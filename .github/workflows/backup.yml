@@ -1,0 +1,51 @@
+name: Nightly backup + keep-alive
+
+# Runs once a day. Two jobs in one: (1) an encrypted database backup, and
+# (2) a harmless request to Supabase so the free-tier project never sits
+# idle long enough to auto-pause (that happens after 7 days of no activity).
+on:
+  schedule:
+    - cron: "0 20 * * *"   # 20:00 UTC = 03:00 Bangkok time
+  workflow_dispatch:        # lets you also trigger it manually from the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install postgresql-client (for pg_dump)
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Run encrypted backup
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: python3 scripts/backup.py
+
+      - name: Commit backup file
+        run: |
+          git config user.name "crm-backup-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add backups/
+          git diff --cached --quiet || git commit -m "Automated backup $(date -u +%Y-%m-%d)"
+          git push
+
+      - name: Keep Supabase project awake
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          curl -s -o /dev/null -w "Supabase ping: %{http_code}\n" \
+            "$SUPABASE_URL/rest/v1/" \
+            -H "apikey: $SUPABASE_ANON_KEY"

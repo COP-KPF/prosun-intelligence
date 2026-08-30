@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Klong Phai Farm CRM</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- ============ LOGIN SCREEN ============ -->
+  <div id="login-screen">
+    <form class="login-card" id="login-form">
+      <h1>Klong Phai Farm CRM</h1>
+      <p class="subtitle">Sign in with the account your admin created for you.</p>
+
+      <label for="email">Email</label>
+      <input type="email" id="email" required autocomplete="username" />
+
+      <label for="password">Password</label>
+      <input type="password" id="password" required autocomplete="current-password" />
+
+      <!-- Shown only when Supabase reports this account has 2FA enabled -->
+      <div id="mfa-block" class="hidden">
+        <label for="mfa-code">6-digit authenticator code</label>
+        <input type="text" id="mfa-code" inputmode="numeric" autocomplete="one-time-code" />
+      </div>
+
+      <button type="submit" class="btn-primary">Sign in</button>
+      <div class="error-text" id="login-error"></div>
+    </form>
+  </div>
+
+  <!-- ============ APP SHELL ============ -->
+  <div id="app-screen" class="hidden">
+    <header class="app-header">
+      <strong>Klong Phai Farm CRM</strong>
+      <div class="who">
+        <span id="who-name"></span> — <span id="who-role"></span>
+        &nbsp;·&nbsp;
+        <button class="btn-link" id="sign-out-btn">Sign out</button>
+      </div>
+    </header>
+
+    <main>
+      <div class="toolbar">
+        <div>
+          <h2 id="list-title">Your pipeline</h2>
+          <!-- Director only: their own pipeline vs. the org-wide new-leads feed -->
+          <div id="director-tabs" class="tabs hidden">
+            <button type="button" class="tab-btn active" id="tab-mine" data-view="mine">My pipeline</button>
+            <button type="button" class="tab-btn" id="tab-leads" data-view="leads">Team leads</button>
+          </div>
+          <!-- Admin only: the full record list vs. a per-rep achievement summary -->
+          <div id="admin-tabs" class="tabs hidden">
+            <button type="button" class="tab-btn active" id="tab-all" data-view="all">All clients &amp; deals</button>
+            <button type="button" class="tab-btn" id="tab-summary" data-view="summary">Team summary</button>
+          </div>
+        </div>
+        <button class="btn-secondary" id="new-client-btn">+ New client / lead</button>
+      </div>
+
+      <table id="clients-table">
+        <thead id="table-head"><!-- filled by app.js, columns differ by role --></thead>
+        <tbody id="table-body"></tbody>
+      </table>
+
+      <!-- Admin only: totals per sales rep, hidden unless the "Team summary" tab is active -->
+      <table id="summary-table" class="hidden">
+        <thead id="summary-head"></thead>
+        <tbody id="summary-body"></tbody>
+      </table>
+
+      <p class="note" id="role-note"></p>
+    </main>
+  </div>
+
+  <!-- ============ ADD/EDIT MODAL ============ -->
+  <div class="modal-backdrop hidden" id="edit-modal">
+    <form class="modal" id="edit-form">
+      <h3 id="modal-title">New client</h3>
+
+      <label>Client / company name</label>
+      <input type="text" id="f-name" required />
+
+      <div class="row-2">
+        <div>
+          <label>Contact name</label>
+          <input type="text" id="f-contact" />
+        </div>
+        <div>
+          <label>Phone</label>
+          <input type="text" id="f-phone" />
+        </div>
+      </div>
+
+      <label>Email</label>
+      <input type="email" id="f-email" />
+
+      <div class="row-2">
+        <div>
+          <label>Segment</label>
+          <select id="f-segment">
+            <option value="Restaurant">Restaurant</option>
+            <option value="Individual">Individual</option>
+            <option value="Retail">Retail</option>
+            <option value="Department Store">Department Store</option>
+          </select>
+        </div>
+        <div>
+          <label>Stage</label>
+          <select id="f-stage">
+            <option value="lead">Lead</option>
+            <option value="qualified">Qualified</option>
+            <option value="proposal">Proposal</option>
+            <option value="won">Won</option>
+            <option value="at_risk">At risk</option>
+            <option value="dormant">Dormant</option>
+            <option value="lost">Lost</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row-2" id="value-field-wrap">
+        <div>
+          <label>Deal value (THB / month)</label>
+          <input type="number" id="f-value" step="1" />
+        </div>
+        <div>
+          <label>Next action date</label>
+          <input type="date" id="f-next-date" />
+        </div>
+      </div>
+
+      <div id="assigned-to-wrap" class="hidden">
+        <label>Assigned sales rep (admin only)</label>
+        <select id="f-assigned-to"></select>
+      </div>
+
+      <label>Next action</label>
+      <input type="text" id="f-next-action" placeholder="e.g. Call to confirm tasting" />
+
+      <label>Notes</label>
+      <textarea id="f-notes" rows="3"></textarea>
+
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="cancel-edit-btn">Cancel</button>
+        <button type="submit" class="btn-primary" style="margin-top:0;width:auto;padding:9px 18px;">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

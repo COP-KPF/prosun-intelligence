@@ -1,0 +1,7 @@
+# Never commit unencrypted dumps or secrets
+backups/*.sql
+backups/_tmp_*
+.env
+*.pem
+__pycache__/
+*.pyc
