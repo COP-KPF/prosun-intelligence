@@ -60,6 +60,12 @@
         <button class="btn-secondary" id="new-client-btn">+ New client / lead</button>
       </div>
 
+      <!-- Sales reps and director's own pipeline: a quick personal stat line —
+           how many accounts are at risk this month, and win rate. Hidden for
+           the director's "Team leads" tab and both admin tabs (admin has the
+           same numbers broken out per rep in Team summary instead). -->
+      <div id="pipeline-stats" class="stats-strip hidden"></div>
+
       <table id="clients-table">
         <thead id="table-head"><!-- filled by app.js, columns differ by role --></thead>
         <tbody id="table-body"></tbody>

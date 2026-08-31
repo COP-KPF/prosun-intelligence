@@ -35,6 +35,7 @@ const tabAllBtn    = document.getElementById("tab-all");
 const tabSummaryBtn = document.getElementById("tab-summary");
 const clientsTable = document.getElementById("clients-table");
 const summaryTable = document.getElementById("summary-table");
+const pipelineStats = document.getElementById("pipeline-stats");
 
 init();
 
@@ -127,6 +128,7 @@ function setupForRole() {
   adminTabs.classList.add("hidden");
   clientsTable.classList.remove("hidden");
   summaryTable.classList.add("hidden");
+  pipelineStats.classList.add("hidden");
   newBtn.classList.remove("hidden");
 
   if (myProfile.role === "admin") {
@@ -207,6 +209,34 @@ async function switchAdminView(view) {
   }
 }
 
+// --------------------------------------------------------- personal stats
+// Win rate is deliberately based only on "won" vs "at_risk" — the accounts
+// actually being tracked month to month — not leads/qualified/proposal/
+// dormant/lost, which aren't part of "did they order this month or not".
+function winRate(won, atRisk) {
+  const tracked = won + atRisk;
+  return tracked > 0 ? Math.round((won / tracked) * 100) : null;
+}
+
+function renderPipelineStats(rows) {
+  const won = rows.filter(c => c.stage === "won").length;
+  const atRisk = rows.filter(c => c.stage === "at_risk").length;
+  const atRiskValue = rows
+    .filter(c => c.stage === "at_risk")
+    .reduce((sum, c) => sum + (Number(c.deal_value) || 0), 0);
+  const rate = winRate(won, atRisk);
+
+  const rateClass = rate === null ? "" : rate >= 50 ? "win-rate-good" : "win-rate-bad";
+  const rateText = rate === null ? "—" : `${rate}%`;
+
+  pipelineStats.innerHTML = `
+    <span class="stat"><strong>${won}</strong>won this month</span>
+    <span class="stat"><strong>${atRisk}</strong>at risk (haven't ordered yet)</span>
+    ${atRisk > 0 ? `<span class="stat"><strong>${atRiskValue.toLocaleString()} ฿</strong>sitting at risk</span>` : ""}
+    <span class="stat ${rateClass}"><strong>${rateText}</strong>win rate</span>
+  `;
+}
+
 // ------------------------------------------------------------ team summary
 async function loadSummary() {
   // Reuses the same "admin full access" RLS policy that already lets admin
@@ -233,7 +263,7 @@ async function loadSummary() {
     byRep[p.id] = {
       name: p.full_name, role: p.role,
       lead: 0, qualified: 0, proposal: 0, won: 0, at_risk: 0, dormant: 0, lost: 0,
-      wonValue: 0, openValue: 0,
+      wonValue: 0, openValue: 0, atRiskValue: 0,
     };
   });
 
@@ -244,43 +274,53 @@ async function loadSummary() {
     const value = Number(c.deal_value) || 0;
     if (c.stage === "won") rep.wonValue += value;
     else if (OPEN_STAGES.includes(c.stage)) rep.openValue += value;
+    if (c.stage === "at_risk") rep.atRiskValue += value;
   });
 
   head.innerHTML = `<tr>
       <th>Sales rep</th><th>Leads</th><th>Qualified</th><th>Proposal</th>
       <th>Won</th><th>At risk</th><th>Dormant</th><th>Lost</th>
-      <th>Won value</th><th>Open pipeline value</th>
+      <th>Win rate</th>
+      <th>Won value</th><th>At risk value</th><th>Open pipeline value</th>
     </tr>`;
 
   const rows = Object.values(byRep);
 
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="10">No sales reps or director yet.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="11">No sales reps or director yet.</td></tr>`;
     return;
   }
 
-  body.innerHTML = rows.map(r => `
+  body.innerHTML = rows.map(r => {
+    const rate = winRate(r.won, r.at_risk);
+    return `
     <tr>
       <td>${escapeHtml(r.name)}<br><small style="color:var(--muted)">${r.role}</small></td>
       <td>${r.lead}</td><td>${r.qualified}</td><td>${r.proposal}</td>
       <td>${r.won}</td><td>${r.at_risk}</td><td>${r.dormant}</td><td>${r.lost}</td>
+      <td>${rate === null ? "—" : rate + "%"}</td>
       <td>${r.wonValue.toLocaleString()} ฿</td>
+      <td>${r.atRiskValue.toLocaleString()} ฿</td>
       <td>${r.openValue.toLocaleString()} ฿</td>
     </tr>
-  `).join("");
+  `;
+  }).join("");
 
   const totals = rows.reduce((acc, r) => {
-    ["lead", "qualified", "proposal", "won", "at_risk", "dormant", "lost", "wonValue", "openValue"]
+    ["lead", "qualified", "proposal", "won", "at_risk", "dormant", "lost", "wonValue", "openValue", "atRiskValue"]
       .forEach(k => { acc[k] = (acc[k] || 0) + r[k]; });
     return acc;
   }, {});
+  const totalRate = winRate(totals.won, totals.at_risk);
 
   body.innerHTML += `
     <tr class="totals-row">
       <td>Total</td>
       <td>${totals.lead}</td><td>${totals.qualified}</td><td>${totals.proposal}</td>
       <td>${totals.won}</td><td>${totals.at_risk}</td><td>${totals.dormant}</td><td>${totals.lost}</td>
+      <td>${totalRate === null ? "—" : totalRate + "%"}</td>
       <td>${totals.wonValue.toLocaleString()} ฿</td>
+      <td>${totals.atRiskValue.toLocaleString()} ฿</td>
       <td>${totals.openValue.toLocaleString()} ฿</td>
     </tr>`;
 }
@@ -329,6 +369,18 @@ async function loadClients() {
   const showValue = myProfile.role === "admin" || myProfile.role === "sales" || (isDirector && !onTeamLeadsTab);
   const showAssigned = myProfile.role === "admin";
   const editable = !onTeamLeadsTab; // admin, sales, and director's own pipeline are all editable
+
+  // Personal "how am I doing" line for sales reps and the director's own
+  // pipeline (not the admin views — they get the same numbers per rep in
+  // Team summary — and not the director's org-wide Team leads feed, which
+  // isn't a personal pipeline).
+  const showPersonalStats = myProfile.role === "sales" || (isDirector && !onTeamLeadsTab);
+  if (showPersonalStats) {
+    renderPipelineStats(data || []);
+    pipelineStats.classList.remove("hidden");
+  } else {
+    pipelineStats.classList.add("hidden");
+  }
 
   head.innerHTML = `<tr>
       <th>Client</th><th>Segment</th><th>Stage</th>
