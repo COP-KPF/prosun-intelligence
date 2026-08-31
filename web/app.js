@@ -598,17 +598,24 @@ function closeQuoteModal() {
   currentQuoteClient = null;
 }
 
+// Prosun Farm sells raw/unprocessed poultry — VAT-exempt in Thailand.
+// Prosun Food sells processed products, which are taxed. The tax rate
+// field stays editable in case a real order needs a manual override, but
+// it defaults correctly per entity so a rep doesn't have to remember this.
+const TAX_RATE_BY_ENTITY = { "Prosun Farm": 0, "Prosun Food": 7 };
+
 async function openQuoteModal(client) {
   currentQuoteClient = client;
   quoteError.textContent = "";
   document.getElementById("quote-client-name").textContent = client.name;
-  document.getElementById("q-entity").value = "Prosun Farm";
+  const entitySelect = document.getElementById("q-entity");
+  entitySelect.value = "Prosun Farm";
   document.getElementById("q-cust-name").value = client.contact_name || client.name || "";
   document.getElementById("q-cust-company").value = client.name || "";
   document.getElementById("q-cust-address").value = "";
   document.getElementById("q-cust-cityzip").value = client.delivery_area || "";
   document.getElementById("q-cust-phone").value = client.phone || "";
-  document.getElementById("q-tax-rate").value = 7;
+  document.getElementById("q-tax-rate").value = TAX_RATE_BY_ENTITY[entitySelect.value] ?? 7;
   document.getElementById("q-other").value = 0;
 
   const inTwoWeeks = new Date();
@@ -622,6 +629,11 @@ async function openQuoteModal(client) {
 
   quoteModal.classList.remove("hidden");
 }
+
+document.getElementById("q-entity").addEventListener("change", (e) => {
+  document.getElementById("q-tax-rate").value = TAX_RATE_BY_ENTITY[e.target.value] ?? 7;
+  recomputeQuoteTotals();
+});
 
 document.getElementById("add-quote-line-btn").addEventListener("click", () => addQuoteLineRow());
 
