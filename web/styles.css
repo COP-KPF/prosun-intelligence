@@ -253,3 +253,79 @@ tr.clickable-row:hover { background: #fafbfc; cursor: pointer; }
   margin-top: 18px;
   line-height: 1.4;
 }
+
+/* ---------- Products (admin) ---------- */
+.product-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.product-form input { width: auto; flex: 1; }
+.product-form input#p-price { flex: 0 0 140px; }
+.product-form button { flex: 0 0 auto; white-space: nowrap; }
+
+/* ---------- Quotation builder ---------- */
+.modal.modal-wide { max-width: 720px; }
+
+.quote-lines-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+}
+
+.quote-lines-table th {
+  text-align: left;
+  font-size: 0.78rem;
+  color: var(--muted);
+  padding: 4px 6px;
+}
+
+.quote-lines-table td {
+  padding: 4px 6px;
+  vertical-align: middle;
+}
+
+.quote-lines-table select,
+.quote-lines-table input {
+  padding: 6px 8px;
+  font-size: 0.85rem;
+}
+
+.quote-lines-table input[type="number"] { width: 80px; }
+.quote-lines-table .line-amount { font-size: 0.88rem; white-space: nowrap; }
+
+.btn-icon {
+  background: none;
+  border: none;
+  color: var(--danger);
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.quote-totals {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.quote-totals-lines {
+  margin-top: 8px;
+  text-align: right;
+}
+
+.quote-totals-lines p {
+  margin: 4px 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.quote-totals-lines strong { color: var(--text); margin-left: 8px; }
+
+.quote-totals-lines p.quote-grand-total {
+  font-size: 1.05rem;
+  color: var(--text);
+  font-weight: 600;
+  margin-top: 8px;
+}

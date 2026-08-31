@@ -51,10 +51,12 @@
             <button type="button" class="tab-btn active" id="tab-mine" data-view="mine">My pipeline</button>
             <button type="button" class="tab-btn" id="tab-leads" data-view="leads">Team leads</button>
           </div>
-          <!-- Admin only: the full record list vs. a per-rep achievement summary -->
+          <!-- Admin only: the full record list, a per-rep achievement summary,
+               and the product catalog used when reps build a quotation -->
           <div id="admin-tabs" class="tabs hidden">
             <button type="button" class="tab-btn active" id="tab-all" data-view="all">All clients &amp; deals</button>
             <button type="button" class="tab-btn" id="tab-summary" data-view="summary">Team summary</button>
+            <button type="button" class="tab-btn" id="tab-products" data-view="products">Products</button>
           </div>
         </div>
         <button class="btn-secondary" id="new-client-btn">+ New client / lead</button>
@@ -76,6 +78,21 @@
         <thead id="summary-head"></thead>
         <tbody id="summary-body"></tbody>
       </table>
+
+      <!-- Admin only: the product catalog reps pick from when building a
+           quotation, hidden unless the "Products" tab is active -->
+      <div id="products-section" class="hidden">
+        <form id="product-form" class="product-form">
+          <input type="text" id="p-name" placeholder="Product name" required />
+          <input type="text" id="p-unit" placeholder="Unit (kg, box, piece...)" />
+          <input type="number" id="p-price" placeholder="Price (THB)" step="0.01" min="0" required />
+          <button type="submit" class="btn-secondary">+ Add product</button>
+        </form>
+        <table id="products-table">
+          <thead id="products-head"><tr><th>Product</th><th>Unit</th><th>Price</th><th>Status</th><th></th></tr></thead>
+          <tbody id="products-body"></tbody>
+        </table>
+      </div>
 
       <p class="note" id="role-note"></p>
     </main>
@@ -150,13 +167,101 @@
       <textarea id="f-notes" rows="3"></textarea>
 
       <div class="modal-actions">
+        <button type="button" class="btn-secondary hidden" id="generate-quote-btn" style="margin-right:auto;">Generate quotation</button>
         <button type="button" class="btn-secondary" id="cancel-edit-btn">Cancel</button>
         <button type="submit" class="btn-primary" style="margin-top:0;width:auto;padding:9px 18px;">Save</button>
       </div>
     </form>
   </div>
 
+  <!-- ============ QUOTATION BUILDER MODAL ============ -->
+  <div class="modal-backdrop hidden" id="quote-modal">
+    <form class="modal modal-wide" id="quote-form">
+      <h3>Generate quotation — <span id="quote-client-name"></span></h3>
+
+      <div class="row-2">
+        <div>
+          <label>Issuing company</label>
+          <select id="q-entity">
+            <option value="Prosun Farm">Prosun Farm</option>
+            <option value="Prosun Food">Prosun Food</option>
+          </select>
+        </div>
+        <div>
+          <label>Valid until</label>
+          <input type="date" id="q-valid-until" required />
+        </div>
+      </div>
+
+      <div class="row-2">
+        <div>
+          <label>Customer name</label>
+          <input type="text" id="q-cust-name" />
+        </div>
+        <div>
+          <label>Company name</label>
+          <input type="text" id="q-cust-company" />
+        </div>
+      </div>
+
+      <div class="row-2">
+        <div>
+          <label>Street / Address</label>
+          <input type="text" id="q-cust-address" />
+        </div>
+        <div>
+          <label>City / ZIP</label>
+          <input type="text" id="q-cust-cityzip" />
+        </div>
+      </div>
+
+      <label>Phone</label>
+      <input type="text" id="q-cust-phone" />
+
+      <label style="margin-top:18px;">Products</label>
+      <table class="quote-lines-table">
+        <thead>
+          <tr><th>Product</th><th>Qty</th><th>Unit price</th><th>Taxed</th><th>Amount</th><th></th></tr>
+        </thead>
+        <tbody id="quote-lines-body"></tbody>
+      </table>
+      <button type="button" class="btn-secondary" id="add-quote-line-btn">+ Add product</button>
+
+      <div class="quote-totals">
+        <div class="row-2">
+          <div>
+            <label>Tax rate (%)</label>
+            <input type="number" id="q-tax-rate" value="7" step="0.1" min="0" />
+          </div>
+          <div>
+            <label>Other charge (THB)</label>
+            <input type="number" id="q-other" value="0" step="1" />
+          </div>
+        </div>
+        <div class="quote-totals-lines">
+          <p>Subtotal <strong id="q-subtotal">0 ฿</strong></p>
+          <p>Taxable amount <strong id="q-taxable">0 ฿</strong></p>
+          <p>Tax due <strong id="q-tax-due">0 ฿</strong></p>
+          <p class="quote-grand-total">Total <strong id="q-total">0 ฿</strong></p>
+        </div>
+      </div>
+
+      <div class="error-text" id="quote-error"></div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="cancel-quote-btn">Cancel</button>
+        <button type="submit" class="btn-primary" id="generate-pdf-btn" style="margin-top:0;width:auto;padding:9px 18px;">Generate PDF</button>
+      </div>
+    </form>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <!-- Quotation PDF generation — runs entirely in the browser, same reasoning
+       as everything else in this app: no backend server to do it instead. -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+  <!-- Quotation notification email — see config.js for one-time setup -->
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
   <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
