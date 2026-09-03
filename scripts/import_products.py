@@ -14,6 +14,14 @@ once per tier — per Clement's instruction.
 Also includes the new item announced 31 Aug 2026: Klong Phai Chicken,
 1-1.2kg birds, 200 THB/kg — entered once, no zone given.
 
+3 Sep 2026: added the "Chicken Under Roof" hotel/restaurant price list
+(source: Prosunfarm_Underroof_Chicken_price.xlsx, valid from 01.07.2025) —
+a separate product line from the Red/Green Label and Yellow chicken above,
+priced per kg, no Bangkok/Up-country zone split on this sheet. Named with
+an "Under Roof" suffix so it's never confused with the similarly-named
+existing "Chicken Red/Green Label" or "Leg/Thigh/Drum Stick Red Label"
+items above, which are a different price list entirely.
+
 PLEASE SPOT-CHECK THESE TWO BEFORE TRUSTING THEM FOR A REAL QUOTE — they
 were the two ambiguous readings off the PDF tables:
   - QUAILS: the price list shows only ONE number per size (no visible
@@ -164,6 +172,18 @@ PRODUCTS = [
     ("Grass Fed Milk (1200ml) — Up-country", "pce", 152),
     # ---------------- NEW PRODUCT (31 Aug 2026 launch) ----------------
     ("Klong Phai Chicken (1-1.2kg)", "kg", 200),
+    # ---------------- CHICKEN UNDER ROOF (hotel/restaurant, valid 01.07.2025) ----------------
+    ("Chicken Under Roof (1.4-1.6kg)", "kg", 167.64),
+    ("Chicken Under Roof (1.0-1.1kg)", "kg", 184.15),
+    ("Full Wing Under Roof (90gr)", "kg", 222.25),
+    ("Middle Wing Under Roof", "kg", 304.80),
+    ("Top Wing Under Roof", "kg", 198.12),
+    ("Leg Under Roof (180-230gr)", "kg", 187.96),
+    ("Thigh Under Roof", "kg", 154.94),
+    ("Drum Stick Under Roof", "kg", 177.80),
+    ("Chicken Feet Under Roof", "kg", 241.30),
+    ("Breast with Skin Under Roof (180-270gr)", "kg", 170.00),
+    ("Breast without Skin Under Roof (180-270gr)", "kg", 177.00),
 ]
 
 
