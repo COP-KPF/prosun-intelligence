@@ -68,16 +68,37 @@
            same numbers broken out per rep in Team summary instead). -->
       <div id="pipeline-stats" class="stats-strip hidden"></div>
 
-      <table id="clients-table">
-        <thead id="table-head"><!-- filled by app.js, columns differ by role --></thead>
-        <tbody id="table-body"></tbody>
-      </table>
+      <!-- Search by name, Active/Inactive status filter, and (own/all)
+           archived toggle for the client list. Hidden for admin's Team
+           summary & Products tabs and the director's read-only Team leads
+           feed — see setupForRole()/switchDirectorView() in app.js. -->
+      <div id="client-filters" class="filter-bar">
+        <input type="search" id="client-search" placeholder="Search by name..." aria-label="Search customers" />
+        <select id="status-filter" aria-label="Filter by status">
+          <option value="all">All statuses</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+        <label class="archived-toggle">
+          <input type="checkbox" id="show-archived-toggle" />
+          Show archived
+        </label>
+      </div>
+
+      <div class="table-scroll">
+        <table id="clients-table">
+          <thead id="table-head"><!-- filled by app.js, columns differ by role --></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
 
       <!-- Admin only: totals per sales rep, hidden unless the "Team summary" tab is active -->
-      <table id="summary-table" class="hidden">
-        <thead id="summary-head"></thead>
-        <tbody id="summary-body"></tbody>
-      </table>
+      <div class="table-scroll">
+        <table id="summary-table" class="hidden">
+          <thead id="summary-head"></thead>
+          <tbody id="summary-body"></tbody>
+        </table>
+      </div>
 
       <!-- Admin only: the product catalog reps pick from when building a
            quotation, hidden unless the "Products" tab is active -->
@@ -102,6 +123,7 @@
   <div class="modal-backdrop hidden" id="edit-modal">
     <form class="modal" id="edit-form">
       <h3 id="modal-title">New client</h3>
+      <p class="archived-note hidden" id="archived-note">This customer is archived — closed business, hidden from the normal list.</p>
 
       <label>Client / company name</label>
       <input type="text" id="f-name" required />
@@ -167,7 +189,12 @@
       <textarea id="f-notes" rows="3"></textarea>
 
       <div class="modal-actions">
-        <button type="button" class="btn-secondary hidden" id="generate-quote-btn" style="margin-right:auto;">Generate quotation</button>
+        <div class="modal-actions-left">
+          <button type="button" class="btn-secondary hidden" id="generate-quote-btn">Generate quotation</button>
+          <!-- Admin only — archiving/unarchiving is a deliberate, reversible
+               admin action (see sql/schema.sql section 6 and app.js). -->
+          <button type="button" class="btn-secondary hidden" id="archive-client-btn">Archive</button>
+        </div>
         <button type="button" class="btn-secondary" id="cancel-edit-btn">Cancel</button>
         <button type="submit" class="btn-primary" style="margin-top:0;width:auto;padding:9px 18px;">Save</button>
       </div>

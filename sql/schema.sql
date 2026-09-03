@@ -219,6 +219,31 @@ $$;
 
 grant execute on function public.admin_last_logins() to authenticated;
 
+-- ----------------------------------------------------------------------------
+-- 6. ARCHIVE — customers whose business has permanently closed (senior
+--    sales' ask, 3 Sep 2026). A soft flag rather than a delete, so a
+--    customer's quotation history and activity log stay intact and the
+--    action is reversible. Archiving/unarchiving is admin-only by team
+--    decision, but that's enforced in the app's UI, not by RLS — the
+--    existing "sales update own" policy technically lets a rep flip this
+--    column on their own rows via a direct API call, the same known
+--    limitation already noted for deal_value on the director's leads feed
+--    above (RLS controls rows here, not individual columns). Fine for a
+--    small trusted team; worth hardening with a column-check trigger later
+--    if that ever becomes a real concern.
+-- ----------------------------------------------------------------------------
+alter table public.clients add column if not exists archived boolean not null default false;
+create index if not exists clients_archived_idx on public.clients (archived);
+
+-- Re-declared so an archived record can never surface in the director's
+-- org-wide leads feed, on top of the existing stage = 'lead' filter.
+create or replace view public.director_leads
+with (security_invoker = true) as
+  select id, name, contact_name, phone, email, segment, delivery_area,
+         source, assigned_to, stage, next_action, next_action_date, created_at
+  from public.clients
+  where stage = 'lead' and not archived;
+
 -- ============================================================================
 -- Done. Next steps (see README.md):
 --   1. Project Settings > API — copy the Project URL and anon public key into

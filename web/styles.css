@@ -180,6 +180,45 @@ tr.totals-row td {
   font-size: 0.9rem;
 }
 
+/* ---------- Client list: search / status filter / archived toggle ---------- */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.filter-bar input[type="search"] {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.filter-bar select {
+  flex: 0 1 160px;
+  width: auto;
+}
+
+.filter-bar .archived-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.filter-bar .archived-toggle input { width: auto; }
+
+/* Lets a wide table (Team summary especially) scroll horizontally instead
+   of forcing the whole page to zoom out on a phone. */
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -245,6 +284,21 @@ tr.clickable-row:hover { background: #fafbfc; cursor: pointer; }
   justify-content: flex-end;
   gap: 10px;
   margin-top: 20px;
+}
+
+.modal-actions-left {
+  display: flex;
+  gap: 10px;
+  margin-right: auto;
+}
+
+.archived-note {
+  background: #ece9f7;
+  color: #5b4d9c;
+  font-size: 0.82rem;
+  padding: 8px 10px;
+  border-radius: 8px;
+  margin: -4px 0 14px;
 }
 
 .note {

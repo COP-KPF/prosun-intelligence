@@ -16,6 +16,13 @@ const STAGE_LABEL = {
   won: "Won", at_risk: "At risk", dormant: "Dormant", lost: "Lost",
 };
 
+// "Active" vs "Inactive" (senior sales' ask, 3 Sep 2026) is a read of the
+// existing stage, not a new tracked field — Active means currently in a
+// live buying motion, Inactive means not ordering right now. Lost is
+// grouped with Inactive since that customer isn't ordering either.
+const ACTIVE_STAGES = ["lead", "qualified", "proposal", "won"];
+const INACTIVE_STAGES = ["at_risk", "dormant", "lost"];
+
 // Klong Phai Farm logo, embedded so quotation PDFs don't need to fetch an
 // external image file (and so the PDF still generates if the site is ever
 // viewed offline/cached). Resized down from the original artwork — a PDF
@@ -51,9 +58,23 @@ const summaryTable = document.getElementById("summary-table");
 const productsSection = document.getElementById("products-section");
 const pipelineStats = document.getElementById("pipeline-stats");
 const generateQuoteBtn = document.getElementById("generate-quote-btn");
+const archiveClientBtn = document.getElementById("archive-client-btn");
+const archivedNote = document.getElementById("archived-note");
+const clientFilters = document.getElementById("client-filters");
+const clientSearchInput = document.getElementById("client-search");
+const statusFilterSelect = document.getElementById("status-filter");
+const showArchivedToggle = document.getElementById("show-archived-toggle");
 
 let editingRecord = null;   // the full client row currently open in the edit modal, or null
 let productCatalog = [];    // cached product list, reloaded each time the quote modal opens
+
+// Last-rendered client list, kept so the search box / status filter /
+// archived toggle can re-render instantly without refetching from Supabase.
+let clientListState = null; // { rows, showValue, showAssigned, editable, onTeamLeadsTab }
+
+clientSearchInput.addEventListener("input", renderClientsTable);
+statusFilterSelect.addEventListener("change", renderClientsTable);
+showArchivedToggle.addEventListener("change", renderClientsTable);
 
 init();
 
@@ -216,6 +237,7 @@ async function switchAdminView(view) {
   tabSummaryBtn.classList.toggle("active", view === "summary");
   tabProductsBtn.classList.toggle("active", view === "products");
   clientsTable.classList.toggle("hidden", view !== "all");
+  clientFilters.classList.toggle("hidden", view !== "all");
   summaryTable.classList.toggle("hidden", view !== "summary");
   productsSection.classList.toggle("hidden", view !== "products");
   pipelineStats.classList.add("hidden"); // never shown on any admin view
@@ -291,7 +313,9 @@ async function loadSummary() {
     { data: quotes, error: qErr },
     { data: logins, error: lErr },
   ] = await Promise.all([
-    sb.from("clients").select("id, name, contact_name, segment, assigned_to, stage, deal_value, next_action, next_action_date"),
+    // Archived (closed-business) customers are excluded here — they
+    // shouldn't count toward a rep's win rate, at-risk value, etc.
+    sb.from("clients").select("id, name, contact_name, segment, assigned_to, stage, deal_value, next_action, next_action_date").eq("archived", false),
     sb.from("profiles").select("id, full_name, role").order("full_name"),
     sb.from("quotations").select("created_by, total"),
     sb.rpc("admin_last_logins"),
@@ -530,10 +554,10 @@ async function loadClients() {
 
   const { data, error } = await query.order("created_at", { ascending: false });
 
-  const head = document.getElementById("table-head");
   const body = document.getElementById("table-body");
 
   if (error) {
+    clientListState = null;
     body.innerHTML = `<tr><td colspan="6">Couldn't load records: ${error.message}</td></tr>`;
     return;
   }
@@ -545,14 +569,53 @@ async function loadClients() {
   // Personal "how am I doing" line for sales reps and the director's own
   // pipeline (not the admin views — they get the same numbers per rep in
   // Team summary — and not the director's org-wide Team leads feed, which
-  // isn't a personal pipeline).
+  // isn't a personal pipeline). Archived (closed-business) customers never
+  // count toward these — they're gone, not "at risk" of anything anymore.
   const showPersonalStats = myProfile.role === "sales" || (isDirector && !onTeamLeadsTab);
   if (showPersonalStats) {
-    renderPipelineStats(data || []);
+    renderPipelineStats((data || []).filter(c => !c.archived));
     pipelineStats.classList.remove("hidden");
   } else {
     pipelineStats.classList.add("hidden");
   }
+
+  clientListState = { rows: data || [], showValue, showAssigned, editable, onTeamLeadsTab };
+  renderClientsTable();
+}
+
+// Re-renders the client table from the already-fetched clientListState,
+// applying the search box / Active-Inactive filter / archived toggle —
+// all client-side, so typing in the search box never hits the network.
+function renderClientsTable() {
+  if (!clientListState) return;
+  const { rows, showValue, showAssigned, editable, onTeamLeadsTab } = clientListState;
+
+  // The director's read-only Team leads feed has no archive concept (the
+  // director_leads view already excludes archived rows server-side) and is
+  // always "active" by definition, so the filter bar has nothing to do there.
+  clientFilters.classList.toggle("hidden", onTeamLeadsTab);
+
+  const showArchived = !onTeamLeadsTab && showArchivedToggle.checked;
+  const statusFilter = onTeamLeadsTab ? "all" : statusFilterSelect.value;
+  const searchTerm = onTeamLeadsTab ? "" : clientSearchInput.value.trim().toLowerCase();
+
+  const visible = rows.filter(c => {
+    if (showArchived) {
+      if (!c.archived) return false;
+    } else if (c.archived) {
+      return false;
+    }
+    if (statusFilter === "active" && !ACTIVE_STAGES.includes(c.stage)) return false;
+    if (statusFilter === "inactive" && !INACTIVE_STAGES.includes(c.stage)) return false;
+    if (searchTerm) {
+      const haystack = `${c.name || ""} ${c.contact_name || ""}`.toLowerCase();
+      if (!haystack.includes(searchTerm)) return false;
+    }
+    return true;
+  });
+
+  const head = document.getElementById("table-head");
+  const body = document.getElementById("table-body");
 
   head.innerHTML = `<tr>
       <th>Client</th><th>Segment</th><th>Stage</th>
@@ -561,7 +624,7 @@ async function loadClients() {
       ${showAssigned ? "<th>Assigned to</th>" : ""}
     </tr>`;
 
-  body.innerHTML = (data || []).map(c => `
+  body.innerHTML = visible.map(c => `
     <tr class="clickable-row" data-id="${c.id}" data-editable="${editable}">
       <td>${escapeHtml(c.name)}${c.contact_name ? `<br><small>${escapeHtml(c.contact_name)}</small>` : ""}</td>
       <td>${escapeHtml(c.segment || "")}</td>
@@ -570,11 +633,11 @@ async function loadClients() {
       <td>${escapeHtml(c.next_action || "—")}${c.next_action_date ? `<br><small>${c.next_action_date}</small>` : ""}</td>
       ${showAssigned ? `<td>${c.assigned_to || "—"}</td>` : ""}
     </tr>
-  `).join("") || `<tr><td colspan="6">Nothing here yet.</td></tr>`;
+  `).join("") || `<tr><td colspan="6">${rows.length ? "No customers match your search/filter." : "Nothing here yet."}</td></tr>`;
 
   body.querySelectorAll("tr.clickable-row").forEach(row => {
     if (row.dataset.editable === "true") {
-      row.addEventListener("click", () => openEditModal(row.dataset.id, data));
+      row.addEventListener("click", () => openEditModal(row.dataset.id, rows));
     }
   });
 }
@@ -596,7 +659,14 @@ function openEditModal(id, currentRows) {
   editingId = id;
   const record = id ? currentRows.find(r => r.id === id) : null;
   editingRecord = record;
-  generateQuoteBtn.classList.toggle("hidden", !record);
+  generateQuoteBtn.classList.toggle("hidden", !record || !!record.archived);
+
+  // Archiving/unarchiving is an admin-only action (reps can still see their
+  // own archived customers via the "Show archived" toggle, read-only).
+  const canArchive = myProfile.role === "admin" && !!record;
+  archiveClientBtn.classList.toggle("hidden", !canArchive);
+  archiveClientBtn.textContent = record?.archived ? "Unarchive" : "Archive";
+  archivedNote.classList.toggle("hidden", !record?.archived);
 
   document.getElementById("modal-title").textContent = id ? "Edit client" : "New client";
   document.getElementById("f-name").value = record?.name || "";
@@ -654,6 +724,25 @@ editForm.addEventListener("submit", async (e) => {
     return;
   }
 
+  closeModal();
+  await loadClients();
+});
+
+// Archive = a customer whose business has permanently closed. Kept as a
+// soft flag (sql/schema.sql section 6) rather than a delete, so quotation
+// history and the activity log stay intact and the action is reversible.
+// Admin-only, matching the earlier team decision on this feature.
+archiveClientBtn.addEventListener("click", async () => {
+  if (!editingId || !editingRecord) return;
+  const nowArchived = !editingRecord.archived;
+  const verb = nowArchived ? "archive" : "unarchive";
+  if (!confirm(`${nowArchived ? "Archive" : "Unarchive"} ${editingRecord.name}?`)) return;
+
+  const { error } = await sb.from("clients").update({ archived: nowArchived }).eq("id", editingId);
+  if (error) {
+    alert(`Couldn't ${verb}: ` + error.message);
+    return;
+  }
   closeModal();
   await loadClients();
 });
