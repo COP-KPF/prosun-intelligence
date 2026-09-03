@@ -225,7 +225,7 @@ async function switchAdminView(view) {
   document.getElementById("role-note").textContent = view === "all"
     ? "You see every record. Deal values and assignment are visible and editable."
     : view === "summary"
-    ? "Totals per sales rep — stage breakdown, won value, and open pipeline value. Only you can see this."
+    ? "Totals per sales rep — stage breakdown, avg deal size, quotations sent, and last login. Click a row for that rep's client-by-client detail. Only you can see this."
     : "The price list your reps pick from when building a quotation. Deactivating a product hides it from the picker without deleting past quotations that used it.";
 
   if (view === "summary") {
@@ -266,12 +266,35 @@ function renderPipelineStats(rows) {
 }
 
 // ------------------------------------------------------------ team summary
+// Bangkok-local "last login" display. Supabase Auth stamps last_sign_in_at
+// on auth.users automatically on every sign-in — nothing in this app has to
+// write it. That table isn't reachable from the browser though (auth schema
+// isn't exposed via PostgREST), so it comes in through the admin_last_logins()
+// RPC (see sql/schema.sql, section 5) instead of a direct table query.
+function formatLastLogin(iso) {
+  if (!iso) return "Never";
+  return new Date(iso).toLocaleString("en-GB", {
+    timeZone: "Asia/Bangkok",
+    day: "2-digit", month: "short",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+}
+
 async function loadSummary() {
   // Reuses the same "admin full access" RLS policy that already lets admin
   // read every clients/profiles row — no new database permissions needed.
-  const [{ data: clients, error: cErr }, { data: profiles, error: pErr }] = await Promise.all([
-    sb.from("clients").select("assigned_to, stage, deal_value"),
+  // Quotations and last-login are fetched best-effort (see below) so this
+  // view still works even before that table/function exists in Supabase.
+  const [
+    { data: clients, error: cErr },
+    { data: profiles, error: pErr },
+    { data: quotes, error: qErr },
+    { data: logins, error: lErr },
+  ] = await Promise.all([
+    sb.from("clients").select("id, name, contact_name, segment, assigned_to, stage, deal_value, next_action, next_action_date"),
     sb.from("profiles").select("id, full_name, role").order("full_name"),
+    sb.from("quotations").select("created_by, total"),
+    sb.rpc("admin_last_logins"),
   ]);
 
   const head = document.getElementById("summary-head");
@@ -279,7 +302,7 @@ async function loadSummary() {
   const err = cErr || pErr;
 
   if (err) {
-    body.innerHTML = `<tr><td colspan="10">Couldn't load summary: ${err.message}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="15">Couldn't load summary: ${err.message}</td></tr>`;
     return;
   }
 
@@ -289,9 +312,11 @@ async function loadSummary() {
   (profiles || []).forEach(p => {
     if (p.role === "admin") return; // admin has no personal pipeline to summarize
     byRep[p.id] = {
-      name: p.full_name, role: p.role,
+      id: p.id, name: p.full_name, role: p.role,
       lead: 0, qualified: 0, proposal: 0, won: 0, at_risk: 0, dormant: 0, lost: 0,
       wonValue: 0, openValue: 0, atRiskValue: 0,
+      quoteCount: 0, quoteValue: 0, lastLogin: null,
+      clientRows: [], // kept for the click-through detail view below
     };
   });
 
@@ -303,26 +328,49 @@ async function loadSummary() {
     if (c.stage === "won") rep.wonValue += value;
     else if (OPEN_STAGES.includes(c.stage)) rep.openValue += value;
     if (c.stage === "at_risk") rep.atRiskValue += value;
+    rep.clientRows.push(c);
   });
+
+  // Quotations sent per rep — skipped silently if the query errors (e.g. the
+  // quotations table isn't reachable yet), rather than breaking the summary.
+  if (!qErr) {
+    (quotes || []).forEach(q => {
+      const rep = byRep[q.created_by];
+      if (!rep) return;
+      rep.quoteCount += 1;
+      rep.quoteValue += Number(q.total) || 0;
+    });
+  }
+
+  // Last login per rep — same reasoning: only shown once admin_last_logins()
+  // has been created in Supabase (see sql/schema.sql).
+  if (!lErr) {
+    (logins || []).forEach(l => {
+      const rep = byRep[l.id];
+      if (rep) rep.lastLogin = l.last_sign_in_at;
+    });
+  }
 
   head.innerHTML = `<tr>
       <th>Sales rep</th><th>Leads</th><th>Qualified</th><th>Proposal</th>
       <th>Won</th><th>At risk</th><th>Dormant</th><th>Lost</th>
       <th>Win rate</th>
       <th>Won value</th><th>At risk value</th><th>Open pipeline value</th>
+      <th>Avg deal size</th><th>Quotations sent</th><th>Last login</th>
     </tr>`;
 
   const rows = Object.values(byRep);
 
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="11">No sales reps or director yet.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="15">No sales reps or director yet.</td></tr>`;
     return;
   }
 
   body.innerHTML = rows.map(r => {
     const rate = winRate(r.won, r.at_risk);
+    const avgDeal = r.won > 0 ? Math.round(r.wonValue / r.won) : null;
     return `
-    <tr>
+    <tr class="clickable-row" data-rep-id="${r.id}">
       <td>${escapeHtml(r.name)}<br><small style="color:var(--muted)">${r.role}</small></td>
       <td>${r.lead}</td><td>${r.qualified}</td><td>${r.proposal}</td>
       <td>${r.won}</td><td>${r.at_risk}</td><td>${r.dormant}</td><td>${r.lost}</td>
@@ -330,16 +378,20 @@ async function loadSummary() {
       <td>${r.wonValue.toLocaleString()} ฿</td>
       <td>${r.atRiskValue.toLocaleString()} ฿</td>
       <td>${r.openValue.toLocaleString()} ฿</td>
+      <td>${avgDeal === null ? "—" : avgDeal.toLocaleString() + " ฿"}</td>
+      <td>${qErr ? "—" : r.quoteCount + (r.quoteCount ? ` (${r.quoteValue.toLocaleString()} ฿)` : "")}</td>
+      <td>${lErr ? "—" : formatLastLogin(r.lastLogin)}</td>
     </tr>
   `;
   }).join("");
 
   const totals = rows.reduce((acc, r) => {
-    ["lead", "qualified", "proposal", "won", "at_risk", "dormant", "lost", "wonValue", "openValue", "atRiskValue"]
+    ["lead", "qualified", "proposal", "won", "at_risk", "dormant", "lost", "wonValue", "openValue", "atRiskValue", "quoteCount", "quoteValue"]
       .forEach(k => { acc[k] = (acc[k] || 0) + r[k]; });
     return acc;
   }, {});
   const totalRate = winRate(totals.won, totals.at_risk);
+  const totalAvgDeal = totals.won > 0 ? Math.round(totals.wonValue / totals.won) : null;
 
   body.innerHTML += `
     <tr class="totals-row">
@@ -350,7 +402,47 @@ async function loadSummary() {
       <td>${totals.wonValue.toLocaleString()} ฿</td>
       <td>${totals.atRiskValue.toLocaleString()} ฿</td>
       <td>${totals.openValue.toLocaleString()} ฿</td>
+      <td>${totalAvgDeal === null ? "—" : totalAvgDeal.toLocaleString() + " ฿"}</td>
+      <td>${qErr ? "—" : totals.quoteCount + (totals.quoteCount ? ` (${totals.quoteValue.toLocaleString()} ฿)` : "")}</td>
+      <td>—</td>
     </tr>`;
+
+  // Click a rep's row to drill into the actual client list behind their
+  // numbers — Clément's "more detail per sales" ask.
+  body.querySelectorAll("tr.clickable-row").forEach(tr => {
+    tr.addEventListener("click", () => {
+      const rep = rows.find(r => r.id === tr.dataset.repId);
+      if (rep) openRepDetail(rep);
+    });
+  });
+}
+
+// ------------------------------------------------- rep detail (drill-down)
+const repDetailModal = document.getElementById("rep-detail-modal");
+document.getElementById("close-rep-detail-btn").addEventListener("click", () => {
+  repDetailModal.classList.add("hidden");
+});
+
+function openRepDetail(rep) {
+  document.getElementById("rep-detail-title").textContent = `${rep.name} — client detail (${rep.clientRows.length})`;
+  const body = document.getElementById("rep-detail-body");
+  const stageOrder = ["at_risk", "lead", "qualified", "proposal", "dormant", "won", "lost"];
+  const sorted = [...rep.clientRows].sort((a, b) => {
+    const s = stageOrder.indexOf(a.stage) - stageOrder.indexOf(b.stage);
+    return s !== 0 ? s : a.name.localeCompare(b.name);
+  });
+
+  body.innerHTML = sorted.map(c => `
+    <tr>
+      <td>${escapeHtml(c.name)}${c.contact_name ? `<br><small>${escapeHtml(c.contact_name)}</small>` : ""}</td>
+      <td>${escapeHtml(c.segment || "—")}</td>
+      <td><span class="badge badge-${c.stage}">${STAGE_LABEL[c.stage] || c.stage}</span></td>
+      <td>${c.deal_value ? Number(c.deal_value).toLocaleString() + " ฿" : "—"}</td>
+      <td>${escapeHtml(c.next_action || "—")}${c.next_action_date ? `<br><small>${c.next_action_date}</small>` : ""}</td>
+    </tr>
+  `).join("") || `<tr><td colspan="5">No clients assigned yet.</td></tr>`;
+
+  repDetailModal.classList.remove("hidden");
 }
 
 // -------------------------------------------------------------- products

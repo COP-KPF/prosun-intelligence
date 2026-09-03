@@ -196,6 +196,29 @@ with (security_invoker = true) as
   from public.clients
   where stage = 'lead';
 
+-- ----------------------------------------------------------------------------
+-- 5. LAST LOGIN (admin-only) — for the "Last login" column in Team summary.
+--    Supabase Auth already stamps last_sign_in_at on auth.users automatically
+--    on every sign-in; nothing in the app needs to write it. auth.users
+--    itself isn't reachable from the browser (the auth schema isn't exposed
+--    via PostgREST), so this SECURITY DEFINER function is the narrow,
+--    read-only window into it — same pattern as current_role() above. A
+--    non-admin caller gets zero rows back, not an error.
+-- ----------------------------------------------------------------------------
+create or replace function public.admin_last_logins()
+returns table (id uuid, last_sign_in_at timestamptz)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select u.id, u.last_sign_in_at
+  from auth.users u
+  where public.current_role() = 'admin';
+$$;
+
+grant execute on function public.admin_last_logins() to authenticated;
+
 -- ============================================================================
 -- Done. Next steps (see README.md):
 --   1. Project Settings > API — copy the Project URL and anon public key into

@@ -255,6 +255,22 @@
     </form>
   </div>
 
+  <!-- ============ REP DETAIL MODAL (Team summary drill-down) ============ -->
+  <div class="modal-backdrop hidden" id="rep-detail-modal">
+    <div class="modal modal-wide">
+      <h3 id="rep-detail-title">Rep detail</h3>
+      <table id="rep-detail-table">
+        <thead>
+          <tr><th>Client</th><th>Segment</th><th>Stage</th><th>Deal value</th><th>Next action</th></tr>
+        </thead>
+        <tbody id="rep-detail-body"></tbody>
+      </table>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="close-rep-detail-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <!-- Quotation PDF generation — runs entirely in the browser, same reasoning
        as everything else in this app: no backend server to do it instead. -->
