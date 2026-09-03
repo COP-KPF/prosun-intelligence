@@ -257,6 +257,9 @@ tr.clickable-row:hover { background: #fafbfc; cursor: pointer; }
 .badge-dormant { background: #f0f0f0; color: #777; }
 .badge-lost { background: #f0f0f0; color: #999; }
 
+.badge-status-active { background: #e3f5e9; color: #1c7c3f; }
+.badge-status-inactive { background: #f0f0f0; color: #777; }
+
 /* ---------- Modal ---------- */
 .modal-backdrop {
   position: fixed; inset: 0;

@@ -68,16 +68,27 @@
            same numbers broken out per rep in Team summary instead). -->
       <div id="pipeline-stats" class="stats-strip hidden"></div>
 
-      <!-- Search by name, Active/Inactive status filter, and (own/all)
-           archived toggle for the client list. Hidden for admin's Team
-           summary & Products tabs and the director's read-only Team leads
-           feed — see setupForRole()/switchDirectorView() in app.js. -->
+      <!-- Search by name, Active/Inactive status filter, a specific-stage
+           filter, and (own/all) archived toggle for the client list. Hidden
+           for admin's Team summary & Products tabs and the director's
+           read-only Team leads feed — see setupForRole()/
+           switchDirectorView() in app.js. -->
       <div id="client-filters" class="filter-bar">
         <input type="search" id="client-search" placeholder="Search by name..." aria-label="Search customers" />
         <select id="status-filter" aria-label="Filter by status">
           <option value="all">All statuses</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
+        </select>
+        <select id="stage-filter" aria-label="Filter by stage">
+          <option value="all">All stages</option>
+          <option value="lead">Lead</option>
+          <option value="qualified">Qualified</option>
+          <option value="proposal">Proposal</option>
+          <option value="won">Won</option>
+          <option value="at_risk">At risk</option>
+          <option value="dormant">Dormant</option>
+          <option value="lost">Lost</option>
         </select>
         <label class="archived-toggle">
           <input type="checkbox" id="show-archived-toggle" />

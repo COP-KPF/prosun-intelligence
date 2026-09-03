@@ -63,17 +63,20 @@ const archivedNote = document.getElementById("archived-note");
 const clientFilters = document.getElementById("client-filters");
 const clientSearchInput = document.getElementById("client-search");
 const statusFilterSelect = document.getElementById("status-filter");
+const stageFilterSelect = document.getElementById("stage-filter");
 const showArchivedToggle = document.getElementById("show-archived-toggle");
 
 let editingRecord = null;   // the full client row currently open in the edit modal, or null
 let productCatalog = [];    // cached product list, reloaded each time the quote modal opens
 
 // Last-rendered client list, kept so the search box / status filter /
-// archived toggle can re-render instantly without refetching from Supabase.
+// stage filter / archived toggle can re-render instantly without
+// refetching from Supabase.
 let clientListState = null; // { rows, showValue, showAssigned, editable, onTeamLeadsTab }
 
 clientSearchInput.addEventListener("input", renderClientsTable);
 statusFilterSelect.addEventListener("change", renderClientsTable);
+stageFilterSelect.addEventListener("change", renderClientsTable);
 showArchivedToggle.addEventListener("change", renderClientsTable);
 
 init();
@@ -558,7 +561,7 @@ async function loadClients() {
 
   if (error) {
     clientListState = null;
-    body.innerHTML = `<tr><td colspan="6">Couldn't load records: ${error.message}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="7">Couldn't load records: ${error.message}</td></tr>`;
     return;
   }
 
@@ -597,6 +600,7 @@ function renderClientsTable() {
 
   const showArchived = !onTeamLeadsTab && showArchivedToggle.checked;
   const statusFilter = onTeamLeadsTab ? "all" : statusFilterSelect.value;
+  const stageFilter = onTeamLeadsTab ? "all" : stageFilterSelect.value;
   const searchTerm = onTeamLeadsTab ? "" : clientSearchInput.value.trim().toLowerCase();
 
   const visible = rows.filter(c => {
@@ -607,6 +611,7 @@ function renderClientsTable() {
     }
     if (statusFilter === "active" && !ACTIVE_STAGES.includes(c.stage)) return false;
     if (statusFilter === "inactive" && !INACTIVE_STAGES.includes(c.stage)) return false;
+    if (stageFilter !== "all" && c.stage !== stageFilter) return false;
     if (searchTerm) {
       const haystack = `${c.name || ""} ${c.contact_name || ""}`.toLowerCase();
       if (!haystack.includes(searchTerm)) return false;
@@ -618,22 +623,26 @@ function renderClientsTable() {
   const body = document.getElementById("table-body");
 
   head.innerHTML = `<tr>
-      <th>Client</th><th>Segment</th><th>Stage</th>
+      <th>Client</th><th>Segment</th><th>Stage</th><th>Status</th>
       ${showValue ? "<th>Deal value</th>" : ""}
       <th>Next action</th>
       ${showAssigned ? "<th>Assigned to</th>" : ""}
     </tr>`;
 
-  body.innerHTML = visible.map(c => `
+  body.innerHTML = visible.map(c => {
+    const isActive = ACTIVE_STAGES.includes(c.stage);
+    return `
     <tr class="clickable-row" data-id="${c.id}" data-editable="${editable}">
       <td>${escapeHtml(c.name)}${c.contact_name ? `<br><small>${escapeHtml(c.contact_name)}</small>` : ""}</td>
       <td>${escapeHtml(c.segment || "")}</td>
       <td><span class="badge badge-${c.stage}">${STAGE_LABEL[c.stage] || c.stage}</span></td>
+      <td><span class="badge ${isActive ? "badge-status-active" : "badge-status-inactive"}">${isActive ? "Active" : "Inactive"}</span></td>
       ${showValue ? `<td>${c.deal_value ? Number(c.deal_value).toLocaleString() + " ฿" : "—"}</td>` : ""}
       <td>${escapeHtml(c.next_action || "—")}${c.next_action_date ? `<br><small>${c.next_action_date}</small>` : ""}</td>
       ${showAssigned ? `<td>${c.assigned_to || "—"}</td>` : ""}
     </tr>
-  `).join("") || `<tr><td colspan="6">${rows.length ? "No customers match your search/filter." : "Nothing here yet."}</td></tr>`;
+  `;
+  }).join("") || `<tr><td colspan="7">${rows.length ? "No customers match your search/filter." : "Nothing here yet."}</td></tr>`;
 
   body.querySelectorAll("tr.clickable-row").forEach(row => {
     if (row.dataset.editable === "true") {
