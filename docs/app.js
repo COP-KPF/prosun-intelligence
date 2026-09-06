@@ -2405,12 +2405,17 @@ function calcDayLabel(calcDateIso) {
 // the smaller side's shortfall becomes spare thigh or spare drumstick,
 // which is exactly the leftover-parts problem this v1 doesn't solve yet,
 // so it's surfaced here as a number rather than hidden.
-function aggregatePoultryDemand(orders) {
+function aggregatePoultryDemand(orders, deliveryDates) {
   const groups = new Map();          // "species|variant" -> { species, variant, cuts: Map }
   const uncounted = [];              // real demand this can't turn into a bird count
   const tbcLines = [];
+  // The two (or more) delivery dates this window covers. Passed in from the
+  // calculation-day cycle so both dates show even if one has zero orders;
+  // falls back to whatever dates actually show up, for direct/test calls.
+  const dates = deliveryDates || [...new Set((orders || []).map(o => o.delivery_date).filter(Boolean))].sort();
 
   for (const o of (orders || [])) {
+    const orderDate = o.delivery_date;
     for (const l of (o.sale_order_lines || [])) {
       if (l.quantity_tbc) {
         tbcLines.push({ customer: o.customer_name, product: (l.order_products && l.order_products.name) || l.product_name || "—" });
@@ -2444,16 +2449,35 @@ function aggregatePoultryDemand(orders) {
       const cutKey = cyr.leg_pool_group ? "pool:" + cyr.leg_pool_group : cyr.cut_name;
       if (!group.cuts.has(cutKey)) {
         group.cuts.set(cutKey, cyr.leg_pool_group
-          ? { pooled: true, label: "Leg (whole + thigh/drumstick, pooled)", parts: new Map() }
-          : { pooled: false, label: cyr.cut_name, paired: cyr.paired, pieces: 0 });
+          ? { pooled: true, label: "Leg (whole + thigh/drumstick, pooled)", parts: new Map(), partsByDate: new Map() }
+          : { pooled: false, label: cyr.cut_name, paired: cyr.paired, pieces: 0, piecesByDate: new Map() });
       }
       const cut = group.cuts.get(cutKey);
       if (cut.pooled) {
         cut.parts.set(cyr.cut_name, (cut.parts.get(cyr.cut_name) || 0) + pieces);
+        if (!cut.partsByDate.has(orderDate)) cut.partsByDate.set(orderDate, new Map());
+        const dm = cut.partsByDate.get(orderDate);
+        dm.set(cyr.cut_name, (dm.get(cyr.cut_name) || 0) + pieces);
       } else {
         cut.pieces += pieces;
+        cut.piecesByDate.set(orderDate, (cut.piecesByDate.get(orderDate) || 0) + pieces);
       }
     }
+  }
+
+  // Same bottleneck-not-sum formula as the combined total, applied to just
+  // one date's slice of demand — tells sale support/production how much of
+  // a shared slaughter run's output is actually needed for which delivery,
+  // even though the birds themselves are all slaughtered together.
+  function birdsForPooled(whole, thigh, drum) {
+    const legsNeeded = whole + Math.max(thigh, drum);
+    return {
+      birds: Math.ceil(legsNeeded / 2),
+      detail: { whole, thigh, drum, spare: Math.abs(thigh - drum), spareCut: thigh > drum ? "thigh" : (drum > thigh ? "drumstick" : null) },
+    };
+  }
+  function birdsForPieces(pieces, paired) {
+    return { birds: Math.ceil(pieces / (paired ? 2 : 1)), detail: { pieces } };
   }
 
   const groupList = [];
@@ -2466,17 +2490,37 @@ function aggregatePoultryDemand(orders) {
         const whole = cut.parts.get("Leg (whole)") || 0;
         const thigh = cut.parts.get("Thigh") || 0;
         const drum  = cut.parts.get("Drumstick") || 0;
-        const legsNeeded = whole + Math.max(thigh, drum);
-        birds = Math.ceil(legsNeeded / 2);
-        detail = { whole, thigh, drum, spare: Math.abs(thigh - drum), spareCut: thigh > drum ? "thigh" : (drum > thigh ? "drumstick" : null) };
+        ({ birds, detail } = birdsForPooled(whole, thigh, drum));
       } else {
-        birds = Math.ceil(cut.pieces / (cut.paired ? 2 : 1));
-        detail = { pieces: cut.pieces };
+        ({ birds, detail } = birdsForPieces(cut.pieces, cut.paired));
       }
-      cuts.push({ label: cut.label, birds, detail });
+
+      const byDate = dates.map(d => {
+        if (cut.pooled) {
+          const dm = cut.partsByDate.get(d) || new Map();
+          const r = birdsForPooled(dm.get("Leg (whole)") || 0, dm.get("Thigh") || 0, dm.get("Drumstick") || 0);
+          return { date: d, birds: r.birds, detail: r.detail };
+        }
+        const r = birdsForPieces(cut.piecesByDate.get(d) || 0, cut.paired);
+        return { date: d, birds: r.birds, detail: r.detail };
+      });
+
+      cuts.push({ label: cut.label, birds, detail, byDate });
       if (birds > recommendedBirds) { recommendedBirds = birds; bottleneck = cut.label; }
     }
-    groupList.push({ species: g.species, variant: g.variant, cuts, recommendedBirds, bottleneck });
+
+    // Per-day recommended count: same "biggest cut wins" rule, just scoped
+    // to that day's slice of the cuts already computed above.
+    const byDate = dates.map(d => {
+      let rb = 0, bn = null;
+      for (const cut of cuts) {
+        const cd = cut.byDate.find(x => x.date === d);
+        if (cd && cd.birds > rb) { rb = cd.birds; bn = cut.label; }
+      }
+      return { date: d, recommendedBirds: rb, bottleneck: bn };
+    });
+
+    groupList.push({ species: g.species, variant: g.variant, cuts, recommendedBirds, bottleneck, byDate });
   }
   groupList.sort((a, b) => (a.species + a.variant).localeCompare(b.species + b.variant));
 
@@ -2500,7 +2544,7 @@ async function loadCalculator() {
   calcResultsEl.innerHTML = `<p class="empty-cell">Loading…</p>`;
 
   const { data, error } = await sb.from("sale_orders")
-    .select("customer_name, sale_order_lines(product_id, product_name, quantity, quantity_tbc, unit, " +
+    .select("customer_name, delivery_date, sale_order_lines(product_id, product_name, quantity, quantity_tbc, unit, " +
             "order_products(name, cut_yield_id, cut_yield_reference(species, variant, cut_name, piece_weight_g, paired, leg_pool_group)))")
     .eq("channel", "Restaurant")
     .in("delivery_date", deliveryDates);
@@ -2510,40 +2554,70 @@ async function loadCalculator() {
     return;
   }
 
-  renderCalculatorResults(aggregatePoultryDemand(data || []));
+  renderCalculatorResults(aggregatePoultryDemand(data || [], deliveryDates));
+}
+
+// One cut/detail table, reused for both a card's combined total and each
+// per-day breakdown below it.
+function calcCutsTableHtml(cuts, bottleneck) {
+  return `
+    <table class="calc-cuts-table">
+      <thead><tr><th>Cut</th><th>Birds needed</th><th>Detail</th></tr></thead>
+      <tbody>
+        ${cuts.map(c => `
+          <tr class="${c.label === bottleneck ? "calc-bottleneck" : ""}">
+            <td>${escapeHtml(c.label)}</td>
+            <td class="num">${c.birds}</td>
+            <td class="muted-code">${
+              c.detail.pieces !== undefined
+                ? `${c.detail.pieces.toFixed(1)} pieces ordered`
+                : `${c.detail.whole.toFixed(1)} whole-leg, ${c.detail.thigh.toFixed(1)} thigh, ${c.detail.drum.toFixed(1)} drumstick` +
+                  (c.detail.spare > 0.05 ? ` — ~${c.detail.spare.toFixed(1)} spare ${c.detail.spareCut} once split` : "")
+            }</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>`;
 }
 
 function renderCalculatorResults(result) {
   if (!result.groups.length) {
     calcResultsEl.innerHTML = `<p class="empty-cell">No Restaurant orders with a linked yield weight fall in this delivery window yet.</p>`;
   } else {
-    calcResultsEl.innerHTML = result.groups.map(g => `
+    calcResultsEl.innerHTML = result.groups.map(g => {
+      const dayBlocks = g.byDate.map(bd => {
+        const cutsForDate = g.cuts.map(c => {
+          const cd = c.byDate.find(x => x.date === bd.date);
+          return { label: c.label, birds: cd.birds, detail: cd.detail };
+        });
+        return `
+          <div class="calc-day-block">
+            <h5>${escapeHtml(shortDate(bd.date))} (${escapeHtml(dayName(bd.date))})
+              — <strong>${bd.recommendedBirds}</strong> bird${bd.recommendedBirds === 1 ? "" : "s"}
+              <span class="muted-code">bottleneck: ${escapeHtml(bd.bottleneck || "—")}</span>
+            </h5>
+            ${calcCutsTableHtml(cutsForDate, bd.bottleneck)}
+          </div>`;
+      }).join("");
+
+      return `
       <div class="calc-card">
-        <div class="calc-card-head">
+        <div class="calc-card-head" data-calc-toggle role="button" tabindex="0"
+             aria-expanded="false" title="Click to see birds needed per delivery day">
           <h4>${escapeHtml(g.species)} — ${escapeHtml(g.variant)}</h4>
           <div class="calc-recommend">
             <strong>${g.recommendedBirds}</strong> bird${g.recommendedBirds === 1 ? "" : "s"} to slaughter
             <span class="muted-code">bottleneck: ${escapeHtml(g.bottleneck || "—")}</span>
           </div>
+          <span class="calc-chevron" aria-hidden="true">▸</span>
         </div>
-        <table class="calc-cuts-table">
-          <thead><tr><th>Cut</th><th>Birds needed</th><th>Detail</th></tr></thead>
-          <tbody>
-            ${g.cuts.map(c => `
-              <tr class="${c.label === g.bottleneck ? "calc-bottleneck" : ""}">
-                <td>${escapeHtml(c.label)}</td>
-                <td class="num">${c.birds}</td>
-                <td class="muted-code">${
-                  c.detail.pieces !== undefined
-                    ? `${c.detail.pieces.toFixed(1)} pieces ordered`
-                    : `${c.detail.whole.toFixed(1)} whole-leg, ${c.detail.thigh.toFixed(1)} thigh, ${c.detail.drum.toFixed(1)} drumstick` +
-                      (c.detail.spare > 0.05 ? ` — ~${c.detail.spare.toFixed(1)} spare ${c.detail.spareCut} once split` : "")
-                }</td>
-              </tr>`).join("")}
-          </tbody>
-        </table>
+        ${calcCutsTableHtml(g.cuts, g.bottleneck)}
         <p class="calc-note">Every other cut on this bird line comes along with these ${g.recommendedBirds} birds regardless of whether it was ordered — cuts below the bottleneck will have surplus after this run.</p>
-      </div>`).join("");
+        <div class="calc-daybreak hidden">
+          <p class="calc-daybreak-label">Birds needed per delivery day — the same slaughter run covers both, this just splits out which of that day's cuts are for which delivery:</p>
+          ${dayBlocks}
+        </div>
+      </div>`;
+    }).join("");
   }
 
   const notes = [];
@@ -2559,6 +2633,29 @@ function renderCalculatorResults(result) {
 }
 
 calcDaySelect.addEventListener("change", loadCalculator);
+
+// Click (or Enter/Space) on a card's header reveals that species/variant's
+// birds-needed-per-delivery-day breakdown. Delegated since cards are
+// rebuilt wholesale on every loadCalculator() call.
+function toggleCalcDaybreak(head) {
+  const card = head.closest(".calc-card");
+  const daybreak = card && card.querySelector(".calc-daybreak");
+  if (!daybreak) return;
+  const nowOpen = daybreak.classList.toggle("hidden") === false;
+  head.classList.toggle("is-open", nowOpen);
+  head.setAttribute("aria-expanded", String(nowOpen));
+}
+calcResultsEl.addEventListener("click", (e) => {
+  const head = e.target.closest("[data-calc-toggle]");
+  if (head) toggleCalcDaybreak(head);
+});
+calcResultsEl.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const head = e.target.closest("[data-calc-toggle]");
+  if (!head) return;
+  e.preventDefault();
+  toggleCalcDaybreak(head);
+});
 
 // ------------------------------------------------------------------- wiring
 document.getElementById("channel-tabs").addEventListener("click", async (e) => {

@@ -799,11 +799,28 @@ body.pace-mode .page-footer { max-width: none; padding: 8px 20px 32px; }
 .calc-card-head {
   display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap;
   gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 10px;
+  cursor: pointer; border-radius: 6px; margin: -4px -6px 12px; padding: 4px 6px 10px;
 }
+.calc-card-head:hover { background: #f7f8fa; }
+.calc-card-head:focus-visible { outline: 2px solid var(--accent-dark); outline-offset: 2px; }
 .calc-card-head h4 { margin: 0; font-size: 1rem; }
 .calc-recommend { font-size: 0.95rem; text-align: right; }
 .calc-recommend strong { font-size: 1.4rem; color: var(--accent-dark); margin-right: 4px; }
 .calc-recommend .muted-code { display: block; font-size: 0.75rem; margin-top: 2px; }
+.calc-chevron {
+  align-self: center; color: var(--muted); font-size: 0.9rem; transition: transform 0.15s ease;
+}
+.calc-card-head.is-open .calc-chevron { transform: rotate(90deg); }
+
+.calc-daybreak { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--border); }
+.calc-daybreak-label { color: var(--muted); font-size: 0.8rem; margin: 0 0 10px; }
+.calc-day-block { margin-bottom: 14px; }
+.calc-day-block:last-child { margin-bottom: 0; }
+.calc-day-block h5 {
+  margin: 0 0 6px; font-size: 0.85rem; font-weight: 600; color: var(--text);
+}
+.calc-day-block h5 strong { color: var(--accent-dark); font-size: 0.95rem; }
+.calc-day-block .calc-cuts-table { font-size: 0.82rem; }
 
 .calc-cuts-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
 .calc-cuts-table th {
