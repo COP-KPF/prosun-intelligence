@@ -1168,7 +1168,7 @@ const ORDER_UNITS = ["Kg", "Pcs", "Grams", "Pack", "Jar"];
 
 let paceView = "orders";
 let orderListState = [];          // last loaded orders, filtered client-side
-let customerDirectory = [];       // from client_directory — id + name
+const customerDirectory = {};     // channel -> its own customer list
 let paceUserNames = {};           // profile id -> full name
 const channelProductCache = {};   // channel -> product rows, loaded on demand
 
@@ -1414,19 +1414,28 @@ function closeOrderEntry() {
     .classList.toggle("hidden", !canEnter || currentChannel === "all");
 }
 
-// The customer list comes from client_directory, not clients — sale support
-// gets name/contact/phone and never deal values (see migration 003).
-async function loadCustomerDirectory() {
-  if (customerDirectory.length) return customerDirectory;
+// PACE keeps its own customer list rather than reading the CRM's clients
+// (Clément, 6 Sep 2026 — the two systems stay separate). Scoped to the
+// channel, since the same business is a different account on each one.
+async function loadCustomerDirectory(channel) {
+  const ch = channel || oChannel.value;
+  if (customerDirectory[ch]) { paintCustomerOptions(ch); return customerDirectory[ch]; }
   const { data, error } = await sb
-    .from("client_directory")
-    .select("id, name, contact_name")
+    .from("pace_customers")
+    .select("id, name, code, contact_name, phone")
+    .eq("channel", ch)
+    .eq("active", true)
     .order("name");
-  if (error) { customerDirectory = []; return customerDirectory; }
-  customerDirectory = data || [];
-  document.getElementById("customer-directory").innerHTML =
-    customerDirectory.map(c => `<option value="${escapeHtml(c.name)}"></option>`).join("");
-  return customerDirectory;
+  customerDirectory[ch] = error ? [] : (data || []);
+  paintCustomerOptions(ch);
+  return customerDirectory[ch];
+}
+
+function paintCustomerOptions(ch) {
+  const list = customerDirectory[ch] || [];
+  document.getElementById("customer-directory").innerHTML = list
+    .map(c => `<option value="${escapeHtml(c.name)}">${c.code ? escapeHtml(c.code) : ""}</option>`)
+    .join("");
 }
 
 async function saveOrder() {
@@ -1469,6 +1478,7 @@ async function saveOrder() {
   }
 
   const channel = oChannel.value;
+  await loadCustomerDirectory(channel);
   const isB2C = channel === "Individual" || channel === "Retail";
   const num = id => {
     const v = document.getElementById(id).value;
@@ -1476,19 +1486,20 @@ async function saveOrder() {
   };
   const txt = id => document.getElementById(id).value.trim() || null;
 
-  // Match the typed name against the directory so the order links to the real
-  // CRM record where one exists. An unmatched name still saves — a new
-  // restaurant may genuinely not be in the CRM yet — it just stays text.
-  const match = customerDirectory.find(
+  // Match the typed name against this channel's customer list. An unmatched
+  // name still saves — a genuinely new restaurant may not be on the list yet —
+  // it just stays as text until someone adds them.
+  const match = (customerDirectory[channel] || []).find(
     c => c.name.toLowerCase() === customerName.toLowerCase()
   );
 
   const header = {
     entity: document.getElementById("o-entity").value,
     channel,
-    client_id: match ? match.id : null,
+    pace_customer_id: match ? match.id : null,
     customer_name: customerName,
-    customer_code: txt("o-customer-code"),
+    // Fall back to the code held on the customer record when the field is blank.
+    customer_code: txt("o-customer-code") || (match ? match.code : null),
     po_number: channel === "Restaurant" ? txt("o-po-number") : null,
     order_number: isB2C ? txt("o-order-number") : null,
     chef_name: channel === "Restaurant" ? txt("o-chef") : null,
@@ -1545,6 +1556,7 @@ tabOrdersBtn.addEventListener("click", () => switchPaceView("orders"));
 
 oChannel.addEventListener("change", async () => {
   applyChannelFields(oChannel.value);
+  await loadCustomerDirectory(oChannel.value);
   // Product lists are per channel, so any half-filled lines no longer apply.
   orderLinesBody.innerHTML = "";
   await addOrderLineRow(); await addOrderLineRow(); await addOrderLineRow();
@@ -1841,7 +1853,7 @@ async function loadOrders() {
   ordersGridBody.innerHTML = `<tr><td colspan="16">Loading...</td></tr>`;
 
   if (!Object.keys(paceUserNames).length) {
-    const { data: users } = await sb.from("pace_users").select("id, full_name");
+    const { data: users } = await sb.from("profiles").select("id, full_name");
     (users || []).forEach(u => { paceUserNames[u.id] = u.full_name; });
   }
 
@@ -1938,7 +1950,7 @@ function renderOrdersGrid() {
       shortDate(o.order_date),
       `<strong>${escapeHtml(o.customer_name || "—")}</strong>${
         o.customer_code ? ` <span class="muted-code">(${escapeHtml(o.customer_code)})</span>` : ""}${
-        o.client_id ? "" : ` <span class="unlinked" title="Not matched to a CRM customer record">•</span>`}`,
+        o.pace_customer_id ? "" : ` <span class="unlinked" title="Not matched to a customer on the list">•</span>`}`,
       escapeHtml(o.po_number || o.order_number || "—"),
       escapeHtml(o.chef_name || "—"),
       escapeHtml(o.phone || "—"),
