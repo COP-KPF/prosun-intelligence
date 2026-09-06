@@ -79,8 +79,6 @@ statusFilterSelect.addEventListener("change", renderClientsTable);
 stageFilterSelect.addEventListener("change", renderClientsTable);
 showArchivedToggle.addEventListener("change", renderClientsTable);
 
-init();
-
 async function init() {
   const { data: { session } } = await sb.auth.getSession();
   if (session) {
@@ -155,7 +153,11 @@ async function onSignedIn() {
   document.getElementById("who-role").textContent = myProfile.role;
 
   setupForRole();
-  await loadClients();
+  if (PACE_ROLES.includes(myProfile.role)) {
+    await switchPaceView("orders");
+  } else {
+    await loadClients();
+  }
 }
 
 // ------------------------------------------------------ role-specific setup
@@ -173,6 +175,8 @@ function setupForRole() {
   productsSection.classList.add("hidden");
   pipelineStats.classList.add("hidden");
   newBtn.classList.remove("hidden");
+  hidePaceSections();
+  paceTabs.classList.add("hidden");
 
   if (myProfile.role === "admin") {
     // Admin gets two views: the full record list (as before), and a
@@ -188,6 +192,9 @@ function setupForRole() {
     note.textContent = "You see every record. Deal values and assignment are visible and editable.";
     assignedWrap.classList.remove("hidden");
     populateAssignedToDropdown();
+    // Admin is the only account that works on both sides, so both tab rows show.
+    paceTabs.classList.remove("hidden");
+    tabOrdersBtn.classList.remove("active");
   } else if (myProfile.role === "director") {
     // Director gets two views: their own personal pipeline (targets/visits,
     // just like a sales rep), and a read-only feed of new leads across the
@@ -197,6 +204,10 @@ function setupForRole() {
     tabMineBtn.classList.add("active");
     tabLeadsBtn.classList.remove("active");
     updateDirectorHeader();
+  } else if (PACE_ROLES.includes(myProfile.role)) {
+    // Sale support / purchasing / production live on the PACE side only:
+    // no client list, no pipeline, no quotations.
+    setupPaceRole();
   } else {
     title.textContent = "Your pipeline";
     note.textContent = "You only see clients assigned to you.";
@@ -236,6 +247,8 @@ tabProductsBtn.addEventListener("click", () => switchAdminView("products"));
 
 async function switchAdminView(view) {
   adminView = view;
+  hidePaceSections();
+  tabOrdersBtn.classList.remove("active");
   tabAllBtn.classList.toggle("active", view === "all");
   tabSummaryBtn.classList.toggle("active", view === "summary");
   tabProductsBtn.classList.toggle("active", view === "products");
@@ -1132,3 +1145,945 @@ function generateQuotePDF(q) {
 
   doc.save(`${q.quoteNumber}.pdf`);
 }
+
+// ============================================================================
+// PROSUN PACE — middle office order entry
+// ============================================================================
+// The same app serves two sides. Sales reps and the director work in the CRM
+// (clients, pipeline, quotations); sale support and purchasing work here, in
+// PACE (orders, and later yield and purchasing). Clément, 6 Sep 2026: "Sales
+// rep are in the CRM but the PACE intelligence system is only for middle
+// office and purchasing." Admin sees both.
+//
+// As everywhere else in this app, what a person can actually read or write is
+// enforced by Row Level Security in the database, not by the code below.
+// Sale support genuinely cannot read the CRM's clients table — they see
+// customers through the narrow client_directory view (sql/migrations/
+// 003_client_directory.sql), which exposes name/contact/phone and not
+// deal_value or notes.
+// ============================================================================
+
+const PACE_ROLES = ["sale_support", "purchasing", "production"];
+const ORDER_UNITS = ["Kg", "Pcs", "Grams", "Pack", "Jar"];
+
+let paceView = "orders";
+let orderListState = [];          // last loaded orders, filtered client-side
+let customerDirectory = [];       // from client_directory — id + name
+let paceUserNames = {};           // profile id -> full name
+const channelProductCache = {};   // channel -> product rows, loaded on demand
+
+const paceTabs           = document.getElementById("pace-tabs");
+const tabOrdersBtn       = document.getElementById("tab-orders");
+const ordersSection      = document.getElementById("orders-section");
+const orderEntrySection  = document.getElementById("order-entry-section");
+const orderLinesBody     = document.getElementById("order-lines-body");
+const orderError         = document.getElementById("order-error");
+const oChannel           = document.getElementById("o-channel");
+
+// --------------------------------------------------------------- entry form
+// Channel decides which header fields make sense: a restaurant order has a PO
+// number and a chef, a walk-in Individual order has an order number, a
+// delivery fee and a payment status. Fields carry data-channels in the HTML
+// and are shown or hidden here, so adding a channel later is a markup change.
+function applyChannelFields(channel) {
+  document.querySelectorAll("#order-entry-section [data-channels]").forEach(el => {
+    const allowed = el.dataset.channels.split(",").map(s => s.trim());
+    el.classList.toggle("hidden", !allowed.includes(channel));
+  });
+
+  // The source sheets all call this column "Address", but it means different
+  // things: a real delivery address for Individual/Retail, delivery notes or
+  // an area for Restaurant/Department Store.
+  const isB2C = channel === "Individual" || channel === "Retail";
+  document.getElementById("o-address-label").textContent =
+    isB2C ? "Delivery address" : "Delivery notes / area";
+}
+
+async function loadChannelProducts(channel) {
+  if (channelProductCache[channel]) return channelProductCache[channel];
+  const { data, error } = await sb
+    .from("order_products")
+    .select("id, type, name, default_unit")
+    .eq("channel", channel)
+    .eq("active", true)
+    .order("type")
+    .order("name");
+  if (error) {
+    orderError.textContent = "Couldn't load the product list: " + error.message;
+    return [];
+  }
+  channelProductCache[channel] = data || [];
+  return channelProductCache[channel];
+}
+
+// Types come from the products actually seeded for that channel rather than a
+// hard-coded list — Restaurant has Cooked/UnderRoof/PaleoRobbie/EasyHealth,
+// the other three have Frozen, and that will keep drifting.
+function typesForChannel(products) {
+  return [...new Set(products.map(p => p.type))].sort();
+}
+
+async function addOrderLineRow(prefill) {
+  const channel = oChannel.value;
+  const products = await loadChannelProducts(channel);
+  const types = typesForChannel(products);
+
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td>
+      <select class="l-type">
+        <option value="">Type...</option>
+        ${types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}
+      </select>
+    </td>
+    <td><select class="l-product"><option value="">Pick a type first</option></select></td>
+    <td><input type="text" class="l-weight" placeholder="e.g. 1.6-1.8" /></td>
+    <td><input type="number" class="l-qty" step="0.01" min="0" /></td>
+    <td>
+      <select class="l-unit">
+        <option value="">—</option>
+        ${ORDER_UNITS.map(u => `<option value="${u}">${u}</option>`).join("")}
+      </select>
+    </td>
+    <td><input type="text" class="l-desc" /></td>
+    <td><input type="text" class="l-pack" /></td>
+    <td><button type="button" class="line-remove" title="Remove this line">&times;</button></td>
+  `;
+  orderLinesBody.appendChild(tr);
+
+  const typeSel = tr.querySelector(".l-type");
+  const prodSel = tr.querySelector(".l-product");
+  const unitSel = tr.querySelector(".l-unit");
+
+  // Cascading picker, same behaviour as the Excel sheet's dependent dropdown:
+  // choosing a Type narrows Product to that type's list for this channel.
+  function refreshProducts(selectedId) {
+    const t = typeSel.value;
+    const list = products.filter(p => p.type === t);
+    prodSel.innerHTML = t
+      ? `<option value="">Product...</option>` +
+        list.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("")
+      : `<option value="">Pick a type first</option>`;
+    if (selectedId) prodSel.value = selectedId;
+  }
+  typeSel.addEventListener("change", () => refreshProducts());
+
+  // A product's usual unit is a starting point, not a rule — the same cut is
+  // sold by the kilo to a restaurant and by the pack to an individual.
+  prodSel.addEventListener("change", () => {
+    const p = products.find(x => x.id === prodSel.value);
+    if (p && p.default_unit && !unitSel.value) unitSel.value = p.default_unit;
+  });
+
+  tr.querySelector(".line-remove").addEventListener("click", () => tr.remove());
+
+  if (prefill) {
+    typeSel.value = prefill.type || "";
+    refreshProducts(prefill.product_id);
+    tr.querySelector(".l-weight").value = prefill.weight_label || "";
+    tr.querySelector(".l-qty").value = prefill.quantity ?? "";
+    unitSel.value = prefill.unit || "";
+    tr.querySelector(".l-desc").value = prefill.description || "";
+    tr.querySelector(".l-pack").value = prefill.packaging || "";
+  }
+  return tr;
+}
+
+// Weight is text in the source sheets and often a size band ("1.6-1.8") rather
+// than one number — Clément, 5 Sep 2026: the point of capturing it is to buy
+// the right size of bird, not just the right number. Stored as typed, with the
+// band parsed out alongside so the poultry calculator can group demand by size.
+function parseWeightBand(text) {
+  if (!text) return { label: null, min: null, max: null };
+  const label = String(text).trim();
+  const nums = label.match(/\d+(?:[.,]\d+)?/g);
+  if (!nums || !nums.length) return { label, min: null, max: null };
+  const vals = nums.map(n => parseFloat(n.replace(",", ".")));
+  return { label, min: Math.min(...vals), max: Math.max(...vals) };
+}
+
+function collectOrderLines() {
+  const rows = [...orderLinesBody.querySelectorAll("tr")];
+  const lines = [];
+  let incomplete = 0;
+
+  rows.forEach(tr => {
+    const type = tr.querySelector(".l-type").value;
+    const productId = tr.querySelector(".l-product").value;
+    const qtyRaw = tr.querySelector(".l-qty").value;
+    const unit = tr.querySelector(".l-unit").value;
+    const weight = parseWeightBand(tr.querySelector(".l-weight").value);
+    const desc = tr.querySelector(".l-desc").value.trim();
+    const pack = tr.querySelector(".l-pack").value.trim();
+
+    const blank = !type && !productId && qtyRaw === "" && !unit && !desc && !pack;
+    if (blank) { tr.classList.remove("line-incomplete"); return; }   // ignore empty rows
+
+    // A line needs at minimum a type and a quantity to mean anything to
+    // production or to the bird calculation.
+    if (!type || qtyRaw === "") {
+      tr.classList.add("line-incomplete");
+      incomplete++;
+      return;
+    }
+    tr.classList.remove("line-incomplete");
+
+    lines.push({
+      type,
+      product_id: productId || null,
+      quantity: Number(qtyRaw),
+      unit: unit || null,
+      weight_label: weight.label,
+      weight_min_kg: weight.min,
+      weight_max_kg: weight.max,
+      description: desc || null,
+      packaging: pack || null,
+    });
+  });
+
+  return { lines, incomplete };
+}
+
+function resetOrderEntry() {
+  orderError.textContent = "";
+  orderLinesBody.innerHTML = "";
+  ["o-customer","o-customer-code","o-po-number","o-order-number","o-chef","o-phone",
+   "o-address","o-note","o-total-order","o-delivery-fee","o-total-amount",
+   "o-payment-status","o-delivery-time"].forEach(id => { document.getElementById(id).value = ""; });
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById("o-order-date").value = today;
+  document.getElementById("o-delivery-date").value = "";
+}
+
+// entryMode is either a new order, or extra product lines for one already on
+// the sheet — a client phoning back to add an item, which today means finding
+// their block in the spreadsheet and inserting a row under it.
+let entryMode = { mode: "new", order: null };
+
+async function openOrderEntry(opts) {
+  const addTo = opts && opts.addTo ? opts.addTo : null;
+  entryMode = addTo ? { mode: "addLines", order: addTo } : { mode: "new", order: null };
+
+  resetOrderEntry();
+  oChannel.value = addTo ? addTo.channel : (currentChannel === "all" ? "Restaurant" : currentChannel);
+  applyChannelFields(oChannel.value);
+  await loadCustomerDirectory();
+
+  const heading = document.getElementById("order-entry-title");
+  const headerBox = document.querySelector(".order-header-grid");
+  if (addTo) {
+    // The client's details are already agreed on this order — show them, but
+    // read-only, so the extra lines can't quietly change them.
+    heading.textContent = `Add product lines — ${addTo.customer_name || "order"}`;
+    document.getElementById("o-customer").value = addTo.customer_name || "";
+    document.getElementById("o-customer-code").value = addTo.customer_code || "";
+    document.getElementById("o-po-number").value = addTo.po_number || "";
+    document.getElementById("o-order-number").value = addTo.order_number || "";
+    document.getElementById("o-chef").value = addTo.chef_name || "";
+    document.getElementById("o-phone").value = addTo.phone || "";
+    document.getElementById("o-address").value = addTo.delivery_address || "";
+    document.getElementById("o-note").value = addTo.note || "";
+    document.getElementById("o-order-date").value = addTo.order_date || "";
+    document.getElementById("o-delivery-date").value = addTo.delivery_date || "";
+    document.getElementById("o-delivery-time").value = addTo.delivery_time ? String(addTo.delivery_time).slice(0, 5) : "";
+    document.getElementById("o-entity").value = addTo.entity;
+    headerBox.classList.add("header-locked");
+    headerBox.querySelectorAll("input, select, textarea").forEach(el => { el.disabled = true; });
+  } else {
+    heading.textContent = "New order";
+    headerBox.classList.remove("header-locked");
+    headerBox.querySelectorAll("input, select, textarea").forEach(el => { el.disabled = false; });
+  }
+
+  ordersSection.classList.add("hidden");
+  orderEntrySection.classList.remove("hidden");
+  // Three blank lines to start — most orders have a handful of products.
+  await addOrderLineRow(); await addOrderLineRow(); await addOrderLineRow();
+  (addTo ? orderLinesBody.querySelector(".l-type") : document.getElementById("o-customer")).focus();
+}
+
+function closeOrderEntry() {
+  const headerBox = document.querySelector(".order-header-grid");
+  headerBox.classList.remove("header-locked");
+  headerBox.querySelectorAll("input, select, textarea").forEach(el => { el.disabled = false; });
+  entryMode = { mode: "new", order: null };
+  orderEntrySection.classList.add("hidden");
+  ordersSection.classList.remove("hidden");
+  const canEnter = myProfile.role === "sale_support" || myProfile.role === "admin";
+  document.getElementById("new-order-btn")
+    .classList.toggle("hidden", !canEnter || currentChannel === "all");
+}
+
+// The customer list comes from client_directory, not clients — sale support
+// gets name/contact/phone and never deal values (see migration 003).
+async function loadCustomerDirectory() {
+  if (customerDirectory.length) return customerDirectory;
+  const { data, error } = await sb
+    .from("client_directory")
+    .select("id, name, contact_name")
+    .order("name");
+  if (error) { customerDirectory = []; return customerDirectory; }
+  customerDirectory = data || [];
+  document.getElementById("customer-directory").innerHTML =
+    customerDirectory.map(c => `<option value="${escapeHtml(c.name)}"></option>`).join("");
+  return customerDirectory;
+}
+
+async function saveOrder() {
+  orderError.textContent = "";
+
+  // Adding lines to an existing order: no header to write, just the lines.
+  if (entryMode.mode === "addLines") {
+    const { lines, incomplete } = collectOrderLines();
+    if (incomplete) {
+      orderError.textContent = `${incomplete} product line${incomplete > 1 ? "s are" : " is"} missing a type or quantity — highlighted below.`;
+      return;
+    }
+    if (!lines.length) { orderError.textContent = "Add at least one product line."; return; }
+    const btn = document.getElementById("save-order-btn");
+    btn.disabled = true; btn.textContent = "Saving...";
+    const { error } = await sb.from("sale_order_lines")
+      .insert(lines.map(l => ({ ...l, order_id: entryMode.order.id })));
+    btn.disabled = false; btn.textContent = "Save order";
+    if (error) { orderError.textContent = "Couldn't save the product lines: " + error.message; return; }
+    closeOrderEntry();
+    await loadOrders();
+    return;
+  }
+
+  const customerName = document.getElementById("o-customer").value.trim();
+  if (!customerName) {
+    orderError.textContent = "Enter a customer name.";
+    document.getElementById("o-customer").focus();
+    return;
+  }
+
+  const { lines, incomplete } = collectOrderLines();
+  if (incomplete) {
+    orderError.textContent = `${incomplete} product line${incomplete > 1 ? "s are" : " is"} missing a type or quantity — highlighted below.`;
+    return;
+  }
+  if (!lines.length) {
+    orderError.textContent = "Add at least one product line.";
+    return;
+  }
+
+  const channel = oChannel.value;
+  const isB2C = channel === "Individual" || channel === "Retail";
+  const num = id => {
+    const v = document.getElementById(id).value;
+    return v === "" ? null : Number(v);
+  };
+  const txt = id => document.getElementById(id).value.trim() || null;
+
+  // Match the typed name against the directory so the order links to the real
+  // CRM record where one exists. An unmatched name still saves — a new
+  // restaurant may genuinely not be in the CRM yet — it just stays text.
+  const match = customerDirectory.find(
+    c => c.name.toLowerCase() === customerName.toLowerCase()
+  );
+
+  const header = {
+    entity: document.getElementById("o-entity").value,
+    channel,
+    client_id: match ? match.id : null,
+    customer_name: customerName,
+    customer_code: txt("o-customer-code"),
+    po_number: channel === "Restaurant" ? txt("o-po-number") : null,
+    order_number: isB2C ? txt("o-order-number") : null,
+    chef_name: channel === "Restaurant" ? txt("o-chef") : null,
+    phone: txt("o-phone"),
+    note: txt("o-note"),
+    delivery_address: txt("o-address"),
+    order_date: document.getElementById("o-order-date").value || null,
+    delivery_date: document.getElementById("o-delivery-date").value || null,
+    delivery_time: document.getElementById("o-delivery-time").value || null,
+    total_order: isB2C ? num("o-total-order") : null,
+    delivery_fee: isB2C ? num("o-delivery-fee") : null,
+    total_amount: isB2C ? num("o-total-amount") : null,
+    payment_status_text: channel === "Individual" ? txt("o-payment-status") : null,
+    created_by: myProfile.id,
+  };
+
+  const saveBtn = document.getElementById("save-order-btn");
+  saveBtn.disabled = true;
+  saveBtn.textContent = "Saving...";
+
+  const { data: created, error: headErr } = await sb
+    .from("sale_orders").insert(header).select("id").single();
+
+  if (headErr) {
+    orderError.textContent = "Couldn't save the order: " + headErr.message;
+    saveBtn.disabled = false; saveBtn.textContent = "Save order";
+    return;
+  }
+
+  const { error: lineErr } = await sb
+    .from("sale_order_lines")
+    .insert(lines.map(l => ({ ...l, order_id: created.id })));
+
+  if (lineErr) {
+    // The header is already committed — PostgREST has no transaction across
+    // two requests. Remove it again so a half-saved order can't strand; the
+    // policy in migration 003 permits exactly this (own order, no lines yet).
+    const { error: cleanupErr } = await sb.from("sale_orders").delete().eq("id", created.id);
+    orderError.textContent = cleanupErr
+      ? "The product lines failed to save (" + lineErr.message +
+        ") and the empty order could not be removed automatically — tell Clément so he can delete it."
+      : "Couldn't save the product lines: " + lineErr.message + ". Nothing was saved — try again.";
+    saveBtn.disabled = false; saveBtn.textContent = "Save order";
+    return;
+  }
+
+  saveBtn.disabled = false; saveBtn.textContent = "Save order";
+  closeOrderEntry();
+  await loadOrders();
+}
+
+// ------------------------------------------------------------------- wiring
+tabOrdersBtn.addEventListener("click", () => switchPaceView("orders"));
+
+oChannel.addEventListener("change", async () => {
+  applyChannelFields(oChannel.value);
+  // Product lists are per channel, so any half-filled lines no longer apply.
+  orderLinesBody.innerHTML = "";
+  await addOrderLineRow(); await addOrderLineRow(); await addOrderLineRow();
+});
+
+document.getElementById("add-order-line-btn").addEventListener("click", () => addOrderLineRow());
+document.getElementById("save-order-btn").addEventListener("click", saveOrder);
+document.getElementById("cancel-order-btn").addEventListener("click", closeOrderEntry);
+
+// B2C total is order + delivery fee unless someone types something else.
+["o-total-order", "o-delivery-fee"].forEach(id => {
+  document.getElementById(id).addEventListener("input", () => {
+    const a = parseFloat(document.getElementById("o-total-order").value) || 0;
+    const b = parseFloat(document.getElementById("o-delivery-fee").value) || 0;
+    const totalField = document.getElementById("o-total-amount");
+    if (!totalField.dataset.touched) totalField.value = (a + b).toFixed(2);
+  });
+});
+document.getElementById("o-total-amount").addEventListener("input", (e) => {
+  e.target.dataset.touched = "1";
+});
+
+
+// ------------------------------------------------------- showing each side
+// The CRM and PACE are one app but two workspaces. These keep the two from
+// bleeding into each other when a role — or admin — moves between them.
+function hidePaceSections() {
+  ordersSection.classList.add("hidden");
+  orderEntrySection.classList.add("hidden");
+  document.getElementById("new-order-btn").classList.add("hidden");
+}
+
+function hideCrmSections() {
+  clientsTable.classList.add("hidden");
+  clientFilters.classList.add("hidden");
+  summaryTable.classList.add("hidden");
+  productsSection.classList.add("hidden");
+  pipelineStats.classList.add("hidden");
+  document.getElementById("new-client-btn").classList.add("hidden");
+  directorTabs.classList.add("hidden");
+  adminTabs.classList.add("hidden");
+}
+
+// Sale support, purchasing and production never see the CRM at all.
+function setupPaceRole() {
+  hideCrmSections();
+  // Only admin needs this row, to move between PACE and the CRM. For the PACE
+  // roles it would be a single tab pointing at the page they are already on.
+  paceTabs.classList.add("hidden");
+  tabOrdersBtn.classList.add("active");
+  document.getElementById("app-title").textContent = "PROSUN PACE";
+
+  const note = document.getElementById("role-note");
+  if (myProfile.role === "sale_support") {
+    note.textContent = "Enter and review customer orders. You also maintain the product catalogue — retire a product by deactivating it rather than deleting, so past orders keep their reference.";
+  } else if (myProfile.role === "purchasing") {
+    note.textContent = "Read-only view of every order, so purchasing can see demand before buying. Entering and changing orders is sale support's job.";
+  } else {
+    note.textContent = "Read-only view of orders for production.";
+  }
+}
+
+async function switchPaceView(view) {
+  paceView = view;
+  if (myProfile.role === "admin") {
+    // Admin keeps both tab rows; moving to PACE closes the CRM sections.
+    hideCrmSections();
+    adminTabs.classList.remove("hidden");
+    paceTabs.classList.remove("hidden");
+    [tabAllBtn, tabSummaryBtn, tabProductsBtn].forEach(b => b.classList.remove("active"));
+  }
+  tabOrdersBtn.classList.toggle("active", view === "orders");
+  orderEntrySection.classList.add("hidden");
+  ordersSection.classList.toggle("hidden", view !== "orders");
+
+  // Purchasing and production read; only sale support and admin write. Entry
+  // also needs one specific channel, since the product list is per channel.
+  const canEnter = myProfile.role === "sale_support" || myProfile.role === "admin";
+  document.getElementById("new-order-btn")
+    .classList.toggle("hidden", !canEnter || view !== "orders" || currentChannel === "all");
+
+  if (view === "orders") await loadOrders();
+}
+
+document.getElementById("new-order-btn").addEventListener("click", openOrderEntry);
+
+
+// ============================================================================
+// Minimal .xlsx writer — no library, no CDN.
+// ============================================================================
+// Why hand-rolled: the export has to survive Thai product names, and a CSV
+// only does that if Excel sees a byte-order mark — fragile, and it still opens
+// as one flat sheet with no column widths. A real .xlsx is just a zip of XML
+// files, and XML is UTF-8 by definition, so Thai is safe by construction.
+//
+// The zip entries are STORED (uncompressed) rather than deflated, which means
+// no compression code is needed — only a CRC32. Export files here are a few
+// hundred KB at most, so the size cost is irrelevant and the dependency cost
+// is zero.
+// ============================================================================
+
+const XLSX_CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[i] = c >>> 0;
+  }
+  return t;
+})();
+
+function xlsxCrc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = XLSX_CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function xlsxEscape(s) {
+  return String(s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    // Excel rejects most control characters outright.
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+}
+
+function xlsxColName(n) {
+  let s = "";
+  while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - m) / 26); }
+  return s;
+}
+
+// rows: array of arrays. Values that are numbers are written as numbers so
+// Excel can sum them; everything else goes out as inline text.
+function xlsxSheetXml(rows, widths) {
+  const cols = widths && widths.length
+    ? `<cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("")}</cols>`
+    : "";
+  const body = rows.map((row, r) => {
+    const cells = row.map((v, c) => {
+      const ref = xlsxColName(c + 1) + (r + 1);
+      if (v === null || v === undefined || v === "") return "";
+      if (typeof v === "number" && isFinite(v)) return `<c r="${ref}"><v>${v}</v></c>`;
+      const style = r === 0 ? ' s="1"' : "";
+      return `<c r="${ref}" t="inlineStr"${style}><is><t xml:space="preserve">${xlsxEscape(v)}</t></is></c>`;
+    }).join("");
+    return `<row r="${r + 1}">${cells}</row>`;
+  }).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${cols}<sheetData>${body}</sheetData></worksheet>`;
+}
+
+function buildXlsx(sheetName, rows, widths) {
+  const enc = new TextEncoder();
+  const files = [
+    ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>`],
+    ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`],
+    ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="${xlsxEscape(sheetName).slice(0, 31)}" sheetId="1" r:id="rId1"/></sheets></workbook>`],
+    ["xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`],
+    ["xl/styles.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
+<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+<borders count="1"><border/></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`],
+    ["xl/worksheets/sheet1.xml", xlsxSheetXml(rows, widths)],
+  ];
+
+  // --- assemble the zip (all entries STORED) ---
+  const chunks = [], central = [];
+  let offset = 0;
+  files.forEach(([name, text]) => {
+    const nameBytes = enc.encode(name);
+    const data = enc.encode(text);
+    const crc = xlsxCrc32(data);
+    const local = new Uint8Array(30 + nameBytes.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint16(6, 0, true);
+    lv.setUint16(8, 0, true);            // stored, no compression
+    lv.setUint16(10, 0, true); lv.setUint16(12, 0, true);
+    lv.setUint32(14, crc, true); lv.setUint32(18, data.length, true); lv.setUint32(22, data.length, true);
+    lv.setUint16(26, nameBytes.length, true); lv.setUint16(28, 0, true);
+    local.set(nameBytes, 30);
+    chunks.push(local, data);
+
+    const cd = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(cd.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0, true); cv.setUint16(10, 0, true);
+    cv.setUint16(12, 0, true); cv.setUint16(14, 0, true);
+    cv.setUint32(16, crc, true); cv.setUint32(20, data.length, true); cv.setUint32(24, data.length, true);
+    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint32(42, offset, true);
+    cd.set(nameBytes, 46);
+    central.push(cd);
+    offset += local.length + data.length;
+  });
+
+  const centralSize = central.reduce((n, c) => n + c.length, 0);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true);
+  ev.setUint32(12, centralSize, true); ev.setUint32(16, offset, true);
+
+  return new Blob([...chunks, ...central, end],
+    { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+
+function downloadXlsx(filename, sheetName, rows, widths) {
+  const url = URL.createObjectURL(buildXlsx(sheetName, rows, widths));
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+
+// ============================================================================
+// The order book — grouped grid
+// ============================================================================
+// Rebuilt 6 Sep 2026 to match the layout Clément's team recognises: their
+// weekly Excel sheet, where an order's client details sit once on the left and
+// its product lines run down the right. The database keeps a proper header +
+// lines structure underneath; only the presentation mirrors the sheet.
+// ============================================================================
+
+const ORDER_CHANNELS = ["Restaurant", "Department Store", "Individual", "Retail"];
+let currentChannel = "Restaurant";
+let weekMonday = null;            // Monday of the week on screen
+
+const ordersGridHead = document.getElementById("orders-grid-head");
+const ordersGridBody = document.getElementById("orders-grid-body");
+const weekLabel      = document.getElementById("week-label");
+const typeHint       = document.getElementById("type-hint");
+const ordersFoot     = document.getElementById("orders-foot");
+
+// Their sheets run Monday to Saturday ("31 August - 5 September"), so the app
+// uses the same boundaries rather than an ISO Sunday week.
+function mondayOf(d) {
+  const x = new Date(d);
+  const day = (x.getDay() + 6) % 7;          // Mon = 0
+  x.setDate(x.getDate() - day);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+const iso = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+function weekBounds(monday) {
+  const to = new Date(monday); to.setDate(to.getDate() + 5);   // Saturday
+  return { from: iso(monday), to: iso(to) };
+}
+function weekLabelText(monday) {
+  const to = new Date(monday); to.setDate(to.getDate() + 5);
+  const f = (d, withMonth) => d.getDate() + (withMonth ? " " + d.toLocaleString("en", { month: "short" }) : "");
+  const sameMonth = monday.getMonth() === to.getMonth();
+  return `${f(monday, !sameMonth)}–${f(to, true)}`;
+}
+function shortDate(s) {
+  if (!s) return "—";
+  const [y, m, d] = s.split("-");
+  return `${d}/${m}`;
+}
+function dayName(s) {
+  if (!s) return "";
+  const d = new Date(s + "T00:00:00");
+  return d.toLocaleString("en", { weekday: "short" });
+}
+
+// ------------------------------------------------------------------ loading
+async function loadOrders() {
+  if (!weekMonday) weekMonday = mondayOf(new Date());
+  const { from, to } = weekBounds(weekMonday);
+  weekLabel.textContent = weekLabelText(weekMonday);
+  document.getElementById("list-title").textContent =
+    `Order Entry — ${currentChannel === "all" ? "All channels" : currentChannel}, week of ${weekLabelText(weekMonday)}`;
+  ordersGridBody.innerHTML = `<tr><td colspan="16">Loading...</td></tr>`;
+
+  if (!Object.keys(paceUserNames).length) {
+    const { data: users } = await sb.from("pace_users").select("id, full_name");
+    (users || []).forEach(u => { paceUserNames[u.id] = u.full_name; });
+  }
+
+  let q = sb.from("sale_orders")
+    .select("*, sale_order_lines(id, type, product_id, description, weight_label, quantity, unit, packaging, order_products(name))")
+    // An order normally belongs to the week it is delivered in; one entered
+    // without a delivery date yet falls back to the week it was taken.
+    .or(`and(delivery_date.gte.${from},delivery_date.lte.${to}),` +
+        `and(delivery_date.is.null,order_date.gte.${from},order_date.lte.${to})`)
+    .order("delivery_date", { ascending: true, nullsFirst: false })
+    .order("created_at", { ascending: true });
+
+  if (currentChannel !== "all") q = q.eq("channel", currentChannel);
+
+  const { data, error } = await q;
+  if (error) {
+    ordersGridBody.innerHTML = `<tr><td colspan="16">Couldn't load orders: ${escapeHtml(error.message)}</td></tr>`;
+    return;
+  }
+  orderListState = data || [];
+  await renderTypeHint();
+  renderOrdersGrid();
+}
+
+// The mockup's hint line: how many products each Type offers on this channel,
+// so it's obvious the Product list is filtered rather than broken.
+async function renderTypeHint() {
+  if (currentChannel === "all") {
+    typeHint.textContent = "Showing every channel. Switch to a single channel to add or edit orders.";
+    return;
+  }
+  const products = await loadChannelProducts(currentChannel);
+  const counts = {};
+  products.forEach(p => { counts[p.type] = (counts[p.type] || 0) + 1; });
+  const parts = Object.keys(counts).sort().map(t => `${t} (${counts[t]})`);
+  typeHint.innerHTML = parts.length
+    ? `<strong>Type</strong> filters the <strong>Product</strong> list automatically — ${parts.join(" · ")}.`
+    : "No products are set up for this channel yet.";
+}
+
+// ---------------------------------------------------------------- rendering
+const HEADER_COLS = [
+  { key: "order_date",  label: "Order date" },
+  { key: "customer",    label: "Client" },
+  { key: "ref",         label: "PO / Order no." },
+  { key: "contact",     label: "Contact" },
+  { key: "phone",       label: "Phone" },
+  { key: "address",     label: "Delivery notes / area" },
+  { key: "delivery",    label: "Delivery" },
+];
+const LINE_COLS = ["Type", "Product", "Weight spec", "Qty", "Unit", "Description", "Packaging"];
+
+function renderOrdersGrid() {
+  const term = document.getElementById("order-search").value.trim().toLowerCase();
+  const showChannel = currentChannel === "all";
+
+  const head = [
+    ...(showChannel ? [{ key: "channel", label: "Channel" }] : []),
+    ...HEADER_COLS,
+  ];
+  ordersGridHead.innerHTML = `<tr>
+    ${head.map(c => `<th class="hdr-col">${c.label}</th>`).join("")}
+    ${LINE_COLS.map(c => `<th class="line-col">${c}</th>`).join("")}
+  </tr>`;
+  const colCount = head.length + LINE_COLS.length;
+
+  const orders = orderListState.filter(o => {
+    if (!term) return true;
+    const hay = [o.customer_name, o.po_number, o.order_number, o.customer_code]
+      .filter(Boolean).join(" ").toLowerCase();
+    return hay.includes(term);
+  });
+
+  if (!orders.length) {
+    ordersGridBody.innerHTML = `<tr><td colspan="${colCount}" class="empty-cell">${
+      orderListState.length
+        ? "No orders match that search this week."
+        : "No orders this week yet." }</td></tr>`;
+    ordersFoot.textContent = "";
+    return;
+  }
+
+  const canEnter = myProfile.role === "sale_support" || myProfile.role === "admin";
+
+  ordersGridBody.innerHTML = orders.map((o, idx) => {
+    const lines = (o.sale_order_lines || []).slice();
+    const bodyRows = lines.length ? lines : [null];
+    // +1 for the "add product line" row, which only writers see
+    const span = bodyRows.length + (canEnter ? 1 : 0);
+    const zebra = idx % 2 ? " order-alt" : "";
+
+    const headerCells = [
+      ...(showChannel ? [`<span class="channel-pill channel-${o.channel.replace(/\s/g, "")}">${escapeHtml(o.channel)}</span>`] : []),
+      shortDate(o.order_date),
+      `<strong>${escapeHtml(o.customer_name || "—")}</strong>${
+        o.customer_code ? ` <span class="muted-code">(${escapeHtml(o.customer_code)})</span>` : ""}${
+        o.client_id ? "" : ` <span class="unlinked" title="Not matched to a CRM customer record">•</span>`}`,
+      escapeHtml(o.po_number || o.order_number || "—"),
+      escapeHtml(o.chef_name || "—"),
+      escapeHtml(o.phone || "—"),
+      escapeHtml(o.delivery_address || "—"),
+      o.delivery_date
+        ? `${shortDate(o.delivery_date)}<span class="muted-code">, ${dayName(o.delivery_date)}</span>${
+            o.delivery_time ? `<br><span class="muted-code">${escapeHtml(String(o.delivery_time).slice(0, 5))}</span>` : ""}`
+        : "—",
+    ].map((html, i) => `<td class="hdr-col" rowspan="${span}">${html}</td>`).join("");
+
+    const lineRow = (l) => l ? `
+      <td class="line-col"><span class="type-pill">${escapeHtml(l.type)}</span></td>
+      <td class="line-col prod-cell">${escapeHtml(l.order_products ? l.order_products.name : "—")}</td>
+      <td class="line-col">${escapeHtml(l.weight_label || "—")}</td>
+      <td class="line-col num">${l.quantity ?? "—"}</td>
+      <td class="line-col">${escapeHtml(l.unit || "—")}</td>
+      <td class="line-col">${escapeHtml(l.description || "—")}</td>
+      <td class="line-col">${escapeHtml(l.packaging || "—")}</td>`
+      : `<td class="line-col empty-cell" colspan="7">No product lines on this order yet.</td>`;
+
+    const rows = bodyRows.map((l, i) =>
+      `<tr class="order-line${zebra}${i === 0 ? " order-first" : ""}">${i === 0 ? headerCells : ""}${lineRow(l)}</tr>`
+    );
+
+    if (canEnter) {
+      rows.push(`<tr class="order-line add-line-row${zebra}">
+        <td class="line-col" colspan="7">
+          <button type="button" class="btn-link add-line" data-order="${o.id}">+ Add product line</button>
+        </td></tr>`);
+    }
+    return rows.join("");
+  }).join("");
+
+  const lineTotal = orders.reduce((n, o) => n + (o.sale_order_lines || []).length, 0);
+  ordersFoot.textContent =
+    `${orders.length} order${orders.length === 1 ? "" : "s"} · ${lineTotal} product line${lineTotal === 1 ? "" : "s"}` +
+    (term ? ` (filtered from ${orderListState.length})` : "") +
+    ` · week of ${weekLabelText(weekMonday)}`;
+
+  ordersGridBody.querySelectorAll(".add-line").forEach(btn => {
+    btn.addEventListener("click", () => addLineToExistingOrder(btn.dataset.order));
+  });
+}
+
+// Adding a line to an order already on the sheet: the common case of a client
+// phoning back to add one more item, which today means finding their row block
+// and inserting a row underneath it.
+async function addLineToExistingOrder(orderId) {
+  const order = orderListState.find(o => o.id === orderId);
+  if (!order) return;
+  openOrderEntry({ addTo: order });
+}
+
+// ------------------------------------------------------------------- export
+// One row per product line, with the client cells left blank on continuation
+// rows — the shape the team already reads, not a database dump.
+async function exportOrdersXlsx() {
+  const btn = document.getElementById("export-orders-btn");
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = "Preparing...";
+  try {
+    const showChannel = currentChannel === "all";
+    const header = [
+      ...(showChannel ? ["Channel"] : []),
+      "Order date", "Client", "Customer code", "PO / Order no.", "Contact", "Phone",
+      "Delivery notes / area", "Delivery date", "Delivery time",
+      "Type", "Product", "Weight spec", "Qty", "Unit", "Description", "Packaging",
+      "Total order", "Delivery fee", "Total", "Payment", "Entered by",
+    ];
+    const rows = [header];
+
+    orderListState.forEach(o => {
+      const lines = (o.sale_order_lines || []);
+      const blocks = lines.length ? lines : [null];
+      blocks.forEach((l, i) => {
+        const first = i === 0;
+        rows.push([
+          ...(showChannel ? [first ? o.channel : ""] : []),
+          first ? (o.order_date || "") : "",
+          first ? (o.customer_name || "") : "",
+          first ? (o.customer_code || "") : "",
+          first ? (o.po_number || o.order_number || "") : "",
+          first ? (o.chef_name || "") : "",
+          first ? (o.phone || "") : "",
+          first ? (o.delivery_address || "") : "",
+          first ? (o.delivery_date || "") : "",
+          first ? (o.delivery_time ? String(o.delivery_time).slice(0, 5) : "") : "",
+          l ? l.type : "",
+          l ? (l.order_products ? l.order_products.name : "") : "",
+          l ? (l.weight_label || "") : "",
+          l && l.quantity !== null && l.quantity !== undefined ? Number(l.quantity) : "",
+          l ? (l.unit || "") : "",
+          l ? (l.description || "") : "",
+          l ? (l.packaging || "") : "",
+          first && o.total_order  !== null && o.total_order  !== undefined ? Number(o.total_order)  : "",
+          first && o.delivery_fee !== null && o.delivery_fee !== undefined ? Number(o.delivery_fee) : "",
+          first && o.total_amount !== null && o.total_amount !== undefined ? Number(o.total_amount) : "",
+          first ? (o.payment_status_text || "") : "",
+          first ? (paceUserNames[o.created_by] || "") : "",
+        ]);
+      });
+    });
+
+    const widths = [
+      ...(showChannel ? [16] : []),
+      11, 26, 13, 16, 14, 14, 30, 12, 10, 12, 46, 12, 8, 8, 34, 16, 12, 12, 12, 20, 14,
+    ];
+    const { from } = weekBounds(weekMonday);
+    const scope = currentChannel === "all" ? "All channels" : currentChannel;
+    downloadXlsx(
+      `Orders ${scope} ${from}.xlsx`,
+      scope.slice(0, 31),
+      rows,
+      widths
+    );
+  } finally {
+    btn.disabled = false; btn.textContent = original;
+  }
+}
+
+// ------------------------------------------------------------------- wiring
+document.getElementById("channel-tabs").addEventListener("click", async (e) => {
+  const btn = e.target.closest(".tab-btn");
+  if (!btn) return;
+  currentChannel = btn.dataset.channel;
+  [...e.currentTarget.querySelectorAll(".tab-btn")]
+    .forEach(b => b.classList.toggle("active", b === btn));
+  // Entering an order needs one specific channel's product list.
+  const canEnter = myProfile.role === "sale_support" || myProfile.role === "admin";
+  document.getElementById("new-order-btn")
+    .classList.toggle("hidden", !canEnter || currentChannel === "all");
+  await loadOrders();
+});
+
+document.getElementById("week-prev").addEventListener("click", async () => {
+  weekMonday.setDate(weekMonday.getDate() - 7); await loadOrders();
+});
+document.getElementById("week-next").addEventListener("click", async () => {
+  weekMonday.setDate(weekMonday.getDate() + 7); await loadOrders();
+});
+document.getElementById("week-this").addEventListener("click", async () => {
+  weekMonday = mondayOf(new Date()); await loadOrders();
+});
+document.getElementById("order-search").addEventListener("input", renderOrdersGrid);
+document.getElementById("export-orders-btn").addEventListener("click", exportOrdersXlsx);
+
+// Started last, once every section above has been declared.
+init();

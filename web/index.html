@@ -34,7 +34,7 @@
   <!-- ============ APP SHELL ============ -->
   <div id="app-screen" class="hidden">
     <header class="app-header">
-      <strong>Klong Phai Farm CRM</strong>
+      <strong id="app-title">Klong Phai Farm CRM</strong>
       <div class="who">
         <span id="who-name"></span> — <span id="who-role"></span>
         &nbsp;·&nbsp;
@@ -57,6 +57,11 @@
             <button type="button" class="tab-btn active" id="tab-all" data-view="all">All clients &amp; deals</button>
             <button type="button" class="tab-btn" id="tab-summary" data-view="summary">Team summary</button>
             <button type="button" class="tab-btn" id="tab-products" data-view="products">Products</button>
+          </div>
+          <!-- PACE side: sale support and purchasing. Admin sees this row too,
+               alongside the CRM tabs above. -->
+          <div id="pace-tabs" class="tabs hidden">
+            <button type="button" class="tab-btn active" id="tab-orders" data-view="orders">Orders</button>
           </div>
         </div>
         <button class="btn-secondary" id="new-client-btn">+ New client / lead</button>
@@ -124,6 +129,175 @@
           <thead id="products-head"><tr><th>Product</th><th>Unit</th><th>Price</th><th>Status</th><th></th></tr></thead>
           <tbody id="products-body"></tbody>
         </table>
+      </div>
+
+      <!-- PACE: the order book.
+           Modelled on the Excel sheet Jane's team actually uses: one row group
+           per order, the client's details entered once on the left, as many
+           product lines as needed on the right. Replaces the sheet's fragile
+           "blank cell means same client as the row above" convention with a
+           real header/lines structure, while looking much the same. -->
+      <div id="orders-section" class="hidden">
+        <p class="orders-sub" id="orders-sub">One row group per order — add as many product lines as needed without retyping the client's details.</p>
+
+        <div class="tabs channel-tabs" id="channel-tabs">
+          <button type="button" class="tab-btn active" data-channel="Restaurant">Restaurant</button>
+          <button type="button" class="tab-btn" data-channel="Department Store">Department store</button>
+          <button type="button" class="tab-btn" data-channel="Individual">Individual</button>
+          <button type="button" class="tab-btn" data-channel="Retail">Retail</button>
+          <button type="button" class="tab-btn" data-channel="all">All channels</button>
+        </div>
+
+        <div class="orders-toolbar">
+          <input type="search" id="order-search" placeholder="Search client or PO number" aria-label="Search orders" />
+          <div class="week-nav">
+            <button type="button" id="week-prev" aria-label="Previous week">&lsaquo;</button>
+            <span id="week-label">—</span>
+            <button type="button" id="week-next" aria-label="Next week">&rsaquo;</button>
+            <button type="button" class="btn-link" id="week-this">This week</button>
+          </div>
+          <div class="orders-toolbar-right">
+            <button type="button" class="btn-secondary" id="export-orders-btn">Export to Excel</button>
+            <button type="button" class="btn-secondary hidden" id="new-order-btn">+ New order</button>
+          </div>
+        </div>
+
+        <div class="info-banner" id="type-hint"></div>
+
+        <div class="table-scroll">
+          <table id="orders-grid">
+            <thead id="orders-grid-head"></thead>
+            <tbody id="orders-grid-body"></tbody>
+          </table>
+        </div>
+        <p class="orders-foot" id="orders-foot"></p>
+      </div>
+
+      <!-- PACE: order entry.
+           Deliberately a full-width section rather than a modal — Clément's
+           stated requirement (4 Sep 2026) was a spreadsheet-style grid, not
+           the CRM's cramped table/modal pattern. Header fields are entered
+           once, product lines repeat underneath, replacing the Excel sheet's
+           fragile "blank cell means same customer as the row above". -->
+      <div id="order-entry-section" class="hidden">
+        <div class="order-entry-head">
+          <h3 id="order-entry-title">New order</h3>
+          <div class="order-entry-actions">
+            <button type="button" class="btn-secondary" id="cancel-order-btn">Cancel</button>
+            <button type="button" class="btn-primary" id="save-order-btn">Save order</button>
+          </div>
+        </div>
+
+        <div class="order-header-grid">
+          <div class="fld">
+            <label for="o-channel">Channel</label>
+            <select id="o-channel">
+              <option value="Restaurant">Restaurant</option>
+              <option value="Department Store">Department Store</option>
+              <option value="Individual">Individual</option>
+              <option value="Retail">Retail</option>
+            </select>
+          </div>
+          <div class="fld">
+            <label for="o-entity">Company</label>
+            <select id="o-entity">
+              <option value="Prosun Farm">Prosun Farm</option>
+              <option value="Prosun Food">Prosun Food</option>
+            </select>
+          </div>
+          <div class="fld fld-wide">
+            <label for="o-customer">Customer</label>
+            <input type="text" id="o-customer" list="customer-directory" placeholder="Start typing a customer name..." autocomplete="off" />
+            <datalist id="customer-directory"></datalist>
+            <small class="fld-hint" id="o-customer-hint">Picked from the customer directory where possible, so the order links to the CRM record.</small>
+          </div>
+
+          <div class="fld" data-channels="Department Store,Individual,Retail">
+            <label for="o-customer-code">Customer code</label>
+            <input type="text" id="o-customer-code" placeholder="e.g. CS015" />
+          </div>
+          <div class="fld" data-channels="Restaurant">
+            <label for="o-po-number">PO number</label>
+            <input type="text" id="o-po-number" />
+          </div>
+          <div class="fld" data-channels="Individual,Retail">
+            <label for="o-order-number">Order number</label>
+            <input type="text" id="o-order-number" placeholder="e.g. KPF0000116" />
+          </div>
+          <div class="fld" data-channels="Restaurant">
+            <label for="o-chef">Chef</label>
+            <input type="text" id="o-chef" />
+          </div>
+          <div class="fld" data-channels="Restaurant,Department Store">
+            <label for="o-phone">Phone</label>
+            <input type="text" id="o-phone" />
+          </div>
+
+          <div class="fld">
+            <label for="o-order-date">Order date</label>
+            <input type="date" id="o-order-date" />
+          </div>
+          <div class="fld">
+            <label for="o-delivery-date">Delivery date</label>
+            <input type="date" id="o-delivery-date" />
+          </div>
+          <div class="fld">
+            <label for="o-delivery-time">Delivery time</label>
+            <input type="time" id="o-delivery-time" />
+          </div>
+
+          <div class="fld fld-wide">
+            <label for="o-address" id="o-address-label">Delivery notes / area</label>
+            <textarea id="o-address" rows="2"></textarea>
+          </div>
+          <div class="fld fld-wide" data-channels="Department Store,Individual,Retail">
+            <label for="o-note">Note</label>
+            <input type="text" id="o-note" />
+          </div>
+
+          <!-- B2C only: Individual and Retail are paid per order, with a
+               distance-based delivery fee. Restaurant and Department Store
+               are invoiced accounts and carry none of this. -->
+          <div class="fld" data-channels="Individual,Retail">
+            <label for="o-total-order">Total order (THB)</label>
+            <input type="number" id="o-total-order" step="0.01" min="0" />
+          </div>
+          <div class="fld" data-channels="Individual,Retail">
+            <label for="o-delivery-fee">Delivery fee (THB)</label>
+            <input type="number" id="o-delivery-fee" step="0.01" min="0" />
+          </div>
+          <div class="fld" data-channels="Individual,Retail">
+            <label for="o-total-amount">Total (THB)</label>
+            <input type="number" id="o-total-amount" step="0.01" min="0" />
+            <small class="fld-hint">Fills in automatically from order + fee; overwrite if it differs.</small>
+          </div>
+          <div class="fld" data-channels="Individual">
+            <label for="o-payment-status">Payment</label>
+            <input type="text" id="o-payment-status" placeholder="e.g. PAID 29/08/26 Credit" />
+          </div>
+        </div>
+
+        <h4 class="order-lines-title">Products</h4>
+        <div class="table-scroll">
+          <table class="order-lines-table" id="order-lines-table">
+            <thead>
+              <tr>
+                <th style="width:130px;">Type</th>
+                <th style="width:280px;">Product</th>
+                <th style="width:90px;">Weight</th>
+                <th style="width:90px;">Quantity</th>
+                <th style="width:90px;">Unit</th>
+                <th>Description</th>
+                <th style="width:120px;">Packaging</th>
+                <th style="width:36px;"></th>
+              </tr>
+            </thead>
+            <tbody id="order-lines-body"></tbody>
+          </table>
+        </div>
+        <button type="button" class="btn-secondary" id="add-order-line-btn">+ Add product line</button>
+
+        <div class="error-text" id="order-error"></div>
       </div>
 
       <p class="note" id="role-note"></p>

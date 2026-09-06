@@ -386,3 +386,228 @@ tr.clickable-row:hover { background: #fafbfc; cursor: pointer; }
   font-weight: 600;
   margin-top: 8px;
 }
+
+/* ============================================================================
+   PROSUN PACE — middle office order entry.
+   Uses the same tokens as the CRM side (--panel, --border, --accent...) so
+   the two sides of the app stay visually one product, while the layout is
+   deliberately wide and grid-like rather than the CRM's modal pattern.
+   ========================================================================== */
+
+.filter-bar .date-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.filter-bar .date-filter input { width: auto; }
+
+.order-entry-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 14px;
+}
+.order-entry-head h3 { margin: 0; font-size: 1.05rem; }
+.order-entry-actions { display: flex; gap: 8px; }
+.order-entry-actions button { margin-top: 0; width: auto; padding: 9px 18px; }
+
+/* Header fields: entered once per order, however many product lines follow. */
+.order-header-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 18px;
+}
+.order-header-grid .fld { display: flex; flex-direction: column; min-width: 0; }
+.order-header-grid .fld-wide { grid-column: span 2; }
+.order-header-grid label {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.order-header-grid input,
+.order-header-grid select,
+.order-header-grid textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+}
+.order-header-grid textarea { resize: vertical; font-family: inherit; }
+.fld-hint {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-top: 3px;
+  line-height: 1.3;
+}
+
+.order-lines-title {
+  margin: 4px 0 8px;
+  font-size: 0.95rem;
+}
+
+/* The product lines grid. Real inputs in a wide table rather than a
+   component library: it tabs through like a spreadsheet, works with no
+   extra dependency, and stays editable by hand later. */
+.order-lines-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  font-size: 0.85rem;
+}
+.order-lines-table th {
+  text-align: left;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.order-lines-table td {
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.order-lines-table input,
+.order-lines-table select {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 6px 7px;
+  font-size: 0.85rem;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 6px;
+}
+.order-lines-table input:hover,
+.order-lines-table select:hover { border-color: var(--border); }
+.order-lines-table input:focus,
+.order-lines-table select:focus {
+  border-color: var(--accent);
+  background: #fff;
+  outline: none;
+}
+.order-lines-table .line-remove {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 4px 6px;
+}
+.order-lines-table .line-remove:hover { color: var(--danger); }
+.order-lines-table tr.line-incomplete td { background: #fffaf0; }
+
+#add-order-line-btn { margin-top: 10px; }
+
+/* Order list */
+#orders-table td.num { text-align: right; }
+.channel-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  background: #eef1f6;
+  color: #445;
+  white-space: nowrap;
+}
+.channel-Restaurant { background: #e6f0ff; color: #1e4fa3; }
+.channel-DepartmentStore { background: #fff3d6; color: #916a00; }
+.channel-Individual { background: #e3f5e9; color: #1c7c3f; }
+.channel-Retail { background: #f3e8ff; color: #6b3fa0; }
+
+@media (max-width: 700px) {
+  .order-header-grid { grid-template-columns: 1fr; }
+  .order-header-grid .fld-wide { grid-column: span 1; }
+}
+
+/* --- the order book grid ------------------------------------------------ */
+.orders-sub { color: var(--muted); font-size: 0.85rem; margin: 2px 0 12px; }
+.channel-tabs { margin-bottom: 12px; flex-wrap: wrap; }
+
+.orders-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.orders-toolbar input[type="search"] {
+  width: 260px; margin: 0; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.orders-toolbar-right { margin-left: auto; display: flex; gap: 8px; }
+.orders-toolbar-right button { margin-top: 0; width: auto; padding: 8px 14px; white-space: nowrap; }
+
+.week-nav { display: flex; align-items: center; gap: 6px; font-size: 0.9rem; }
+.week-nav button:not(.btn-link) {
+  border: 1px solid var(--border); background: #fff; border-radius: 8px;
+  width: 30px; height: 30px; cursor: pointer; color: var(--text);
+  font-size: 1.1rem; line-height: 1; padding: 0;
+}
+.week-nav button:not(.btn-link):hover { background: var(--bg); }
+.week-nav #week-label { min-width: 108px; text-align: center; font-weight: 600; }
+
+.info-banner {
+  background: #f2f6fb; border: 1px solid #dbe6f3; color: #33506e;
+  border-radius: 8px; padding: 9px 12px; font-size: 0.82rem; margin-bottom: 12px;
+}
+
+#orders-grid { width: 100%; border-collapse: collapse; font-size: 0.83rem; background: var(--panel); }
+#orders-grid th {
+  text-align: left; font-size: 0.68rem; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--muted); font-weight: 600;
+  padding: 9px 8px; border-bottom: 1px solid var(--border);
+  white-space: nowrap; background: var(--panel);
+  position: sticky; top: 0; z-index: 1;
+}
+#orders-grid th.line-col { background: #fafbfc; }
+#orders-grid td { padding: 7px 8px; vertical-align: top; }
+/* The header block of an order spans its product lines, so the client's
+   details are written once — the same shape as the spreadsheet. */
+#orders-grid td.hdr-col {
+  border-top: 1px solid var(--border);
+  border-right: 2px solid var(--border);
+  vertical-align: top;
+}
+#orders-grid td.line-col { border-bottom: 1px dashed #eceff3; }
+#orders-grid tr.order-first td { border-top: 1px solid var(--border); }
+#orders-grid tr.order-alt td { background: #fcfcfd; }
+#orders-grid td.num { text-align: right; }
+#orders-grid .prod-cell { max-width: 320px; }
+#orders-grid .empty-cell { color: var(--muted); font-style: italic; }
+#orders-grid .muted-code { color: var(--muted); font-weight: 400; font-size: 0.78rem; }
+#orders-grid .unlinked { color: #c08a2e; font-weight: 700; }
+.add-line-row td { border-bottom: 1px solid var(--border) !important; }
+.add-line-row .btn-link { font-size: 0.8rem; }
+
+.type-pill {
+  display: inline-block; padding: 2px 7px; border-radius: 999px;
+  font-size: 0.7rem; background: #eef1f6; color: #445; white-space: nowrap;
+}
+.orders-foot { color: var(--muted); font-size: 0.8rem; margin-top: 10px; }
+
+/* Adding lines to an existing order: its header is shown for context but
+   locked, so extra lines can't quietly rewrite the agreed details. */
+.order-header-grid.header-locked { background: #fbfbfc; }
+.order-header-grid.header-locked input,
+.order-header-grid.header-locked select,
+.order-header-grid.header-locked textarea { color: var(--muted); background: #f4f5f7; }
+
+/* Product names carry both English and Thai, so they need real room —
+   without this the column wraps to four lines and the grid reads badly. */
+#orders-grid .prod-cell { min-width: 230px; max-width: 340px; }
+#orders-grid th.line-col:nth-of-type(2) { min-width: 230px; }
+#orders-grid td.hdr-col:nth-child(6),
+#orders-grid th.hdr-col:nth-child(6) { min-width: 150px; }
