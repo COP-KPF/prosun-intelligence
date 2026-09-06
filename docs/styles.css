@@ -619,6 +619,11 @@ tr.clickable-row:hover { background: #fafbfc; cursor: pointer; }
   resize: none;
 }
 #orders-grid textarea.cell-edit { min-height: 2.4em; }
+/* The Unit column held a two/three-letter value with no room to spare —
+   fine as plain text, too tight once it's a <select> with a native arrow.
+   Without this, the column stays sized to the old plain text and the arrow
+   crowds out the letters (a "g" or "s" reads as clipped). */
+#orders-grid select.cell-edit { min-width: 74px; padding-right: 18px; }
 #orders-grid .cell-edit:hover { background: #f4f6f5; }
 #orders-grid .cell-edit:focus {
   background: #fff;
@@ -654,6 +659,10 @@ tr.clickable-row:hover { background: #fafbfc; cursor: pointer; }
    without this the column wraps to four lines and the grid reads badly. */
 #orders-grid .prod-cell { min-width: 230px; max-width: 340px; }
 #orders-grid th.line-col:nth-of-type(2) { min-width: 230px; }
+/* Unit (5th of the 7 line columns: Type, Product, Weight spec, Qty, Unit,
+   Description, Packaging) — matches the select's own min-width above so the
+   column doesn't clamp back down to it. */
+#orders-grid th.line-col:nth-of-type(5) { min-width: 80px; }
 #orders-grid td.hdr-col:nth-child(6),
 #orders-grid th.hdr-col:nth-child(6) { min-width: 150px; }
 
