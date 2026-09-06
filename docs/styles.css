@@ -783,3 +783,42 @@ body.pace-mode .page-footer { max-width: none; padding: 8px 20px 32px; }
 .system-card-desc { font-size: 0.85rem; color: var(--muted); line-height: 1.45; }
 
 @media (max-width: 620px) { .system-cards { grid-template-columns: 1fr; } }
+
+/* --- poultry calculator --------------------------------------------------- */
+.calc-toolbar {
+  display: flex; align-items: flex-end; gap: 20px; flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.calc-toolbar .fld { max-width: 260px; }
+.calc-window { color: var(--muted); font-size: 0.88rem; padding-bottom: 9px; }
+
+.calc-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px 18px; margin-bottom: 16px;
+}
+.calc-card-head {
+  display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap;
+  gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 10px;
+}
+.calc-card-head h4 { margin: 0; font-size: 1rem; }
+.calc-recommend { font-size: 0.95rem; text-align: right; }
+.calc-recommend strong { font-size: 1.4rem; color: var(--accent-dark); margin-right: 4px; }
+.calc-recommend .muted-code { display: block; font-size: 0.75rem; margin-top: 2px; }
+
+.calc-cuts-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.calc-cuts-table th {
+  text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--muted); padding: 4px 8px; border-bottom: 1px solid var(--border);
+}
+.calc-cuts-table td { padding: 5px 8px; border-bottom: 1px dashed #eceff3; }
+.calc-cuts-table td.num { text-align: right; font-weight: 600; }
+.calc-cuts-table tr.calc-bottleneck { background: #fdf6ea; }
+.calc-cuts-table tr.calc-bottleneck td:first-child { font-weight: 600; }
+
+.calc-note { color: var(--muted); font-size: 0.8rem; margin: 10px 0 0; }
+
+.calc-flag {
+  background: #fdf1d6; border: 1px solid #e8c98a; border-radius: var(--radius);
+  padding: 10px 14px; font-size: 0.85rem; margin-bottom: 10px; color: #6b4c00;
+}
+.calc-flag strong { color: #4a3400; }

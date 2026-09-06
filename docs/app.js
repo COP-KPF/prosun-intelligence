@@ -1196,10 +1196,15 @@ const channelProductCache = {};   // channel -> product rows, loaded on demand
 
 const paceTabs           = document.getElementById("pace-tabs");
 const tabOrdersBtn       = document.getElementById("tab-orders");
+const tabCalculatorBtn   = document.getElementById("tab-calculator");
 const ordersSection      = document.getElementById("orders-section");
 const orderEntrySection  = document.getElementById("order-entry-section");
 const orderLinesBody     = document.getElementById("order-lines-body");
 const orderError         = document.getElementById("order-error");
+const calculatorSection  = document.getElementById("calculator-section");
+const calcDaySelect      = document.getElementById("calc-day");
+const calcWindowEl       = document.getElementById("calc-window");
+const calcResultsEl      = document.getElementById("calc-results");
 const oChannel           = document.getElementById("o-channel");
 
 // --------------------------------------------------------------- entry form
@@ -1630,6 +1635,7 @@ document.getElementById("o-total-amount").addEventListener("input", (e) => {
 function hidePaceSections() {
   ordersSection.classList.add("hidden");
   orderEntrySection.classList.add("hidden");
+  calculatorSection.classList.add("hidden");
   document.getElementById("new-order-btn").classList.add("hidden");
 }
 
@@ -1648,9 +1654,7 @@ function hideCrmSections() {
 function setupPaceRole() {
   document.body.classList.add("pace-mode");
   hideCrmSections();
-  // Only admin needs this row, to move between PACE and the CRM. For the PACE
-  // roles it would be a single tab pointing at the page they are already on.
-  paceTabs.classList.add("hidden");
+  paceTabs.classList.remove("hidden");
   tabOrdersBtn.classList.add("active");
   document.getElementById("app-title").textContent = "PROSUN PACE";
   document.getElementById("app-subtitle").textContent =
@@ -1675,12 +1679,14 @@ async function switchPaceView(view) {
       "Performance · Accountability · Coordination · Execution";
     document.body.classList.add("pace-mode");
     hideCrmSections();
-    paceTabs.classList.add("hidden");   // one PACE view for now; nothing to tab between
+    paceTabs.classList.remove("hidden");
     [tabAllBtn, tabSummaryBtn, tabProductsBtn].forEach(b => b.classList.remove("active"));
   }
   tabOrdersBtn.classList.toggle("active", view === "orders");
+  tabCalculatorBtn.classList.toggle("active", view === "calculator");
   orderEntrySection.classList.add("hidden");
   ordersSection.classList.toggle("hidden", view !== "orders");
+  calculatorSection.classList.toggle("hidden", view !== "calculator");
 
   // Purchasing and production read; only sale support and admin write. Entry
   // also needs one specific channel, since the product list is per channel.
@@ -1689,7 +1695,13 @@ async function switchPaceView(view) {
     .classList.toggle("hidden", !canEnter || view !== "orders" || currentChannel === "all");
 
   if (view === "orders") { await loadOrders(); startRealtime(); }
+  else if (view === "calculator") {
+    document.getElementById("list-title").textContent = "Poultry calculator";
+    await loadCalculator();
+  }
 }
+
+tabCalculatorBtn.addEventListener("click", () => switchPaceView("calculator"));
 
 document.getElementById("new-order-btn").addEventListener("click", openOrderEntry);
 
@@ -2332,6 +2344,221 @@ async function exportOrdersXlsx() {
     btn.disabled = false; btn.textContent = original;
   }
 }
+
+// ------------------------------------------------------------ poultry calc
+// v1, per Clément (6 Sep 2026): Restaurant channel only — the only one
+// linked to a yield weight so far — and bird count only, not the fuller
+// leftover-parts reconciliation from the 5 Sep design (that's a later
+// step). Turns real order demand for a chosen calculation day into how
+// many birds to slaughter, the same arithmetic Clément does by hand today.
+//
+// The weekly cycle (process doc, section 4), as fixed day offsets from the
+// calculation day rather than by name — deliveries never fall on a Sunday,
+// which is why Wednesday's cycle jumps +3/+5 instead of +3/+4:
+//   Monday    -> Thursday (+3), Friday (+5 would be Saturday, not used: +4)
+//   Wednesday -> Saturday (+3), Monday (+5, skipping Sunday)
+//   Saturday  -> Tuesday (+3), Wednesday (+4)
+const CALC_CYCLE_OFFSETS = { 1: [3, 4], 3: [3, 5], 6: [3, 4] };   // JS getDay(): Mon=1, Wed=3, Sat=6
+
+function addDaysIso(baseIso, n) {
+  const d = new Date(baseIso + "T00:00:00");
+  d.setDate(d.getDate() + n);
+  return iso(d);
+}
+
+// The next several valid calculation days (Mon/Wed/Sat), starting today if
+// today itself qualifies — so opening the screen on a Monday morning
+// doesn't force scrolling past it to find it.
+function nextCalcDates(n) {
+  const out = [];
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  while (out.length < n) {
+    if (CALC_CYCLE_OFFSETS[d.getDay()]) out.push(iso(d));
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
+}
+
+function poultryWindowFor(calcDateIso) {
+  const dow = new Date(calcDateIso + "T00:00:00").getDay();
+  const offsets = CALC_CYCLE_OFFSETS[dow];
+  if (!offsets) return null;              // shouldn't happen — the select only offers valid days
+  return offsets.map(n => addDaysIso(calcDateIso, n));
+}
+
+function calcDayLabel(calcDateIso) {
+  const d = new Date(calcDateIso + "T00:00:00");
+  return d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" });
+}
+
+// Pure aggregation, no DOM — takes the Restaurant orders for one delivery
+// window and turns them into birds needed per bird line (species + variant,
+// e.g. "Chicken / Red Label" or "Duck / Moscovy/Barbary female"), each
+// broken down by cut. Kept separate from rendering so it can be tested
+// directly against fixture data.
+//
+// The leg is the one place a single physical part can fill two different
+// kinds of order (see the process doc's "leg is a shared pool" note): a
+// whole-leg order consumes one leg, a thigh order and a drumstick order
+// together also consume one leg (split), so thigh and drumstick pieces are
+// pooled and only the LARGER of the two drives how many legs get split —
+// the smaller side's shortfall becomes spare thigh or spare drumstick,
+// which is exactly the leftover-parts problem this v1 doesn't solve yet,
+// so it's surfaced here as a number rather than hidden.
+function aggregatePoultryDemand(orders) {
+  const groups = new Map();          // "species|variant" -> { species, variant, cuts: Map }
+  const uncounted = [];              // real demand this can't turn into a bird count
+  const tbcLines = [];
+
+  for (const o of (orders || [])) {
+    for (const l of (o.sale_order_lines || [])) {
+      if (l.quantity_tbc) {
+        tbcLines.push({ customer: o.customer_name, product: (l.order_products && l.order_products.name) || l.product_name || "—" });
+        continue;
+      }
+      const qty = Number(l.quantity);
+      if (!qty) continue;
+
+      const op  = l.order_products;
+      const cyr = op && op.cut_yield_reference;
+      const productName = (op && op.name) || l.product_name || "—";
+
+      if (!cyr) {
+        uncounted.push({ customer: o.customer_name, product: productName, unit: l.unit, quantity: qty, reason: "not linked to a yield weight yet" });
+        continue;
+      }
+
+      let pieces;
+      if (l.unit === "Kg")         pieces = (qty * 1000) / cyr.piece_weight_g;
+      else if (l.unit === "Grams") pieces = qty / cyr.piece_weight_g;
+      else if (l.unit === "Pcs")   pieces = qty;
+      else {
+        uncounted.push({ customer: o.customer_name, product: productName, unit: l.unit, quantity: qty, reason: `"${l.unit}" can't convert to a piece count` });
+        continue;
+      }
+
+      const groupKey = cyr.species + "|" + cyr.variant;
+      if (!groups.has(groupKey)) groups.set(groupKey, { species: cyr.species, variant: cyr.variant, cuts: new Map() });
+      const group = groups.get(groupKey);
+
+      const cutKey = cyr.leg_pool_group ? "pool:" + cyr.leg_pool_group : cyr.cut_name;
+      if (!group.cuts.has(cutKey)) {
+        group.cuts.set(cutKey, cyr.leg_pool_group
+          ? { pooled: true, label: "Leg (whole + thigh/drumstick, pooled)", parts: new Map() }
+          : { pooled: false, label: cyr.cut_name, paired: cyr.paired, pieces: 0 });
+      }
+      const cut = group.cuts.get(cutKey);
+      if (cut.pooled) {
+        cut.parts.set(cyr.cut_name, (cut.parts.get(cyr.cut_name) || 0) + pieces);
+      } else {
+        cut.pieces += pieces;
+      }
+    }
+  }
+
+  const groupList = [];
+  for (const g of groups.values()) {
+    const cuts = [];
+    let recommendedBirds = 0, bottleneck = null;
+    for (const cut of g.cuts.values()) {
+      let birds, detail;
+      if (cut.pooled) {
+        const whole = cut.parts.get("Leg (whole)") || 0;
+        const thigh = cut.parts.get("Thigh") || 0;
+        const drum  = cut.parts.get("Drumstick") || 0;
+        const legsNeeded = whole + Math.max(thigh, drum);
+        birds = Math.ceil(legsNeeded / 2);
+        detail = { whole, thigh, drum, spare: Math.abs(thigh - drum), spareCut: thigh > drum ? "thigh" : (drum > thigh ? "drumstick" : null) };
+      } else {
+        birds = Math.ceil(cut.pieces / (cut.paired ? 2 : 1));
+        detail = { pieces: cut.pieces };
+      }
+      cuts.push({ label: cut.label, birds, detail });
+      if (birds > recommendedBirds) { recommendedBirds = birds; bottleneck = cut.label; }
+    }
+    groupList.push({ species: g.species, variant: g.variant, cuts, recommendedBirds, bottleneck });
+  }
+  groupList.sort((a, b) => (a.species + a.variant).localeCompare(b.species + b.variant));
+
+  return { groups: groupList, uncounted, tbcLines };
+}
+
+async function loadCalculator() {
+  if (!calcDaySelect.options.length) {
+    nextCalcDates(6).forEach(d => {
+      const opt = document.createElement("option");
+      opt.value = d; opt.textContent = calcDayLabel(d);
+      calcDaySelect.appendChild(opt);
+    });
+  }
+  const calcDay = calcDaySelect.value || calcDaySelect.options[0].value;
+  calcDaySelect.value = calcDay;
+  const deliveryDates = poultryWindowFor(calcDay);
+
+  calcWindowEl.textContent = "Covers deliveries: " +
+    deliveryDates.map(d => shortDate(d) + " (" + dayName(d) + ")").join(", ");
+  calcResultsEl.innerHTML = `<p class="empty-cell">Loading…</p>`;
+
+  const { data, error } = await sb.from("sale_orders")
+    .select("customer_name, sale_order_lines(product_id, product_name, quantity, quantity_tbc, unit, " +
+            "order_products(name, cut_yield_id, cut_yield_reference(species, variant, cut_name, piece_weight_g, paired, leg_pool_group)))")
+    .eq("channel", "Restaurant")
+    .in("delivery_date", deliveryDates);
+
+  if (error) {
+    calcResultsEl.innerHTML = `<p class="empty-cell">Couldn't load orders: ${escapeHtml(error.message)}</p>`;
+    return;
+  }
+
+  renderCalculatorResults(aggregatePoultryDemand(data || []));
+}
+
+function renderCalculatorResults(result) {
+  if (!result.groups.length) {
+    calcResultsEl.innerHTML = `<p class="empty-cell">No Restaurant orders with a linked yield weight fall in this delivery window yet.</p>`;
+  } else {
+    calcResultsEl.innerHTML = result.groups.map(g => `
+      <div class="calc-card">
+        <div class="calc-card-head">
+          <h4>${escapeHtml(g.species)} — ${escapeHtml(g.variant)}</h4>
+          <div class="calc-recommend">
+            <strong>${g.recommendedBirds}</strong> bird${g.recommendedBirds === 1 ? "" : "s"} to slaughter
+            <span class="muted-code">bottleneck: ${escapeHtml(g.bottleneck || "—")}</span>
+          </div>
+        </div>
+        <table class="calc-cuts-table">
+          <thead><tr><th>Cut</th><th>Birds needed</th><th>Detail</th></tr></thead>
+          <tbody>
+            ${g.cuts.map(c => `
+              <tr class="${c.label === g.bottleneck ? "calc-bottleneck" : ""}">
+                <td>${escapeHtml(c.label)}</td>
+                <td class="num">${c.birds}</td>
+                <td class="muted-code">${
+                  c.detail.pieces !== undefined
+                    ? `${c.detail.pieces.toFixed(1)} pieces ordered`
+                    : `${c.detail.whole.toFixed(1)} whole-leg, ${c.detail.thigh.toFixed(1)} thigh, ${c.detail.drum.toFixed(1)} drumstick` +
+                      (c.detail.spare > 0.05 ? ` — ~${c.detail.spare.toFixed(1)} spare ${c.detail.spareCut} once split` : "")
+                }</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+        <p class="calc-note">Every other cut on this bird line comes along with these ${g.recommendedBirds} birds regardless of whether it was ordered — cuts below the bottleneck will have surplus after this run.</p>
+      </div>`).join("");
+  }
+
+  const notes = [];
+  if (result.tbcLines.length) {
+    notes.push(`<div class="calc-flag"><strong>${result.tbcLines.length} standing-order line${result.tbcLines.length === 1 ? "" : "s"} still TBC</strong> in this window — not included above until sale support confirms a quantity: ` +
+      result.tbcLines.map(l => `${escapeHtml(l.customer)} (${escapeHtml(l.product)})`).join(", ") + `</div>`);
+  }
+  if (result.uncounted.length) {
+    notes.push(`<div class="calc-flag"><strong>${result.uncounted.length} line${result.uncounted.length === 1 ? "" : "s"} not included</strong> in the count above: ` +
+      result.uncounted.map(u => `${escapeHtml(u.customer)} — ${escapeHtml(u.product)}, ${u.quantity} ${escapeHtml(u.unit || "")} (${escapeHtml(u.reason)})`).join("; ") + `</div>`);
+  }
+  calcResultsEl.innerHTML += notes.join("");
+}
+
+calcDaySelect.addEventListener("change", loadCalculator);
 
 // ------------------------------------------------------------------- wiring
 document.getElementById("channel-tabs").addEventListener("click", async (e) => {
