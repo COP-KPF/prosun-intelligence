@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Klong Phai Farm CRM</title>
-<link rel="stylesheet" href="styles.css?v=20260906-0519" />
+<link rel="stylesheet" href="styles.css?v=20260906-0605" />
 </head>
 <body>
 
@@ -34,7 +34,10 @@
   <!-- ============ APP SHELL ============ -->
   <div id="app-screen" class="hidden">
     <header class="app-header">
-      <strong id="app-title">Klong Phai Farm CRM</strong>
+      <div class="brand">
+        <strong id="app-title">Klong Phai Farm CRM</strong>
+        <span class="brand-sub" id="app-subtitle"></span>
+      </div>
       <div class="who">
         <span id="who-name"></span> — <span id="who-role"></span>
         &nbsp;·&nbsp;
@@ -156,6 +159,9 @@
             <button type="button" id="week-next" aria-label="Next week">&rsaquo;</button>
             <button type="button" class="btn-link" id="week-this">This week</button>
           </div>
+          <span class="live-status" id="live-status" title="Orders entered by your colleagues appear here without reloading">
+            <span class="live-dot" id="live-dot"></span><span id="live-text">connecting…</span>
+          </span>
           <div class="orders-toolbar-right">
             <button type="button" class="btn-secondary" id="export-orders-btn">Export to Excel</button>
             <button type="button" class="btn-secondary hidden" id="new-order-btn">+ New order</button>
@@ -300,8 +306,16 @@
         <div class="error-text" id="order-error"></div>
       </div>
 
-      <p class="note" id="role-note"></p>
     </main>
+
+    <footer class="page-footer">
+      <p class="note" id="role-note"></p>
+      <p class="confidential-note">
+        Confidential — customer orders, quantities and delivery details for
+        Prosun Farm and Prosun Food. For internal use by the people named on
+        this system only. Do not copy, forward or share outside the company.
+      </p>
+    </footer>
   </div>
 
   <!-- ============ ADD/EDIT MODAL ============ -->
@@ -490,7 +504,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
   <!-- Quotation notification email — see config.js for one-time setup -->
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-  <script src="config.js?v=20260906-0519"></script>
-  <script src="app.js?v=20260906-0519"></script>
+  <script src="config.js?v=20260906-0605"></script>
+  <script src="app.js?v=20260906-0605"></script>
 </body>
 </html>

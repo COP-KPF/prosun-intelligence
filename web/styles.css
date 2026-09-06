@@ -611,3 +611,86 @@ tr.clickable-row:hover { background: #fafbfc; cursor: pointer; }
 #orders-grid th.line-col:nth-of-type(2) { min-width: 230px; }
 #orders-grid td.hdr-col:nth-child(6),
 #orders-grid th.hdr-col:nth-child(6) { min-width: 150px; }
+
+/* --- brand + live status ------------------------------------------------- */
+.brand { display: flex; flex-direction: column; line-height: 1.15; }
+.brand-sub {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.live-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--muted);
+  flex: 0 0 auto;
+}
+.live-status.is-live .live-dot { background: var(--accent); }
+.live-status.is-live .live-dot { animation: live-pulse 2.4s ease-in-out infinite; }
+.live-status.is-down .live-dot { background: var(--danger); }
+@keyframes live-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(47,111,79,0.45); }
+  50%      { box-shadow: 0 0 0 4px rgba(47,111,79,0); }
+}
+
+/* A colleague's order arriving is worth noticing, not startling. */
+@keyframes row-arrive {
+  from { background: #eaf4ee; }
+  to   { background: transparent; }
+}
+#orders-grid tr.just-arrived td { animation: row-arrive 2.5s ease-out; }
+
+.confidential-note {
+  font-style: italic;
+  font-size: 0.78rem;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 14px;
+  max-width: 720px;
+  line-height: 1.5;
+}
+
+/* --- full-width order book ------------------------------------------------
+   The CRM is a reading view and stays comfortably centred at 1100px. The
+   order book is a working grid of 15 columns that people scan across all
+   day, so on the PACE side the page gives it the whole screen. */
+body.pace-mode main {
+  max-width: none;
+  padding: 20px 20px 8px;
+}
+body.pace-mode .table-scroll { margin: 0; }
+body.pace-mode #orders-grid { width: 100%; }
+
+/* Both notices sit together at the foot of the page, out of the way of the
+   grid but always present. */
+.page-footer {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 8px 24px 32px;
+}
+body.pace-mode .page-footer { max-width: none; padding: 8px 20px 32px; }
+.page-footer .note,
+.page-footer .confidential-note {
+  font-style: italic;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.55;
+  margin: 0 0 6px;
+  max-width: 900px;
+}
+.page-footer .confidential-note {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 10px;
+}

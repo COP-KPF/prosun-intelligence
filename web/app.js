@@ -247,6 +247,9 @@ tabProductsBtn.addEventListener("click", () => switchAdminView("products"));
 
 async function switchAdminView(view) {
   adminView = view;
+  document.getElementById("app-title").textContent = "Klong Phai Farm CRM";
+  document.getElementById("app-subtitle").textContent = "";
+  document.body.classList.remove("pace-mode");   // the CRM reads better centred
   hidePaceSections();
   tabOrdersBtn.classList.remove("active");
   tabAllBtn.classList.toggle("active", view === "all");
@@ -1602,12 +1605,15 @@ function hideCrmSections() {
 
 // Sale support, purchasing and production never see the CRM at all.
 function setupPaceRole() {
+  document.body.classList.add("pace-mode");
   hideCrmSections();
   // Only admin needs this row, to move between PACE and the CRM. For the PACE
   // roles it would be a single tab pointing at the page they are already on.
   paceTabs.classList.add("hidden");
   tabOrdersBtn.classList.add("active");
   document.getElementById("app-title").textContent = "PROSUN PACE";
+  document.getElementById("app-subtitle").textContent =
+    "Performance · Accountability · Coordination · Execution";
 
   const note = document.getElementById("role-note");
   if (myProfile.role === "sale_support") {
@@ -1623,6 +1629,10 @@ async function switchPaceView(view) {
   paceView = view;
   if (myProfile.role === "admin") {
     // Admin keeps both tab rows; moving to PACE closes the CRM sections.
+    document.getElementById("app-title").textContent = "PROSUN PACE";
+    document.getElementById("app-subtitle").textContent =
+      "Performance · Accountability · Coordination · Execution";
+    document.body.classList.add("pace-mode");
     hideCrmSections();
     adminTabs.classList.remove("hidden");
     paceTabs.classList.remove("hidden");
@@ -1638,7 +1648,7 @@ async function switchPaceView(view) {
   document.getElementById("new-order-btn")
     .classList.toggle("hidden", !canEnter || view !== "orders" || currentChannel === "all");
 
-  if (view === "orders") await loadOrders();
+  if (view === "orders") { await loadOrders(); startRealtime(); }
 }
 
 document.getElementById("new-order-btn").addEventListener("click", openOrderEntry);
@@ -1844,13 +1854,14 @@ function dayName(s) {
 }
 
 // ------------------------------------------------------------------ loading
-async function loadOrders() {
+async function loadOrders(opts) {
+  const silent = opts && opts.silent;      // a refresh nobody asked for
   if (!weekMonday) weekMonday = mondayOf(new Date());
   const { from, to } = weekBounds(weekMonday);
   weekLabel.textContent = weekLabelText(weekMonday);
   document.getElementById("list-title").textContent =
     `Order Entry — ${currentChannel === "all" ? "All channels" : currentChannel}, week of ${weekLabelText(weekMonday)}`;
-  ordersGridBody.innerHTML = `<tr><td colspan="16">Loading...</td></tr>`;
+  if (!silent) ordersGridBody.innerHTML = `<tr><td colspan="16">Loading...</td></tr>`;
 
   if (!Object.keys(paceUserNames).length) {
     const { data: users } = await sb.from("profiles").select("id, full_name");
@@ -1876,6 +1887,22 @@ async function loadOrders() {
   orderListState = data || [];
   await renderTypeHint();
   renderOrdersGrid();
+  // First load establishes the baseline; after that, anything unseen came
+  // from a colleague and is worth a brief highlight.
+  const seenBefore = knownOrderIds.size > 0;
+  const arrived = orderListState.filter(o => !knownOrderIds.has(o.id)).map(o => o.id);
+  orderListState.forEach(o => knownOrderIds.add(o.id));
+  if (seenBefore && arrived.length) highlightArrivals(arrived);
+}
+
+function highlightArrivals(ids) {
+  ids.forEach(id => {
+    ordersGridBody.querySelectorAll(`tr[data-order="${id}"]`)
+      .forEach(tr => {
+        tr.classList.add("just-arrived");
+        setTimeout(() => tr.classList.remove("just-arrived"), 2600);
+      });
+  });
 }
 
 // The mockup's hint line: how many products each Type offers on this channel,
@@ -1972,11 +1999,11 @@ function renderOrdersGrid() {
       : `<td class="line-col empty-cell" colspan="7">No product lines on this order yet.</td>`;
 
     const rows = bodyRows.map((l, i) =>
-      `<tr class="order-line${zebra}${i === 0 ? " order-first" : ""}">${i === 0 ? headerCells : ""}${lineRow(l)}</tr>`
+      `<tr class="order-line${zebra}${i === 0 ? " order-first" : ""}" data-order="${o.id}">${i === 0 ? headerCells : ""}${lineRow(l)}</tr>`
     );
 
     if (canEnter) {
-      rows.push(`<tr class="order-line add-line-row${zebra}">
+      rows.push(`<tr class="order-line add-line-row${zebra}" data-order="${o.id}">
         <td class="line-col" colspan="7">
           <button type="button" class="btn-link add-line" data-order="${o.id}">+ Add product line</button>
         </td></tr>`);
@@ -2096,6 +2123,67 @@ document.getElementById("week-this").addEventListener("click", async () => {
 });
 document.getElementById("order-search").addEventListener("input", renderOrdersGrid);
 document.getElementById("export-orders-btn").addEventListener("click", exportOrdersXlsx);
+
+
+// ------------------------------------------------------------- live updates
+// Jane, Tod and Nam work the same order book. A spreadsheet makes that a
+// queue — one person has the file, the others wait. Here a colleague's order
+// simply appears. Row Level Security still applies to the stream, so a client
+// is only sent changes to rows it could already read.
+let realtimeChannel = null;
+let refreshTimer = null;
+let knownOrderIds = new Set();
+
+function setLiveStatus(state, detail) {
+  const wrap = document.getElementById("live-status");
+  const text = document.getElementById("live-text");
+  if (!wrap || !text) return;
+  wrap.classList.toggle("is-live", state === "live");
+  wrap.classList.toggle("is-down", state === "down");
+  text.textContent = detail;
+}
+
+function stamp() {
+  return new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+function startRealtime() {
+  if (realtimeChannel) return;
+  // Live updates are a convenience, never a dependency. If the websocket API
+  // is missing or refuses to start, the order book must still work — it just
+  // stops refreshing by itself.
+  if (typeof sb.channel !== "function") {
+    setLiveStatus("down", "Live updates unavailable · reload to refresh");
+    return;
+  }
+  try {
+  realtimeChannel = sb
+    .channel("pace-order-book")
+    .on("postgres_changes", { event: "*", schema: "public", table: "sale_orders" }, onRemoteChange)
+    .on("postgres_changes", { event: "*", schema: "public", table: "sale_order_lines" }, onRemoteChange)
+    .subscribe((status) => {
+      if (status === "SUBSCRIBED") setLiveStatus("live", "Live · updated " + stamp());
+      else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT")
+        // Not fatal: the book still works, it just stops updating by itself.
+        setLiveStatus("down", "Offline · reload to refresh");
+      else setLiveStatus("", "connecting…");
+    });
+  } catch (e) {
+    realtimeChannel = null;
+    setLiveStatus("down", "Live updates unavailable · reload to refresh");
+  }
+}
+
+// Several rows usually change at once (an order plus its lines), so wait for
+// the burst to finish rather than reloading per row.
+function onRemoteChange() {
+  if (!orderEntrySection.classList.contains("hidden")) return;   // don't yank the form
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(async () => {
+    await loadOrders({ silent: true });
+    setLiveStatus("live", "Live · updated " + stamp());
+  }, 800);
+}
 
 // Started last, once every section above has been declared.
 init();
