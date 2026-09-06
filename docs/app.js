@@ -1202,9 +1202,8 @@ const orderEntrySection  = document.getElementById("order-entry-section");
 const orderLinesBody     = document.getElementById("order-lines-body");
 const orderError         = document.getElementById("order-error");
 const calculatorSection  = document.getElementById("calculator-section");
-const calcDaySelect      = document.getElementById("calc-day");
-const calcWindowEl       = document.getElementById("calc-window");
-const calcResultsEl      = document.getElementById("calc-results");
+const calcCycleNavEl     = document.getElementById("calc-cycle-nav");
+const calcCyclesEl       = document.getElementById("calc-cycles");
 const oChannel           = document.getElementById("o-channel");
 
 // --------------------------------------------------------------- entry form
@@ -1697,7 +1696,7 @@ async function switchPaceView(view) {
   if (view === "orders") { await loadOrders(); startRealtime(); }
   else if (view === "calculator") {
     document.getElementById("list-title").textContent = "Poultry calculator";
-    await loadCalculator();
+    await loadCalculatorCycles();
   }
 }
 
@@ -1925,7 +1924,8 @@ async function loadOrders(opts) {
     // without them a standing order awaiting its number and a line nobody
     // filled in look identical on screen, and a product that is not on the
     // catalogue shows as nothing at all.
-    .select("*, sale_order_lines(id, type, product_id, product_name, description, weight_label, quantity, quantity_tbc, unit, packaging, order_products(name))")
+    .select("*, sale_order_lines(id, type, product_id, product_name, description, weight_label, quantity, quantity_tbc, unit, packaging, " +
+            "order_products(name, cut_yield_id, cut_yield_reference(species, variant, cut_name, piece_weight_g, paired, leg_pool_group)))")
     // An order normally belongs to the week it is delivered in; one entered
     // without a delivery date yet falls back to the week it was taken.
     .or(`and(delivery_date.gte.${from},delivery_date.lte.${to}),` +
@@ -2055,6 +2055,7 @@ function renderOrdersGrid() {
   }
 
   const canEnter = myProfile.role === "sale_support" || myProfile.role === "admin";
+  const upcomingDeliveryDates = upcomingCalcDeliveryDates();
 
   ordersGridBody.innerHTML = orders.map((o, idx) => {
     const lines = (o.sale_order_lines || []).slice();
@@ -2083,7 +2084,10 @@ function renderOrdersGrid() {
       // above editCell. Everything else on the order is theirs to fix.
       `<strong>${escapeHtml(o.customer_name || "—")}</strong>${
         o.customer_code ? ` <span class="muted-code">(${escapeHtml(o.customer_code)})</span>` : ""}${
-        o.pace_customer_id ? "" : ` <span class="unlinked" title="Not matched to a customer on the list">•</span>`}`,
+        o.pace_customer_id ? "" : ` <span class="unlinked" title="Not matched to a customer on the list">•</span>`}${
+        orderIsCalcCounted(o, upcomingDeliveryDates)
+          ? ` <span class="calc-star" title="Already counted in the upcoming poultry calculation">★</span>`
+          : ""}`,
       canEnter
         ? editCell("sale_orders", o.id, refField, refValue, { placeholder: "—" })
         : escapeHtml(refValue || "—"),
@@ -2366,17 +2370,28 @@ function addDaysIso(baseIso, n) {
   return iso(d);
 }
 
-// The next several valid calculation days (Mon/Wed/Sat), starting today if
-// today itself qualifies — so opening the screen on a Monday morning
-// doesn't force scrolling past it to find it.
-function nextCalcDates(n) {
-  const out = [];
+// The next occurrence of one specific weekly cycle (e.g. the next Monday,
+// today included if today qualifies) — so opening the screen on a calc-day
+// morning doesn't force scrolling past it to find it.
+function nextCalcDateForDow(dow) {
   const d = new Date(); d.setHours(0, 0, 0, 0);
-  while (out.length < n) {
-    if (CALC_CYCLE_OFFSETS[d.getDay()]) out.push(iso(d));
-    d.setDate(d.getDate() + 1);
-  }
-  return out;
+  while (d.getDay() !== dow) d.setDate(d.getDate() + 1);
+  return iso(d);
+}
+
+// All three weekly cycles' next occurrence, in chronological order — the
+// calculator shows all three on one page (Clément, 6 Sep: wanted to see
+// Monday's window plus what's already scheduled for the cycle after,
+// without switching a dropdown), and the order grid's "already counted"
+// star (below) needs the same set of dates to know what's upcoming.
+function upcomingCalcCycles() {
+  return Object.keys(CALC_CYCLE_OFFSETS)
+    .map(dow => nextCalcDateForDow(Number(dow)))
+    .sort()
+    .map(calcDate => ({ calcDate, dates: poultryWindowFor(calcDate) }));
+}
+function upcomingCalcDeliveryDates() {
+  return [...new Set(upcomingCalcCycles().flatMap(w => w.dates))];
 }
 
 function poultryWindowFor(calcDateIso) {
@@ -2527,34 +2542,51 @@ function aggregatePoultryDemand(orders, deliveryDates) {
   return { groups: groupList, uncounted, tbcLines };
 }
 
-async function loadCalculator() {
-  if (!calcDaySelect.options.length) {
-    nextCalcDates(6).forEach(d => {
-      const opt = document.createElement("option");
-      opt.value = d; opt.textContent = calcDayLabel(d);
-      calcDaySelect.appendChild(opt);
-    });
-  }
-  const calcDay = calcDaySelect.value || calcDaySelect.options[0].value;
-  calcDaySelect.value = calcDay;
-  const deliveryDates = poultryWindowFor(calcDay);
+function calcCycleSectionId(calcDateIso) { return "calc-cycle-" + calcDateIso; }
+function calcCycleResultsId(calcDateIso) { return "calc-cycle-results-" + calcDateIso; }
 
-  calcWindowEl.textContent = "Covers deliveries: " +
-    deliveryDates.map(d => shortDate(d) + " (" + dayName(d) + ")").join(", ");
-  calcResultsEl.innerHTML = `<p class="empty-cell">Loading…</p>`;
+function calcCycleSkeletonHtml(w) {
+  const coverage = w.dates.map(d => shortDate(d) + " (" + dayName(d) + ")").join(", ");
+  return `
+    <section class="calc-cycle" id="${calcCycleSectionId(w.calcDate)}">
+      <h3 class="calc-cycle-title">${escapeHtml(calcDayLabel(w.calcDate))}
+        <span class="muted-code">covers deliveries: ${escapeHtml(coverage)}</span>
+      </h3>
+      <div id="${calcCycleResultsId(w.calcDate)}"><p class="empty-cell">Loading…</p></div>
+    </section>`;
+}
 
+// Loads and renders all three upcoming calculation cycles (next Monday,
+// Wednesday and Saturday) on one page, so nothing needs a dropdown to see
+// what's already scheduled for the cycle after the one you're focused on.
+// One query covers every date across all three windows; each window's own
+// slice of that data is aggregated independently, so a shared slaughter
+// decision for one cycle never bleeds into another's numbers.
+async function loadCalculatorCycles() {
+  const cycles = upcomingCalcCycles();
+
+  calcCycleNavEl.innerHTML = cycles.map(w =>
+    `<a href="#${calcCycleSectionId(w.calcDate)}" class="calc-cycle-link">${escapeHtml(calcDayLabel(w.calcDate))}</a>`
+  ).join("");
+  calcCyclesEl.innerHTML = cycles.map(calcCycleSkeletonHtml).join("");
+
+  const allDates = [...new Set(cycles.flatMap(w => w.dates))];
   const { data, error } = await sb.from("sale_orders")
     .select("customer_name, delivery_date, sale_order_lines(product_id, product_name, quantity, quantity_tbc, unit, " +
             "order_products(name, cut_yield_id, cut_yield_reference(species, variant, cut_name, piece_weight_g, paired, leg_pool_group)))")
     .eq("channel", "Restaurant")
-    .in("delivery_date", deliveryDates);
+    .in("delivery_date", allDates);
 
   if (error) {
-    calcResultsEl.innerHTML = `<p class="empty-cell">Couldn't load orders: ${escapeHtml(error.message)}</p>`;
+    calcCyclesEl.innerHTML = `<p class="empty-cell">Couldn't load orders: ${escapeHtml(error.message)}</p>`;
     return;
   }
 
-  renderCalculatorResults(aggregatePoultryDemand(data || [], deliveryDates));
+  cycles.forEach(w => {
+    const ordersForWindow = (data || []).filter(o => w.dates.includes(o.delivery_date));
+    const target = document.getElementById(calcCycleResultsId(w.calcDate));
+    renderCalculatorResults(aggregatePoultryDemand(ordersForWindow, w.dates), target);
+  });
 }
 
 // One cut/detail table, reused for both a card's combined total and each
@@ -2579,11 +2611,11 @@ function calcCutsTableHtml(cuts, bottleneck) {
     </table>`;
 }
 
-function renderCalculatorResults(result) {
+function renderCalculatorResults(result, targetEl) {
   if (!result.groups.length) {
-    calcResultsEl.innerHTML = `<p class="empty-cell">No Restaurant orders with a linked yield weight fall in this delivery window yet.</p>`;
+    targetEl.innerHTML = `<p class="empty-cell">No Restaurant orders with a linked yield weight fall in this delivery window yet.</p>`;
   } else {
-    calcResultsEl.innerHTML = result.groups.map(g => {
+    targetEl.innerHTML = result.groups.map(g => {
       const dayBlocks = g.byDate.map(bd => {
         const cutsForDate = g.cuts.map(c => {
           const cd = c.byDate.find(x => x.date === bd.date);
@@ -2629,14 +2661,13 @@ function renderCalculatorResults(result) {
     notes.push(`<div class="calc-flag"><strong>${result.uncounted.length} line${result.uncounted.length === 1 ? "" : "s"} not included</strong> in the count above: ` +
       result.uncounted.map(u => `${escapeHtml(u.customer)} — ${escapeHtml(u.product)}, ${u.quantity} ${escapeHtml(u.unit || "")} (${escapeHtml(u.reason)})`).join("; ") + `</div>`);
   }
-  calcResultsEl.innerHTML += notes.join("");
+  targetEl.innerHTML += notes.join("");
 }
 
-calcDaySelect.addEventListener("change", loadCalculator);
-
 // Click (or Enter/Space) on a card's header reveals that species/variant's
-// birds-needed-per-delivery-day breakdown. Delegated since cards are
-// rebuilt wholesale on every loadCalculator() call.
+// birds-needed-per-delivery-day breakdown. Delegated on the whole
+// calc-cycles container since every cycle's cards are rebuilt wholesale on
+// every loadCalculatorCycles() call.
 function toggleCalcDaybreak(head) {
   const card = head.closest(".calc-card");
   const daybreak = card && card.querySelector(".calc-daybreak");
@@ -2645,17 +2676,37 @@ function toggleCalcDaybreak(head) {
   head.classList.toggle("is-open", nowOpen);
   head.setAttribute("aria-expanded", String(nowOpen));
 }
-calcResultsEl.addEventListener("click", (e) => {
+calcCyclesEl.addEventListener("click", (e) => {
   const head = e.target.closest("[data-calc-toggle]");
   if (head) toggleCalcDaybreak(head);
 });
-calcResultsEl.addEventListener("keydown", (e) => {
+calcCyclesEl.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" && e.key !== " ") return;
   const head = e.target.closest("[data-calc-toggle]");
   if (!head) return;
   e.preventDefault();
   toggleCalcDaybreak(head);
 });
+
+// -------------------------------------------------------- order-grid star
+// Clément, 6 Sep: wants orders that have already been accounted for in the
+// upcoming poultry calculation visibly marked in the order book, so sale
+// support can tell at a glance which orders' birds are already covered by
+// a scheduled slaughter run. Deliberately NOT a stored flag — it's the same
+// question the calculator itself answers each time it runs (does this line
+// convert to a piece count right now?), computed live so the star can never
+// drift out of sync with what the calculator would actually say.
+function lineCountsForCalculator(l) {
+  if (l.quantity_tbc) return false;
+  if (!Number(l.quantity)) return false;
+  if (!(l.order_products && l.order_products.cut_yield_reference)) return false;
+  return l.unit === "Kg" || l.unit === "Grams" || l.unit === "Pcs";
+}
+function orderIsCalcCounted(o, upcomingDeliveryDates) {
+  if (o.channel !== "Restaurant") return false;
+  if (!upcomingDeliveryDates.includes(o.delivery_date)) return false;
+  return (o.sale_order_lines || []).some(lineCountsForCalculator);
+}
 
 // ------------------------------------------------------------------- wiring
 document.getElementById("channel-tabs").addEventListener("click", async (e) => {

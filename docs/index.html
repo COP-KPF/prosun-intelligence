@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Klong Phai Farm CRM</title>
-<link rel="stylesheet" href="styles.css?v=20260906-1815" />
+<link rel="stylesheet" href="styles.css?v=20260906-1930" />
 </head>
 <body>
 
@@ -338,17 +338,11 @@
            many birds to slaughter, the same arithmetic Clément does by hand
            today, using the weekly cycle from the process doc. -->
       <div id="calculator-section" class="hidden">
-        <p class="orders-sub">Restaurant channel only for now — Department Store, Individual and Retail aren&rsquo;t linked to a yield weight yet. This is the bird count only; matching it against what's left over after cutting is a later step.</p>
+        <p class="orders-sub">Restaurant channel only for now — Department Store, Individual and Retail aren&rsquo;t linked to a yield weight yet. This is the bird count only; matching it against what's left over after cutting is a later step. All three upcoming calculation days — Monday, Wednesday and Saturday — are shown below.</p>
 
-        <div class="calc-toolbar">
-          <div class="fld">
-            <label for="calc-day">Calculation day</label>
-            <select id="calc-day"></select>
-          </div>
-          <div class="calc-window" id="calc-window"></div>
-        </div>
+        <nav class="calc-cycle-nav" id="calc-cycle-nav"></nav>
 
-        <div id="calc-results"></div>
+        <div id="calc-cycles"></div>
       </div>
 
     </main>
@@ -549,7 +543,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
   <!-- Quotation notification email — see config.js for one-time setup -->
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-  <script src="config.js?v=20260906-1815"></script>
-  <script src="app.js?v=20260906-1815"></script>
+  <script src="config.js?v=20260906-1930"></script>
+  <script src="app.js?v=20260906-1930"></script>
 </body>
 </html>

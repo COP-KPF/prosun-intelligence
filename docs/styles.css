@@ -785,12 +785,25 @@ body.pace-mode .page-footer { max-width: none; padding: 8px 20px 32px; }
 @media (max-width: 620px) { .system-cards { grid-template-columns: 1fr; } }
 
 /* --- poultry calculator --------------------------------------------------- */
-.calc-toolbar {
-  display: flex; align-items: flex-end; gap: 20px; flex-wrap: wrap;
-  margin-bottom: 18px;
+.calc-cycle-nav {
+  display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px;
 }
-.calc-toolbar .fld { max-width: 260px; }
-.calc-window { color: var(--muted); font-size: 0.88rem; padding-bottom: 9px; }
+.calc-cycle-link {
+  display: inline-block; padding: 6px 12px; border: 1px solid var(--border);
+  border-radius: 999px; font-size: 0.82rem; color: var(--text); text-decoration: none;
+  background: var(--panel);
+}
+.calc-cycle-link:hover { background: #f7f8fa; }
+
+.calc-cycle { margin-bottom: 32px; }
+.calc-cycle:last-child { margin-bottom: 0; }
+.calc-cycle-title {
+  font-size: 1.05rem; margin: 0 0 14px; padding-bottom: 8px;
+  border-bottom: 2px solid var(--border);
+}
+.calc-cycle-title .muted-code { display: block; font-size: 0.78rem; font-weight: 400; margin-top: 3px; }
+
+.calc-star { color: #c98a00; font-size: 0.85em; }
 
 .calc-card {
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
