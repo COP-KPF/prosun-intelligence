@@ -606,6 +606,37 @@ tr.clickable-row:hover { background: #fafbfc; cursor: pointer; }
 .add-line-row td { border-bottom: 1px solid var(--border) !important; }
 .add-line-row .btn-link { font-size: 0.8rem; }
 
+/* Inline editing for sale support: a cell looks like plain text until it's
+   focused, so a grid full of writable cells doesn't read as a form. */
+#orders-grid .cell-edit {
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  padding: 2px 4px;
+  border-radius: 4px;
+  resize: none;
+}
+#orders-grid textarea.cell-edit { min-height: 2.4em; }
+#orders-grid .cell-edit:hover { background: #f4f6f5; }
+#orders-grid .cell-edit:focus {
+  background: #fff;
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(47, 111, 79, 0.15);
+}
+#orders-grid .cell-edit.cell-saving { opacity: 0.6; }
+#orders-grid .cell-edit.cell-saved {
+  background: #eaf6ee;
+  border-color: var(--accent);
+  transition: background 1s ease;
+}
+#orders-grid .cell-edit.cell-error {
+  background: #fdecea;
+  border-color: #c0392b;
+}
+
 .type-pill {
   display: inline-block; padding: 2px 7px; border-radius: 999px;
   font-size: 0.7rem; background: #eef1f6; color: #445; white-space: nowrap;

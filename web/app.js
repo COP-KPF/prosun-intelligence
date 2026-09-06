@@ -678,6 +678,20 @@ function escapeHtml(str) {
   return d.innerHTML;
 }
 
+// escapeHtml is for text NODES — it never escapes a quote, because a quote
+// means nothing between tags. Inside an attribute (value="...") it does mean
+// something: an unescaped " in a delivery note or PO number would close the
+// attribute early and corrupt the row's markup. Used only where a value is
+// written into an attribute rather than between tags.
+function escapeAttr(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 // -------------------------------------------------------------- edit modal
 const modal = document.getElementById("edit-modal");
 const editForm = document.getElementById("edit-form");
@@ -1963,6 +1977,41 @@ const HEADER_COLS = [
 ];
 const LINE_COLS = ["Type", "Product", "Weight spec", "Qty", "Unit", "Description", "Packaging"];
 
+// -------------------------------------------------- editable grid cells
+// Clément, 6 Sep 2026: sale support should be able to fix a delivery note or
+// a quantity directly in the table, the way they could in the spreadsheet,
+// rather than only ever adding a new line. Client identity (name/code) and a
+// line's Type/Product stay locked even here — both are matched against a
+// directory (pace_customers, order_products) by the app, and a typo typed
+// straight into the grid would silently break that match instead of visibly
+// failing the way picking from a list does.
+//
+// One writable cell: `table`/`rowId`/`field` say what a change should update.
+// The original value is stashed in data-orig so a blur with nothing changed
+// never issues a write, and Escape can restore it without a round trip.
+function editCell(table, rowId, field, value, opts) {
+  opts = opts || {};
+  const type = opts.type || "text";
+  const v = escapeAttr(value ?? "");
+  const ph = opts.placeholder ? ` placeholder="${escapeAttr(opts.placeholder)}"` : "";
+  const attrs = `class="cell-edit" data-table="${table}" data-row-id="${rowId}" data-field="${field}" data-orig="${v}"`;
+  if (opts.multiline) {
+    return `<textarea ${attrs} rows="2"${ph}>${escapeHtml(value ?? "")}</textarea>`;
+  }
+  return `<input ${attrs} type="${type}" value="${v}"${ph}>`;
+}
+
+// Unit is constrained by a database check (Kg/Pcs/Grams/Pack/Jar) — free text
+// could be rejected outright, so this is a dropdown of exactly those values
+// rather than an input box.
+function editSelect(table, rowId, field, value, options) {
+  const v = value ?? "";
+  const optHtml = ["", ...options].map(o =>
+    `<option value="${escapeAttr(o)}"${o === v ? " selected" : ""}>${o || "—"}</option>`
+  ).join("");
+  return `<select class="cell-edit" data-table="${table}" data-row-id="${rowId}" data-field="${field}" data-orig="${escapeAttr(v)}">${optHtml}</select>`;
+}
+
 function renderOrdersGrid() {
   const term = document.getElementById("order-search").value.trim().toLowerCase();
   const showChannel = currentChannel === "all";
@@ -2002,25 +2051,50 @@ function renderOrdersGrid() {
     const span = bodyRows.length + (canEnter ? 1 : 0);
     const zebra = idx % 2 ? " order-alt" : "";
 
+    // PO / Order no. collapses two columns (po_number, order_number) into one
+    // cell for display. An edit has to land on whichever one is actually in
+    // use, or a PO typed in would silently create a second, separate field.
+    const refField = o.po_number ? "po_number" : (o.order_number ? "order_number" : "po_number");
+    const refValue = o.po_number || o.order_number || "";
+
     const headerCells = [
       ...(showChannel ? [`<span class="channel-pill channel-${o.channel.replace(/\s/g, "")}">${escapeHtml(o.channel)}</span>`] : []),
       // For a standing arrangement the date column holds the day the
       // arrangement began, not when this delivery was ordered. Saying so is
       // the difference between useful context and a date that looks stale.
+      // Not made editable here — changing it changes whether the order reads
+      // as standing at all, which deserves its own control, not a bare date.
       o.standing_since
         ? `<span class="muted-code">standing since</span><br>${shortDate(o.standing_since)}`
         : shortDate(o.order_date),
+      // Client identity stays locked even for sale support — see the note
+      // above editCell. Everything else on the order is theirs to fix.
       `<strong>${escapeHtml(o.customer_name || "—")}</strong>${
         o.customer_code ? ` <span class="muted-code">(${escapeHtml(o.customer_code)})</span>` : ""}${
         o.pace_customer_id ? "" : ` <span class="unlinked" title="Not matched to a customer on the list">•</span>`}`,
-      escapeHtml(o.po_number || o.order_number || "—"),
-      escapeHtml(o.chef_name || "—"),
-      escapeHtml(o.phone || "—"),
-      escapeHtml(o.delivery_address || "—"),
-      o.delivery_date
-        ? `${shortDate(o.delivery_date)}<span class="muted-code">, ${dayName(o.delivery_date)}</span>${
-            o.delivery_time ? `<br><span class="muted-code">${escapeHtml(String(o.delivery_time).slice(0, 5))}</span>` : ""}`
-        : "—",
+      canEnter
+        ? editCell("sale_orders", o.id, refField, refValue, { placeholder: "—" })
+        : escapeHtml(refValue || "—"),
+      canEnter
+        ? editCell("sale_orders", o.id, "chef_name", o.chef_name, { placeholder: "—" })
+        : escapeHtml(o.chef_name || "—"),
+      canEnter
+        ? editCell("sale_orders", o.id, "phone", o.phone, { placeholder: "—" })
+        : escapeHtml(o.phone || "—"),
+      canEnter
+        ? editCell("sale_orders", o.id, "delivery_address", o.delivery_address, { multiline: true, placeholder: "—" })
+        : escapeHtml(o.delivery_address || "—"),
+      canEnter
+        // Plain date/time inputs rather than the day-name formatting shown
+        // read-only below — changing the delivery date can move the order
+        // into a different week's view once the next refresh picks it up,
+        // which is correct (it belongs to that week now) but worth knowing.
+        ? `${editCell("sale_orders", o.id, "delivery_date", o.delivery_date, { type: "date" })}` +
+          `${editCell("sale_orders", o.id, "delivery_time", o.delivery_time ? String(o.delivery_time).slice(0, 5) : "", { type: "time" })}`
+        : (o.delivery_date
+            ? `${shortDate(o.delivery_date)}<span class="muted-code">, ${dayName(o.delivery_date)}</span>${
+                o.delivery_time ? `<br><span class="muted-code">${escapeHtml(String(o.delivery_time).slice(0, 5))}</span>` : ""}`
+            : "—"),
     ].map((html, i) => `<td class="hdr-col" rowspan="${span}">${html}</td>`).join("");
 
     const lineRow = (l) => l ? `
@@ -2031,13 +2105,35 @@ function renderOrdersGrid() {
           : l.product_name
             ? `${escapeHtml(l.product_name)} <span class="unlinked" title="Not on the product list — correct the name or add the product">•</span>`
             : "—"}</td>
-      <td class="line-col">${escapeHtml(l.weight_label || "—")}</td>
+      <td class="line-col">${
+        canEnter
+          ? editCell("sale_order_lines", l.id, "weight_label", l.weight_label, { placeholder: "—" })
+          : escapeHtml(l.weight_label || "—")}</td>
       <td class="line-col num">${
-        l.quantity_tbc ? `<span class="tbc-pill" title="Standing order — this week's quantity not confirmed yet">TBC</span>`
-                       : (l.quantity ?? "—")}</td>
-      <td class="line-col">${escapeHtml(l.unit || "—")}</td>
-      <td class="line-col">${escapeHtml(l.description || "—")}</td>
-      <td class="line-col">${escapeHtml(l.packaging || "—")}</td>`
+        canEnter
+          ? (l.quantity_tbc
+              // Left blank and untouched, this still reads and saves as
+              // "still TBC" — the input starts empty, and an unchanged blank
+              // never fires an update, so the flag survives until someone
+              // actually types a number.
+              ? `<span class="tbc-pill" title="Standing order — this week's quantity not confirmed yet">TBC</span>` +
+                editCell("sale_order_lines", l.id, "quantity", "", { type: "number", placeholder: "enter qty" })
+              : editCell("sale_order_lines", l.id, "quantity", l.quantity, { type: "number", placeholder: "—" }))
+          : (l.quantity_tbc
+              ? `<span class="tbc-pill" title="Standing order — this week's quantity not confirmed yet">TBC</span>`
+              : (l.quantity ?? "—"))}</td>
+      <td class="line-col">${
+        canEnter
+          ? editSelect("sale_order_lines", l.id, "unit", l.unit, ["Kg", "Pcs", "Grams", "Pack", "Jar"])
+          : escapeHtml(l.unit || "—")}</td>
+      <td class="line-col">${
+        canEnter
+          ? editCell("sale_order_lines", l.id, "description", l.description, { multiline: true, placeholder: "—" })
+          : escapeHtml(l.description || "—")}</td>
+      <td class="line-col">${
+        canEnter
+          ? editCell("sale_order_lines", l.id, "packaging", l.packaging, { placeholder: "—" })
+          : escapeHtml(l.packaging || "—")}</td>`
       : `<td class="line-col empty-cell" colspan="7">No product lines on this order yet.</td>`;
 
     const rows = bodyRows.map((l, i) =>
@@ -2063,6 +2159,98 @@ function renderOrdersGrid() {
     btn.addEventListener("click", () => addLineToExistingOrder(btn.dataset.order));
   });
 }
+
+// ------------------------------------------------------------ cell editing
+// A cell saves on blur, never on every keystroke, so tabbing through a row
+// that turns out fine never fires a write at all — data-orig (stashed by
+// editCell/editSelect) is the "did anything actually change" check.
+async function commitCellEdit(el) {
+  const table = el.dataset.table, rowId = el.dataset.rowId, field = el.dataset.field;
+  const orig = el.dataset.orig ?? "";
+  const raw = el.value;
+
+  // Quantity carries the TBC flag with it: a standing order left blank stays
+  // "still to come" (no write at all), but the moment a real number is
+  // typed, that flag clears — the rep confirming a number IS the signal that
+  // it is no longer unconfirmed.
+  if (field === "quantity") {
+    if (raw === "") {
+      if (orig === "") return;                     // untouched TBC row — nothing to save
+      el.value = orig;
+      flashCellError(el, "Quantity can't be blank");
+      return;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n)) { el.value = orig; flashCellError(el, "Not a number"); return; }
+    if (raw === orig) return;
+    const payload = { quantity: n };
+    if (orig === "") payload.quantity_tbc = false;
+    return saveCell(el, table, rowId, payload, String(n));
+  }
+
+  if (raw === orig) return;                          // unchanged — no network call at all
+  const value = raw.trim() === "" ? null : raw.trim();
+  return saveCell(el, table, rowId, { [field]: value }, value ?? "");
+}
+
+async function saveCell(el, table, rowId, payload, newOrig) {
+  el.classList.add("cell-saving");
+  const { error } = await sb.from(table).update(payload).eq("id", rowId);
+  el.classList.remove("cell-saving");
+  if (error) {
+    el.value = el.dataset.orig;
+    flashCellError(el, error.message || "Save failed");
+    return;
+  }
+  el.dataset.orig = newOrig;
+  applyLocalEdit(table, rowId, payload);
+  flashCellSaved(el);
+}
+
+function flashCellSaved(el) {
+  el.classList.add("cell-saved");
+  setTimeout(() => el.classList.remove("cell-saved"), 1200);
+}
+
+function flashCellError(el, message) {
+  el.classList.add("cell-error");
+  el.title = message;
+  setTimeout(() => { el.classList.remove("cell-error"); el.title = ""; }, 2500);
+}
+
+// Keeps orderListState correct right after a save, so the row the rep is
+// still sitting in — and the Excel export, and a later re-render — all see
+// the new value without waiting on the realtime round trip.
+function applyLocalEdit(table, rowId, payload) {
+  if (table === "sale_orders") {
+    const order = orderListState.find(x => x.id === rowId);
+    if (order) Object.assign(order, payload);
+  } else if (table === "sale_order_lines") {
+    for (const order of orderListState) {
+      const line = (order.sale_order_lines || []).find(x => x.id === rowId);
+      if (line) { Object.assign(line, payload); break; }
+    }
+  }
+}
+
+// Attached once to the container, not re-wired on every render — a render
+// replaces the rows inside ordersGridBody, but never ordersGridBody itself,
+// and blur does not bubble so this has to run in the capture phase.
+ordersGridBody.addEventListener("blur", (e) => {
+  if (e.target.classList && e.target.classList.contains("cell-edit")) commitCellEdit(e.target);
+}, true);
+
+ordersGridBody.addEventListener("keydown", (e) => {
+  const el = e.target;
+  if (!el.classList || !el.classList.contains("cell-edit")) return;
+  if (e.key === "Escape") {
+    el.value = el.dataset.orig ?? "";
+    el.blur();
+  } else if (e.key === "Enter" && el.tagName !== "TEXTAREA") {
+    e.preventDefault();               // Enter in a textarea is just a newline
+    el.blur();
+  }
+});
 
 // Adding a line to an order already on the sheet: the common case of a client
 // phoning back to add one more item, which today means finding their row block
@@ -2225,8 +2413,11 @@ function startRealtime() {
 // the burst to finish rather than reloading per row.
 function onRemoteChange() {
   if (!orderEntrySection.classList.contains("hidden")) return;   // don't yank the form
+  if (document.activeElement && document.activeElement.classList.contains("cell-edit")) return;
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(async () => {
+    // Check again — an edit may have started during the wait.
+    if (document.activeElement && document.activeElement.classList.contains("cell-edit")) return;
     await loadOrders({ silent: true });
     setLiveStatus("live", "Live · updated " + stamp());
   }, 800);
