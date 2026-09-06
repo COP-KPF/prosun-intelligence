@@ -155,6 +155,8 @@ async function onSignedIn() {
   setupForRole();
   if (PACE_ROLES.includes(myProfile.role)) {
     await switchPaceView("orders");
+  } else if (myProfile.role === "admin") {
+    showSystemChooser();
   } else {
     await loadClients();
   }
@@ -183,6 +185,8 @@ function setupForRole() {
     // per-sales-rep achievement summary — counts by stage plus won/open
     // pipeline value. Admin-only, same as the CEO-level visibility already
     // required for this role.
+    document.getElementById("switch-system-btn").classList.remove("hidden");
+    document.getElementById("who-sep").classList.remove("hidden");
     adminTabs.classList.remove("hidden");
     adminView = "all";
     tabAllBtn.classList.add("active");
@@ -192,8 +196,8 @@ function setupForRole() {
     note.textContent = "You see every record. Deal values and assignment are visible and editable.";
     assignedWrap.classList.remove("hidden");
     populateAssignedToDropdown();
-    // Admin is the only account that works on both sides, so both tab rows show.
-    paceTabs.classList.remove("hidden");
+    // The two systems are reached from the chooser, not from a shared tab row.
+    paceTabs.classList.add("hidden");
     tabOrdersBtn.classList.remove("active");
   } else if (myProfile.role === "director") {
     // Director gets two views: their own personal pipeline (targets/visits,
@@ -250,6 +254,7 @@ async function switchAdminView(view) {
   document.getElementById("app-title").textContent = "Klong Phai Farm CRM";
   document.getElementById("app-subtitle").textContent = "";
   document.body.classList.remove("pace-mode");   // the CRM reads better centred
+  adminTabs.classList.remove("hidden");
   hidePaceSections();
   tabOrdersBtn.classList.remove("active");
   tabAllBtn.classList.toggle("active", view === "all");
@@ -1628,14 +1633,13 @@ function setupPaceRole() {
 async function switchPaceView(view) {
   paceView = view;
   if (myProfile.role === "admin") {
-    // Admin keeps both tab rows; moving to PACE closes the CRM sections.
+    // Coming from the chooser: close the CRM side entirely.
     document.getElementById("app-title").textContent = "PROSUN PACE";
     document.getElementById("app-subtitle").textContent =
       "Performance · Accountability · Coordination · Execution";
     document.body.classList.add("pace-mode");
     hideCrmSections();
-    adminTabs.classList.remove("hidden");
-    paceTabs.classList.remove("hidden");
+    paceTabs.classList.add("hidden");   // one PACE view for now; nothing to tab between
     [tabAllBtn, tabSummaryBtn, tabProductsBtn].forEach(b => b.classList.remove("active"));
   }
   tabOrdersBtn.classList.toggle("active", view === "orders");
@@ -2184,6 +2188,45 @@ function onRemoteChange() {
     setLiveStatus("live", "Live · updated " + stamp());
   }, 800);
 }
+
+
+// ---------------------------------------------------------- choosing a side
+// Admin is the only account with both systems. Rather than defaulting into one
+// and hiding the other behind a tab, signing in asks — and the choice can be
+// changed at any time from the header.
+const systemChooser = document.getElementById("system-chooser");
+
+function showSystemChooser() {
+  hideCrmSections();
+  hidePaceSections();
+  paceTabs.classList.add("hidden");
+  adminTabs.classList.add("hidden");
+  document.querySelector(".toolbar").classList.add("hidden");
+  document.querySelector(".page-footer").classList.add("hidden");
+  document.body.classList.remove("pace-mode");
+  document.getElementById("app-title").textContent = "Klong Phai Farm";
+  document.getElementById("app-subtitle").textContent = "";
+  systemChooser.classList.remove("hidden");
+}
+
+async function openSystem(which) {
+  systemChooser.classList.add("hidden");
+  document.querySelector(".toolbar").classList.remove("hidden");
+  document.querySelector(".page-footer").classList.remove("hidden");
+  if (which === "pace") {
+    paceTabs.classList.remove("hidden");
+    await switchPaceView("orders");
+  } else {
+    adminTabs.classList.remove("hidden");
+    await switchAdminView("all");
+  }
+}
+
+document.querySelectorAll(".system-card").forEach(card => {
+  card.addEventListener("click", () => openSystem(card.dataset.system));
+});
+document.getElementById("switch-system-btn")
+  .addEventListener("click", showSystemChooser);
 
 // Started last, once every section above has been declared.
 init();

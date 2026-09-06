@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Klong Phai Farm CRM</title>
-<link rel="stylesheet" href="styles.css?v=20260906-0605" />
+<link rel="stylesheet" href="styles.css?v=20260906-0617" />
 </head>
 <body>
 
@@ -39,6 +39,8 @@
         <span class="brand-sub" id="app-subtitle"></span>
       </div>
       <div class="who">
+        <button class="btn-link hidden" id="switch-system-btn">Switch system</button>
+        <span id="who-sep" class="hidden">&nbsp;·&nbsp;</span>
         <span id="who-name"></span> — <span id="who-role"></span>
         &nbsp;·&nbsp;
         <button class="btn-link" id="sign-out-btn">Sign out</button>
@@ -46,6 +48,25 @@
     </header>
 
     <main>
+      <!-- Admin works on both sides, so rather than burying PACE in a tab row
+           among the CRM's own tabs, signing in asks which system to open.
+           Everyone else goes straight to the one system that is theirs. -->
+      <div id="system-chooser" class="hidden">
+        <h2 class="chooser-title">Choose a system</h2>
+        <p class="chooser-sub">You have access to both. You can switch at any time from the top of the page.</p>
+        <div class="system-cards">
+          <button type="button" class="system-card" data-system="crm">
+            <span class="system-card-name">Klong Phai Farm CRM</span>
+            <span class="system-card-desc">Clients, pipeline, team summary and quotations</span>
+          </button>
+          <button type="button" class="system-card" data-system="pace">
+            <span class="system-card-name">PROSUN PACE</span>
+            <span class="system-card-acronym">Performance · Accountability · Coordination · Execution</span>
+            <span class="system-card-desc">Order book and middle office</span>
+          </button>
+        </div>
+      </div>
+
       <div class="toolbar">
         <div>
           <h2 id="list-title">Your pipeline</h2>
@@ -504,7 +525,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
   <!-- Quotation notification email — see config.js for one-time setup -->
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-  <script src="config.js?v=20260906-0605"></script>
-  <script src="app.js?v=20260906-0605"></script>
+  <script src="config.js?v=20260906-0617"></script>
+  <script src="app.js?v=20260906-0617"></script>
 </body>
 </html>
