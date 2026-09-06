@@ -589,6 +589,20 @@ tr.clickable-row:hover { background: #fafbfc; cursor: pointer; }
 #orders-grid .empty-cell { color: var(--muted); font-style: italic; }
 #orders-grid .muted-code { color: var(--muted); font-weight: 400; font-size: 0.78rem; }
 #orders-grid .unlinked { color: #c08a2e; font-weight: 700; }
+
+/* A standing order whose quantity for this week is not settled yet. It has to
+   read as "still to come", not as a zero and not as an empty cell. */
+#orders-grid .tbc-pill {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  color: #8a5a00;
+  background: #fdf1d6;
+  border: 1px solid #e8c98a;
+}
 .add-line-row td { border-bottom: 1px solid var(--border) !important; }
 .add-line-row .btn-link { font-size: 0.8rem; }
 

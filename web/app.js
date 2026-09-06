@@ -1301,13 +1301,34 @@ async function addOrderLineRow(prefill) {
 // than one number — Clément, 5 Sep 2026: the point of capturing it is to buy
 // the right size of bird, not just the right number. Stored as typed, with the
 // band parsed out alongside so the poultry calculator can group demand by size.
+//
+// The columns are weight_min_kg / weight_max_kg, so the number has to be in
+// kilograms. September's sheets mix units freely — "1.6-1.7", "130-190 gr",
+// "300gr+", "3 kg+", and one "8pcs/pack" that is a piece count and not a
+// weight at all. Reading 190 gr as 190 kg would put a fillet at the weight of
+// a small car, and the poultry calculator would size the purchase from it.
 function parseWeightBand(text) {
   if (!text) return { label: null, min: null, max: null };
   const label = String(text).trim();
+  const low = label.toLowerCase();
+
+  // A piece count, not a weight.
+  if (/pcs|piece|pack/.test(low)) return { label, min: null, max: null };
+
   const nums = label.match(/\d+(?:[.,]\d+)?/g);
   if (!nums || !nums.length) return { label, min: null, max: null };
   const vals = nums.map(n => parseFloat(n.replace(",", ".")));
-  return { label, min: Math.min(...vals), max: Math.max(...vals) };
+  let min = Math.min(...vals), max = Math.max(...vals);
+
+  const isKg = /kg|กก|กิโล/.test(low);
+  const isG  = !isKg && /gr|gram|\bg\b|กรัม/.test(low);
+  // No unit written and a value above 20 cannot be kilograms of a poultry cut.
+  if (isG || (!isKg && max > 20)) { min = min / 1000; max = max / 1000; }
+
+  // A trailing "+" is a floor, not the top of a band. Recording it as both
+  // ends would assert a maximum nobody wrote.
+  if (/\+\s*$/.test(label)) return { label, min, max: null };
+  return { label, min, max };
 }
 
 function collectOrderLines() {
@@ -1394,7 +1415,7 @@ async function openOrderEntry(opts) {
     document.getElementById("o-order-date").value = addTo.order_date || "";
     document.getElementById("o-delivery-date").value = addTo.delivery_date || "";
     document.getElementById("o-delivery-time").value = addTo.delivery_time ? String(addTo.delivery_time).slice(0, 5) : "";
-    document.getElementById("o-entity").value = addTo.entity;
+    document.getElementById("o-entity").value = addTo.entity || "";
     headerBox.classList.add("header-locked");
     headerBox.querySelectorAll("input, select, textarea").forEach(el => { el.disabled = true; });
   } else {
@@ -1502,7 +1523,8 @@ async function saveOrder() {
   );
 
   const header = {
-    entity: document.getElementById("o-entity").value,
+    // Blank is the normal case: Odoo decides which company invoices.
+    entity: document.getElementById("o-entity").value || null,
     channel,
     pace_customer_id: match ? match.id : null,
     customer_name: customerName,
@@ -1873,7 +1895,11 @@ async function loadOrders(opts) {
   }
 
   let q = sb.from("sale_orders")
-    .select("*, sale_order_lines(id, type, product_id, description, weight_label, quantity, unit, packaging, order_products(name))")
+    // quantity_tbc and product_name matter as much as the values beside them:
+    // without them a standing order awaiting its number and a line nobody
+    // filled in look identical on screen, and a product that is not on the
+    // catalogue shows as nothing at all.
+    .select("*, sale_order_lines(id, type, product_id, product_name, description, weight_label, quantity, quantity_tbc, unit, packaging, order_products(name))")
     // An order normally belongs to the week it is delivered in; one entered
     // without a delivery date yet falls back to the week it was taken.
     .or(`and(delivery_date.gte.${from},delivery_date.lte.${to}),` +
@@ -1978,7 +2004,12 @@ function renderOrdersGrid() {
 
     const headerCells = [
       ...(showChannel ? [`<span class="channel-pill channel-${o.channel.replace(/\s/g, "")}">${escapeHtml(o.channel)}</span>`] : []),
-      shortDate(o.order_date),
+      // For a standing arrangement the date column holds the day the
+      // arrangement began, not when this delivery was ordered. Saying so is
+      // the difference between useful context and a date that looks stale.
+      o.standing_since
+        ? `<span class="muted-code">standing since</span><br>${shortDate(o.standing_since)}`
+        : shortDate(o.order_date),
       `<strong>${escapeHtml(o.customer_name || "—")}</strong>${
         o.customer_code ? ` <span class="muted-code">(${escapeHtml(o.customer_code)})</span>` : ""}${
         o.pace_customer_id ? "" : ` <span class="unlinked" title="Not matched to a customer on the list">•</span>`}`,
@@ -1994,9 +2025,16 @@ function renderOrdersGrid() {
 
     const lineRow = (l) => l ? `
       <td class="line-col"><span class="type-pill">${escapeHtml(l.type)}</span></td>
-      <td class="line-col prod-cell">${escapeHtml(l.order_products ? l.order_products.name : "—")}</td>
+      <td class="line-col prod-cell">${
+        l.order_products
+          ? escapeHtml(l.order_products.name)
+          : l.product_name
+            ? `${escapeHtml(l.product_name)} <span class="unlinked" title="Not on the product list — correct the name or add the product">•</span>`
+            : "—"}</td>
       <td class="line-col">${escapeHtml(l.weight_label || "—")}</td>
-      <td class="line-col num">${l.quantity ?? "—"}</td>
+      <td class="line-col num">${
+        l.quantity_tbc ? `<span class="tbc-pill" title="Standing order — this week's quantity not confirmed yet">TBC</span>`
+                       : (l.quantity ?? "—")}</td>
       <td class="line-col">${escapeHtml(l.unit || "—")}</td>
       <td class="line-col">${escapeHtml(l.description || "—")}</td>
       <td class="line-col">${escapeHtml(l.packaging || "—")}</td>`
@@ -2070,9 +2108,14 @@ async function exportOrdersXlsx() {
           first ? (o.delivery_date || "") : "",
           first ? (o.delivery_time ? String(o.delivery_time).slice(0, 5) : "") : "",
           l ? l.type : "",
-          l ? (l.order_products ? l.order_products.name : "") : "",
+          // Fall back to what was written when the product is not on the
+          // catalogue, so the export never shows an order line with no product.
+          l ? (l.order_products ? l.order_products.name : (l.product_name || "")) : "",
           l ? (l.weight_label || "") : "",
-          l && l.quantity !== null && l.quantity !== undefined ? Number(l.quantity) : "",
+          // "TBC" rather than an empty cell: whoever reads the file has to be
+          // able to tell an unconfirmed standing order from a forgotten number.
+          l && l.quantity_tbc ? "TBC"
+            : (l && l.quantity !== null && l.quantity !== undefined ? Number(l.quantity) : ""),
           l ? (l.unit || "") : "",
           l ? (l.description || "") : "",
           l ? (l.packaging || "") : "",
