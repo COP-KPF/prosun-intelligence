@@ -2464,18 +2464,25 @@ function aggregatePoultryDemand(orders, deliveryDates) {
       const cutKey = cyr.leg_pool_group ? "pool:" + cyr.leg_pool_group : cyr.cut_name;
       if (!group.cuts.has(cutKey)) {
         group.cuts.set(cutKey, cyr.leg_pool_group
-          ? { pooled: true, label: "Leg (whole + thigh/drumstick, pooled)", parts: new Map(), partsByDate: new Map() }
-          : { pooled: false, label: cyr.cut_name, paired: cyr.paired, pieces: 0, piecesByDate: new Map() });
+          ? { pooled: true, label: "Leg (whole + thigh/drumstick, pooled)", parts: new Map(), partsByDate: new Map(), orders: [] }
+          : { pooled: false, label: cyr.cut_name, paired: cyr.paired, pieces: 0, piecesByDate: new Map(), orders: [] });
       }
       const cut = group.cuts.get(cutKey);
+      // Every contributing line is kept as-ordered (customer, product, the
+      // client's own quantity/unit — not converted to pieces) so Clément can
+      // drill into "who actually ordered this cut" from the calculator. This
+      // is purely a viewing aid: it doesn't feed the bird count or purchase
+      // figures above, which stay driven by the converted piece totals.
       if (cut.pooled) {
         cut.parts.set(cyr.cut_name, (cut.parts.get(cyr.cut_name) || 0) + pieces);
         if (!cut.partsByDate.has(orderDate)) cut.partsByDate.set(orderDate, new Map());
         const dm = cut.partsByDate.get(orderDate);
         dm.set(cyr.cut_name, (dm.get(cyr.cut_name) || 0) + pieces);
+        cut.orders.push({ customer: o.customer_name, product: productName, quantity: qty, unit: l.unit, date: orderDate, part: cyr.cut_name });
       } else {
         cut.pieces += pieces;
         cut.piecesByDate.set(orderDate, (cut.piecesByDate.get(orderDate) || 0) + pieces);
+        cut.orders.push({ customer: o.customer_name, product: productName, quantity: qty, unit: l.unit, date: orderDate });
       }
     }
   }
@@ -2511,16 +2518,17 @@ function aggregatePoultryDemand(orders, deliveryDates) {
       }
 
       const byDate = dates.map(d => {
+        const ordersForDate = cut.orders.filter(o => o.date === d);
         if (cut.pooled) {
           const dm = cut.partsByDate.get(d) || new Map();
           const r = birdsForPooled(dm.get("Leg (whole)") || 0, dm.get("Thigh") || 0, dm.get("Drumstick") || 0);
-          return { date: d, birds: r.birds, detail: r.detail };
+          return { date: d, birds: r.birds, detail: r.detail, orders: ordersForDate };
         }
         const r = birdsForPieces(cut.piecesByDate.get(d) || 0, cut.paired);
-        return { date: d, birds: r.birds, detail: r.detail };
+        return { date: d, birds: r.birds, detail: r.detail, orders: ordersForDate };
       });
 
-      cuts.push({ label: cut.label, birds, detail, byDate });
+      cuts.push({ label: cut.label, birds, detail, byDate, orders: cut.orders });
       if (birds > recommendedBirds) { recommendedBirds = birds; bottleneck = cut.label; }
     }
 
@@ -2589,16 +2597,42 @@ async function loadCalculatorCycles() {
   });
 }
 
+// The client-level list behind one cut row — who actually ordered it, in
+// their own quantity/unit, not the converted piece count. Viewing-only:
+// Clément asked to see this ("only for my view not for my purchase"), so
+// it never feeds back into the birds-needed math above it.
+function calcCutOrdersHtml(orders) {
+  if (!orders || !orders.length) {
+    return `<p class="empty-cell">No orders behind this cut in this window.</p>`;
+  }
+  const sorted = orders.slice().sort((a, b) => a.customer.localeCompare(b.customer));
+  return `
+    <table class="calc-clients-table">
+      <thead><tr><th>Client</th><th>Product</th><th>Quantity</th><th>Delivery</th></tr></thead>
+      <tbody>
+        ${sorted.map(o => `
+          <tr>
+            <td>${escapeHtml(o.customer)}</td>
+            <td>${escapeHtml(o.product)}${o.part ? ` <span class="muted-code">(${escapeHtml(o.part)})</span>` : ""}</td>
+            <td class="num">${o.quantity} ${escapeHtml(o.unit || "")}</td>
+            <td>${escapeHtml(shortDate(o.date))} (${escapeHtml(dayName(o.date))})</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>`;
+}
+
 // One cut/detail table, reused for both a card's combined total and each
-// per-day breakdown below it.
+// per-day breakdown below it. Each row is itself clickable to reveal the
+// list of clients behind that cut's number.
 function calcCutsTableHtml(cuts, bottleneck) {
   return `
     <table class="calc-cuts-table">
       <thead><tr><th>Cut</th><th>Birds needed</th><th>Detail</th></tr></thead>
       <tbody>
         ${cuts.map(c => `
-          <tr class="${c.label === bottleneck ? "calc-bottleneck" : ""}">
-            <td>${escapeHtml(c.label)}</td>
+          <tr class="calc-cut-row ${c.label === bottleneck ? "calc-bottleneck" : ""}" data-cut-toggle
+              role="button" tabindex="0" aria-expanded="false" title="Click to see which clients ordered this cut">
+            <td>${escapeHtml(c.label)} <span class="calc-chevron-sm" aria-hidden="true">▸</span></td>
             <td class="num">${c.birds}</td>
             <td class="muted-code">${
               c.detail.pieces !== undefined
@@ -2606,7 +2640,8 @@ function calcCutsTableHtml(cuts, bottleneck) {
                 : `${c.detail.whole.toFixed(1)} whole-leg, ${c.detail.thigh.toFixed(1)} thigh, ${c.detail.drum.toFixed(1)} drumstick` +
                   (c.detail.spare > 0.05 ? ` — ~${c.detail.spare.toFixed(1)} spare ${c.detail.spareCut} once split` : "")
             }</td>
-          </tr>`).join("")}
+          </tr>
+          <tr class="calc-cut-detail hidden"><td colspan="3">${calcCutOrdersHtml(c.orders)}</td></tr>`).join("")}
       </tbody>
     </table>`;
 }
@@ -2619,7 +2654,7 @@ function renderCalculatorResults(result, targetEl) {
       const dayBlocks = g.byDate.map(bd => {
         const cutsForDate = g.cuts.map(c => {
           const cd = c.byDate.find(x => x.date === bd.date);
-          return { label: c.label, birds: cd.birds, detail: cd.detail };
+          return { label: c.label, birds: cd.birds, detail: cd.detail, orders: cd.orders };
         });
         return `
           <div class="calc-day-block">
@@ -2676,16 +2711,30 @@ function toggleCalcDaybreak(head) {
   head.classList.toggle("is-open", nowOpen);
   head.setAttribute("aria-expanded", String(nowOpen));
 }
+// Click (or Enter/Space) on a cut row reveals the list of clients behind
+// that cut's number — the sibling <tr class="calc-cut-detail"> rendered
+// right after it in calcCutsTableHtml. Purely a viewing aid (Clément:
+// "only for my view not for my purchase") — it never touches the birds
+// count or the detail column next to it.
+function toggleCutOrders(row) {
+  const detailRow = row.nextElementSibling;
+  if (!detailRow || !detailRow.classList.contains("calc-cut-detail")) return;
+  const nowOpen = detailRow.classList.toggle("hidden") === false;
+  row.classList.toggle("is-open", nowOpen);
+  row.setAttribute("aria-expanded", String(nowOpen));
+}
 calcCyclesEl.addEventListener("click", (e) => {
   const head = e.target.closest("[data-calc-toggle]");
-  if (head) toggleCalcDaybreak(head);
+  if (head) { toggleCalcDaybreak(head); return; }
+  const cutRow = e.target.closest("[data-cut-toggle]");
+  if (cutRow) toggleCutOrders(cutRow);
 });
 calcCyclesEl.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" && e.key !== " ") return;
   const head = e.target.closest("[data-calc-toggle]");
-  if (!head) return;
-  e.preventDefault();
-  toggleCalcDaybreak(head);
+  if (head) { e.preventDefault(); toggleCalcDaybreak(head); return; }
+  const cutRow = e.target.closest("[data-cut-toggle]");
+  if (cutRow) { e.preventDefault(); toggleCutOrders(cutRow); }
 });
 
 // -------------------------------------------------------- order-grid star
