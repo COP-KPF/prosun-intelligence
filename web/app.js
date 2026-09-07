@@ -1915,12 +1915,26 @@ function dayName(s) {
 // files Clément shared — one sheet per PO, e.g. FM-SA-01), one PDF per
 // order, covering every line on that order.
 //
-// Two letterheads, matching the two real Excel folders ("PS Farm" / "PS
-// Food") and the order's own `entity` field (already captured at order
-// entry, see o-entity) — NOT the same address as ENTITY_ADDRESS above,
-// which is the sales HQ address used on client-facing quotations. This is
-// the factory/production address printed on the internal work order.
+// Two letterheads ("PS Farm" / "PS Food"), one per company — NOT the same
+// address as ENTITY_ADDRESS above, which is the sales HQ address used on
+// client-facing quotations. This is the factory/production address printed
+// on the internal work order.
+//
+// Migration 014, 7 Sep 2026: which company a work sheet uses is no longer
+// sale_orders.entity (that field is a separate, manually-set decision —
+// which company invoices the order in Odoo). Clément, after asking "what
+// happens if one work paper has two company products? could it be
+// automatic?": "everything that is raw and underoof is psfarm the rest is
+// psfood" — so it's derived per PRODUCT LINE from that line's own Type, and
+// an order can need zero, one, or two separate work sheet PDFs depending on
+// what's actually on it.
+function lineCompany(type) {
+  return (type === "Raw" || type === "UnderRoof") ? "Prosun Farm" : "Prosun Food";
+}
 const WORK_SHEET_ENTITY_NAME = { "Prosun Farm": "Prosun Farm Co., Ltd.", "Prosun Food": "Prosun Food Co., Ltd." };
+// Short button labels — Clément, 7 Sep 2026: "PSFarm"/"PSFood" instead of
+// the full names, since a mixed order shows both side by side in one cell.
+const WORK_SHEET_SHORT_NAME = { "Prosun Farm": "PSFarm", "Prosun Food": "PSFood" };
 const WORK_SHEET_ADDRESS = ["11/24 Ratchadaphisek Road, Chongnonsi,", "Yannawa, Bangkok 10120"];
 const WORK_SHEET_PHONE = "โทรศัพท์ : 02-0163907-8   แฟกซ์ : 02-2853822";
 // Static reference blocks reproduced from the real form — same on every
@@ -1958,7 +1972,9 @@ function workSheetDeliveryLine(dateStr) {
 // Pure builder — returns the jsPDF document without triggering a download,
 // so it can be inspected directly (same split as buildXlsx/downloadXlsx
 // above, for the same reason: testable without a real browser download).
-function buildWorkSheetDoc(order) {
+// `entity` says which company's sheet this is — the document only lists
+// that company's lines (Migration 014), not every line on the order.
+function buildWorkSheetDoc(order, entity) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -1973,7 +1989,7 @@ function buildWorkSheetDoc(order) {
 
   doc.setFont("Sarabun", "bold");
   doc.setFontSize(13);
-  doc.text(WORK_SHEET_ENTITY_NAME[order.entity] || order.entity, marginX, 44);
+  doc.text(WORK_SHEET_ENTITY_NAME[entity] || entity, marginX, 44);
   doc.setFont("Sarabun", "normal");
   doc.setFontSize(9);
   WORK_SHEET_ADDRESS.forEach((line, i) => doc.text(line, marginX, 58 + i * 12));
@@ -2014,7 +2030,9 @@ function buildWorkSheetDoc(order) {
   }
 
   const tableStartY = Math.max(infoY + 10, clientY + 14, 180);
-  const lines = order.sale_order_lines || [];
+  // Only this company's lines (Migration 014) — a mixed order's other
+  // company gets its own separate PDF, not a shared one.
+  const lines = (order.sale_order_lines || []).filter(l => lineCompany(l.type) === entity);
   doc.autoTable({
     startY: tableStartY,
     margin: { left: marginX, right: marginX },
@@ -2078,38 +2096,45 @@ function buildWorkSheetDoc(order) {
   return { doc, refValue };
 }
 
-function generateWorkSheetPDF(order) {
-  const { doc, refValue } = buildWorkSheetDoc(order);
-  doc.save(`worksheet-${refValue}.pdf`);
+function generateWorkSheetPDF(order, entity) {
+  const { doc, refValue } = buildWorkSheetDoc(order, entity);
+  const short = WORK_SHEET_SHORT_NAME[entity] || entity;
+  // Suffixed with the company short name — a mixed order downloads two
+  // files, and they must not collide on the same PO number.
+  doc.save(`worksheet-${refValue}-${short}.pdf`);
 }
 
-async function handleGenerateWorkSheet(orderId) {
+// One row per (order, company) in work_sheet_generations (Migration 014) —
+// an order can need up to two of these, one per company actually present
+// among its lines (see lineCompany above).
+function workSheetGenerationFor(order, entity) {
+  return (order.work_sheet_generations || []).find(g => g.entity === entity) || null;
+}
+
+async function handleGenerateWorkSheet(orderId, entity) {
   const order = orderListState.find(o => o.id === orderId);
   if (!order) return;
-  if (!order.entity) {
-    alert("Set this order's Company (Prosun Farm or Prosun Food) first — the work sheet uses that company's letterhead.");
-    return;
-  }
-  if (!(order.sale_order_lines || []).length) {
-    alert("This order has no product lines yet — add at least one before generating its work sheet.");
+  if (!(order.sale_order_lines || []).some(l => lineCompany(l.type) === entity)) {
+    alert(`This order has no ${WORK_SHEET_SHORT_NAME[entity] || entity} lines to put on a work sheet.`);
     return;
   }
   try {
-    generateWorkSheetPDF(order);
+    generateWorkSheetPDF(order, entity);
   } catch (err) {
     // If the PDF itself never built (e.g. the jsPDF CDN script didn't
-    // load), the order must NOT show as "Generated" — that flag means
+    // load), this company must NOT show as generated — that mark means
     // someone actually has the sheet in hand.
     alert("Couldn't build the work sheet PDF: " + (err.message || err));
     return;
   }
   const nowIso = new Date().toISOString();
-  const { error } = await sb.from("sale_orders")
-    .update({ work_sheet_generated_at: nowIso, work_sheet_generated_by: myProfile.id })
-    .eq("id", orderId);
+  const { error } = await sb.from("work_sheet_generations")
+    .upsert({ order_id: orderId, entity, generated_at: nowIso, generated_by: myProfile.id },
+            { onConflict: "order_id,entity" });
   if (!error) {
-    order.work_sheet_generated_at = nowIso;
-    order.work_sheet_generated_by = myProfile.id;
+    const existing = workSheetGenerationFor(order, entity);
+    if (existing) { existing.generated_at = nowIso; existing.generated_by = myProfile.id; }
+    else (order.work_sheet_generations ||= []).push({ entity, generated_at: nowIso, generated_by: myProfile.id });
     renderOrdersGrid();
   }
 }
@@ -2133,7 +2158,8 @@ async function loadOrders(opts) {
     // filled in look identical on screen, and a product that is not on the
     // catalogue shows as nothing at all.
     .select("*, sale_order_lines(id, type, product_id, product_name, description, weight_label, quantity, quantity_tbc, unit, packaging, " +
-            "order_products(name, cut_yield_id, cut_yield_reference(species, variant, cut_name, piece_weight_g, paired, leg_pool_group)))")
+            "order_products(name, cut_yield_id, cut_yield_reference(species, variant, cut_name, piece_weight_g, paired, leg_pool_group))), " +
+            "work_sheet_generations(entity, generated_at, generated_by)")
     // An order normally belongs to the week it is delivered in; one entered
     // without a delivery date yet falls back to the week it was taken.
     .or(`and(delivery_date.gte.${from},delivery_date.lte.${to}),` +
@@ -2286,6 +2312,13 @@ function renderOrdersGrid() {
     const refField = o.po_number ? "po_number" : (o.order_number ? "order_number" : "po_number");
     const refValue = o.po_number || o.order_number || "";
 
+    // Which companies this order's work sheet needs (Migration 014) — zero,
+    // one, or both, purely from what's actually on the order (see
+    // lineCompany). Farm listed before Food when both are present, matching
+    // the order Clément gave them in "psfarm and psfood".
+    const orderCompanies = ["Prosun Farm", "Prosun Food"]
+      .filter(company => lines.some(l => lineCompany(l.type) === company));
+
     const headerCells = [
       ...(showChannel ? [{ key: "channel", html: `<span class="channel-pill channel-${o.channel.replace(/\s/g, "")}">${escapeHtml(o.channel)}</span>` }] : []),
       // For a standing arrangement the date column holds the day the
@@ -2333,27 +2366,34 @@ function renderOrdersGrid() {
                 o.delivery_time ? `<br><span class="muted-code">${escapeHtml(String(o.delivery_time).slice(0, 5))}</span>` : ""}`
             : "—") },
       // Blank stays the normal case — Odoo decides which company invoices —
-      // but sale support can set it here directly once it's known, which is
-      // also what the work sheet's letterhead reads from (Migration 013).
+      // but sale support can set it here directly once it's known. Separate
+      // from the Work sheet column: which company a work sheet uses is
+      // derived automatically per line (Migration 014), not from this field.
       { key: "entity", html: canEnter
         ? editSelect("sale_orders", o.id, "entity", o.entity, ["Prosun Farm", "Prosun Food"])
         : escapeHtml(o.entity || "—") },
       // Not computed like the calc-star/validated-mark above — a genuine
-      // per-order flag (Migration 013), since generating the sheet is a
-      // discrete action someone takes, not a live fact about the order.
-      // Clément, 7 Sep 2026: "let the team send the work sheet" — sale
-      // support/admin trigger it per order; everyone else sees status only.
-      { key: "worksheet", html: o.work_sheet_generated_at
-        ? (canEnter
-            ? `<button type="button" class="btn-link worksheet-btn worksheet-btn-done" data-order="${o.id}" title="Generated by ${
-                escapeHtml(paceUserNames[o.work_sheet_generated_by] || "—")} on ${fmtValidationTime(o.work_sheet_generated_at)}. Click to regenerate.">✓ Generated</button>`
-            : `<span class="worksheet-generated-mark" title="Generated by ${
-                escapeHtml(paceUserNames[o.work_sheet_generated_by] || "—")} on ${fmtValidationTime(o.work_sheet_generated_at)}">✓ Generated</span>`)
-        : (canEnter
-            ? (o.entity
-                ? `<button type="button" class="btn-link worksheet-btn worksheet-btn-pending" data-order="${o.id}">Generate</button>`
-                : `<span class="muted-code" title="Set this order's Company (Prosun Farm/Food) first — the sheet needs it for the letterhead">Set Company first</span>`)
-            : `<span class="muted-code">—</span>`) },
+      // per-(order, company) record (work_sheet_generations, Migration 014),
+      // since generating a sheet is a discrete action someone takes, not a
+      // live fact about the order. Up to two controls in this one cell — one
+      // per company actually on the order (orderCompanies, above); sale
+      // support/admin trigger each; everyone else sees status only.
+      { key: "worksheet", html: orderCompanies.length
+        ? orderCompanies.map(company => {
+            const short = WORK_SHEET_SHORT_NAME[company];
+            const gen = workSheetGenerationFor(o, company);
+            if (gen) {
+              return canEnter
+                ? `<button type="button" class="btn-link worksheet-btn worksheet-btn-done" data-order="${o.id}" data-entity="${escapeAttr(company)}" title="Generated by ${
+                    escapeHtml(paceUserNames[gen.generated_by] || "—")} on ${fmtValidationTime(gen.generated_at)}. Click to regenerate.">✓ ${short}</button>`
+                : `<span class="worksheet-generated-mark" title="Generated by ${
+                    escapeHtml(paceUserNames[gen.generated_by] || "—")} on ${fmtValidationTime(gen.generated_at)}">✓ ${short}</span>`;
+            }
+            return canEnter
+              ? `<button type="button" class="btn-link worksheet-btn worksheet-btn-pending" data-order="${o.id}" data-entity="${escapeAttr(company)}">${short}</button>`
+              : `<span class="muted-code">${short} —</span>`;
+          }).join("<br>")
+        : `<span class="muted-code">—</span>` },
     ].filter(visibleCols).map(({ key, html }) => `<td class="hdr-col" data-col="${key}" rowspan="${span}">${html}</td>`).join("");
 
     const lineRow = (l) => l ? `
@@ -2418,7 +2458,7 @@ function renderOrdersGrid() {
     btn.addEventListener("click", () => addLineToExistingOrder(btn.dataset.order));
   });
   ordersGridBody.querySelectorAll(".worksheet-btn").forEach(btn => {
-    btn.addEventListener("click", () => handleGenerateWorkSheet(btn.dataset.order));
+    btn.addEventListener("click", () => handleGenerateWorkSheet(btn.dataset.order, btn.dataset.entity));
   });
 }
 
@@ -2467,10 +2507,6 @@ async function saveCell(el, table, rowId, payload, newOrig) {
   el.dataset.orig = newOrig;
   applyLocalEdit(table, rowId, payload);
   flashCellSaved(el);
-  // Company drives the Work sheet cell's Generate/"Set Company first" state
-  // (Migration 013) — a plain flash-and-stay wouldn't reflect that until the
-  // next unrelated re-render, so redraw the grid now that it's changed.
-  if (Object.prototype.hasOwnProperty.call(payload, "entity")) renderOrdersGrid();
 }
 
 function flashCellSaved(el) {
