@@ -2194,6 +2194,7 @@ const HEADER_COLS = [
   { key: "phone",       label: "Phone" },
   { key: "address",     label: "Delivery notes / area" },
   { key: "delivery",    label: "Delivery" },
+  { key: "entity",      label: "Company" },
   { key: "worksheet",   label: "Work sheet" },
 ];
 const LINE_COLS = ["Type", "Product", "Weight spec", "Qty", "Unit", "Description", "Packaging"];
@@ -2323,6 +2324,12 @@ function renderOrdersGrid() {
             ? `${shortDate(o.delivery_date)}<span class="muted-code">, ${dayName(o.delivery_date)}</span>${
                 o.delivery_time ? `<br><span class="muted-code">${escapeHtml(String(o.delivery_time).slice(0, 5))}</span>` : ""}`
             : "—"),
+      // Blank stays the normal case — Odoo decides which company invoices —
+      // but sale support can set it here directly once it's known, which is
+      // also what the work sheet's letterhead reads from (Migration 013).
+      canEnter
+        ? editSelect("sale_orders", o.id, "entity", o.entity, ["Prosun Farm", "Prosun Food"])
+        : escapeHtml(o.entity || "—"),
       // Not computed like the calc-star/validated-mark above — a genuine
       // per-order flag (Migration 013), since generating the sheet is a
       // discrete action someone takes, not a live fact about the order.
@@ -2452,6 +2459,10 @@ async function saveCell(el, table, rowId, payload, newOrig) {
   el.dataset.orig = newOrig;
   applyLocalEdit(table, rowId, payload);
   flashCellSaved(el);
+  // Company drives the Work sheet cell's Generate/"Set Company first" state
+  // (Migration 013) — a plain flash-and-stay wouldn't reflect that until the
+  // next unrelated re-render, so redraw the grid now that it's changed.
+  if (Object.prototype.hasOwnProperty.call(payload, "entity")) renderOrdersGrid();
 }
 
 function flashCellSaved(el) {

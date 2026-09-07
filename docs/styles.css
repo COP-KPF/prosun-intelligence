@@ -665,6 +665,10 @@ tr.clickable-row:hover { background: #fafbfc; cursor: pointer; }
 #orders-grid th.line-col:nth-of-type(5) { min-width: 80px; }
 #orders-grid td.hdr-col:nth-child(6),
 #orders-grid th.hdr-col:nth-child(6) { min-width: 150px; }
+/* Company (8th hdr-col): "Prosun Farm"/"Prosun Food" plus the select's own
+   arrow need more room than the column would otherwise size itself to. */
+#orders-grid td.hdr-col:nth-child(8),
+#orders-grid th.hdr-col:nth-child(8) { min-width: 150px; }
 
 /* --- brand + live status ------------------------------------------------- */
 .brand { display: flex; flex-direction: column; line-height: 1.15; }
