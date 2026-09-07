@@ -910,4 +910,9 @@ body.pace-mode .page-footer { max-width: none; padding: 8px 20px 32px; }
 .calc-validated-mark { color: #1f6b34; font-size: 0.9em; font-weight: 700; }
 
 .worksheet-generated-mark { color: #1f6b34; font-size: 0.85em; font-weight: 600; }
-.worksheet-btn { font-size: 0.85em; }
+.worksheet-btn { font-size: 0.85em; font-weight: 600; }
+/* Red = still to do, green = done — the same red/green Clément asked for
+   on the Generate/✓ Generated pair, so the state reads at a glance without
+   having to read the word. */
+.worksheet-btn-pending { color: var(--danger); }
+.worksheet-btn-done { color: #1f6b34; }
