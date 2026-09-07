@@ -869,3 +869,41 @@ body.pace-mode .page-footer { max-width: none; padding: 8px 20px 32px; }
   padding: 10px 14px; font-size: 0.85rem; margin-bottom: 10px; color: #6b4c00;
 }
 .calc-flag strong { color: #4a3400; }
+
+.calc-summary-table {
+  width: 100%; border-collapse: collapse; font-size: 0.88rem;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  margin-bottom: 16px; overflow: hidden;
+}
+.calc-summary-table th {
+  text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--muted); padding: 8px 12px; border-bottom: 1px solid var(--border); background: #f7f8fa;
+}
+.calc-summary-table td { padding: 8px 12px; border-bottom: 1px dashed #eceff3; }
+.calc-summary-table td.num { text-align: right; font-weight: 600; }
+.calc-summary-table tr:last-child td { border-bottom: none; }
+.calc-summary-table tr.calc-summary-unmapped td { color: var(--muted); font-style: italic; }
+.calc-summary-table tr.calc-summary-unmapped td.num { font-weight: 400; }
+
+.calc-validate-panel {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 18px; margin-bottom: 16px;
+}
+.calc-validate-locked { background: #fbfaf5; border-color: #e8c98a; }
+.calc-validate-approved { background: #f2faf4; border-color: #a8d9b4; }
+.calc-validate-heading { margin: 0 0 8px; font-weight: 600; }
+.calc-validate-approved .calc-validate-heading { color: #1f6b34; }
+.calc-validate-lines { margin: 0 0 10px; padding-left: 20px; font-size: 0.9rem; }
+.calc-validate-lines li { margin-bottom: 2px; }
+.calc-validate-addon { margin: 0 0 10px; font-size: 0.9rem; }
+.calc-validate-note { color: var(--muted); font-size: 0.8rem; margin: 8px 0 0; }
+.calc-addon-form { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.calc-addon-form label {
+  display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; color: var(--muted);
+}
+.calc-addon-input { width: 100px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
+
+.calc-validated-mark { color: #1f6b34; font-size: 0.9em; font-weight: 700; }
+
+.worksheet-generated-mark { color: #1f6b34; font-size: 0.85em; font-weight: 600; }
+.worksheet-btn { font-size: 0.85em; }

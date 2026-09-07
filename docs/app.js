@@ -1904,6 +1904,216 @@ function dayName(s) {
   return d.toLocaleString("en", { weekday: "short" });
 }
 
+// ---------------------------------------------------- work sheet (ใบสั่งงาน)
+// Clément, 7 Sep 2026, after being shown a draft of a *grouped* cross-order
+// sheet: "Id like to be one by one, not grouped... the work sheet
+// corresponds exactly to the client order with the description the SS team
+// wrote." So this is NOT the cross-order production-sequencing idea from
+// the 5 Sep process doc (that stays on the shelf) — it's item 2 of the
+// original target-system design: auto-generate the same per-order "ใบสั่งงาน"
+// (work order) sale support currently builds by hand in Excel (see the real
+// files Clément shared — one sheet per PO, e.g. FM-SA-01), one PDF per
+// order, covering every line on that order.
+//
+// Two letterheads, matching the two real Excel folders ("PS Farm" / "PS
+// Food") and the order's own `entity` field (already captured at order
+// entry, see o-entity) — NOT the same address as ENTITY_ADDRESS above,
+// which is the sales HQ address used on client-facing quotations. This is
+// the factory/production address printed on the internal work order.
+const WORK_SHEET_ENTITY_NAME = { "Prosun Farm": "Prosun Farm Co., Ltd.", "Prosun Food": "Prosun Food Co., Ltd." };
+const WORK_SHEET_ADDRESS = ["11/24 Ratchadaphisek Road, Chongnonsi,", "Yannawa, Bangkok 10120"];
+const WORK_SHEET_PHONE = "โทรศัพท์ : 02-0163907-8   แฟกซ์ : 02-2853822";
+// Static reference blocks reproduced from the real form — same on every
+// sheet regardless of order content, so no order data drives these.
+const WORK_SHEET_MEAT_LEGEND = ["เป็ด / Duck", "ไก่ / Chicken", "ไก่งวง / Turkey", "นกพิราบ / Pigeon", "นกกระทา / Quail", "ไก่ต๊อก / Guinea Fowl", "อื่นๆ / Other"];
+const WORK_SHEET_PACKAGING_LEGEND = [
+  "ถุงเย็น / Plastic Bag  16*24, 20*30 นิ้ว",
+  "ถุงซิป / Zip Bag  10*15, 12*18 นิ้ว",
+  "ถุงแวคคั่ม / Vacuum Bag  15*25, 20*30, 25*36, 35*45 ซม.",
+  "กล่องไข่ / Eggs Box  10, 12 ฟอง",
+  "กล่องโฟม / Foam Box  10, 20, 25 kgs",
+  "กระดาษห่อไก่ / กระดาษซับเลือดไก่",
+  "ถาดดำ / ถาดขาว",
+];
+const WORK_SHEET_THAI_WEEKDAY = ["วันอาทิตย์", "วันจันทร์", "วันอังคาร", "วันพุธ", "วันพฤหัสบดี", "วันศุกร์", "วันเสาร์"];
+
+function workSheetDateShort(dateStr) {
+  if (!dateStr) return "";
+  const [y, m, d] = dateStr.split("-");
+  return `${d}/${m}/${y.slice(2)}`;   // matches the real form's DD/MM/YY (Gregorian, not Buddhist Era)
+}
+function workSheetDeliveryLine(dateStr) {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr + "T00:00:00");
+  return `${WORK_SHEET_THAI_WEEKDAY[d.getDay()]} ที่ ${workSheetDateShort(dateStr)}`;
+}
+
+// Builds the same document sale support currently makes by hand in Excel —
+// see generateQuotePDF above for the sibling client-facing PDF and why
+// Sarabun has to be embedded (Thai text + ฿ otherwise render as boxes).
+// Not a pixel-identical reproduction of the Excel form (no cell borders/
+// merges to match), but every field on it: company letterhead, client,
+// PO number, order + delivery dates, every product line with its own note,
+// order-level remarks, and the sender/receiver sign-off blocks.
+// Pure builder — returns the jsPDF document without triggering a download,
+// so it can be inspected directly (same split as buildXlsx/downloadXlsx
+// above, for the same reason: testable without a real browser download).
+function buildWorkSheetDoc(order) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const marginX = 40;
+  const rightX = pageWidth - marginX;
+
+  doc.addFileToVFS("Sarabun-Regular.ttf", SARABUN_REGULAR_BASE64);
+  doc.addFont("Sarabun-Regular.ttf", "Sarabun", "normal");
+  doc.addFileToVFS("Sarabun-Bold.ttf", SARABUN_BOLD_BASE64);
+  doc.addFont("Sarabun-Bold.ttf", "Sarabun", "bold");
+  doc.setFont("Sarabun", "normal");
+
+  doc.setFont("Sarabun", "bold");
+  doc.setFontSize(13);
+  doc.text(WORK_SHEET_ENTITY_NAME[order.entity] || order.entity, marginX, 44);
+  doc.setFont("Sarabun", "normal");
+  doc.setFontSize(9);
+  WORK_SHEET_ADDRESS.forEach((line, i) => doc.text(line, marginX, 58 + i * 12));
+  doc.text(WORK_SHEET_PHONE, marginX, 58 + WORK_SHEET_ADDRESS.length * 12);
+
+  doc.setFont("Sarabun", "bold");
+  doc.setFontSize(16);
+  doc.text("ใบสั่งงาน", marginX, 120);
+
+  // Meat-type legend, top right — static reference, same on every sheet.
+  doc.setFont("Sarabun", "normal");
+  doc.setFontSize(8);
+  WORK_SHEET_MEAT_LEGEND.forEach((line, i) => doc.text(line, rightX, 44 + i * 11, { align: "right" }));
+
+  const refValue = order.po_number || order.order_number || "—";
+  doc.setFont("Sarabun", "normal");
+  doc.setFontSize(9);
+  const infoRows = [
+    ["PO. NO. :", refValue],
+    ["Date :", workSheetDateShort(order.order_date)],
+    ["Delivery Date", workSheetDeliveryLine(order.delivery_date)],
+  ];
+  let infoY = 140;
+  infoRows.forEach(([label, value]) => {
+    doc.text(`${label} ${value}`, rightX, infoY, { align: "right" });
+    infoY += 14;
+  });
+
+  doc.setFont("Sarabun", "bold");
+  doc.text("ส่ง :", marginX, 140);
+  doc.setFont("Sarabun", "normal");
+  doc.text(`${order.customer_name || "—"}${order.customer_code ? ` (${order.customer_code})` : ""}`, marginX + 30, 140);
+  let clientY = 154;
+  if (order.delivery_address) {
+    const wrapped = doc.splitTextToSize(order.delivery_address, rightX - 160 - marginX);
+    doc.text(wrapped, marginX, clientY);
+    clientY += 12 * wrapped.length;
+  }
+
+  const tableStartY = Math.max(infoY + 10, clientY + 14, 180);
+  const lines = order.sale_order_lines || [];
+  doc.autoTable({
+    startY: tableStartY,
+    margin: { left: marginX, right: marginX },
+    head: [["Reference", "รายละเอียด", "จำนวน"]],
+    body: lines.length
+      ? lines.map(l => {
+          const name = (l.order_products && l.order_products.name) || l.product_name || "—";
+          const notes = [l.description, l.packaging ? `Packaging: ${l.packaging}` : null].filter(Boolean).join("\n");
+          return ["", notes ? `${name}\n${notes}` : name, `${l.quantity_tbc ? "TBC" : (l.quantity ?? "—")} ${l.unit || ""}`.trim()];
+        })
+      : [["", "No product lines on this order.", ""]],
+    styles: { font: "Sarabun", fontSize: 9, cellPadding: 5, valign: "top" },
+    headStyles: { font: "Sarabun", fontStyle: "bold", fillColor: [47, 111, 79], textColor: 255 },
+    columnStyles: { 0: { cellWidth: 60 }, 2: { cellWidth: 80, halign: "right" } },
+  });
+
+  let y = doc.lastAutoTable.finalY + 20;
+  doc.setFont("Sarabun", "bold");
+  doc.setFontSize(9);
+  doc.text("หมายเหตุ :", marginX, y);
+  doc.setFont("Sarabun", "normal");
+  if (order.note) {
+    const wrapped = doc.splitTextToSize(order.note, rightX - 160 - marginX);
+    doc.text(wrapped, marginX + 55, y);
+    y += Math.max(14, 12 * wrapped.length);
+  } else {
+    y += 14;
+  }
+
+  // Packaging legend, static reference block under the notes.
+  doc.setFont("Sarabun", "bold");
+  doc.text("รายการแพ็คเกจจิ้ง", marginX, y);
+  doc.setFont("Sarabun", "normal");
+  doc.setFontSize(8);
+  y += 13;
+  WORK_SHEET_PACKAGING_LEGEND.forEach(line => { doc.text(line, marginX, y); y += 11; });
+
+  // Sign-off blocks — mirrors "ส่งแผนกสต๊อคเพื่อจัดสินค้า" (sender, filled in
+  // automatically from who generated it) / "ส่งกลับแผนกบัญชีเพื่อเปิดบิล"
+  // (receiver, left blank for a physical signature).
+  y = Math.max(y + 20, doc.internal.pageSize.getHeight() - 110);
+  doc.setFontSize(9);
+  doc.text("(ส่งแผนกสต๊อคเพื่อจัดสินค้า)", marginX, y);
+  doc.text("(ส่งกลับแผนกบัญชีเพื่อเปิดบิล)", rightX - 160, y);
+  y += 16;
+  doc.text(`ผู้ส่ง PO.   ${myProfile.full_name || ""}`, marginX, y);
+  doc.text(`ผู้ส่ง PO.`, rightX - 160, y);
+  y += 14;
+  doc.text(`วันที่   ${workSheetDateShort(iso(new Date()))}`, marginX, y);
+  doc.text(`วันที่   /         /`, rightX - 160, y);
+  y += 18;
+  doc.text("ผู้รับ PO.", marginX, y);
+  doc.text("ผู้รับ PO.", rightX - 160, y);
+  y += 14;
+  doc.text("วันที่   /         /", marginX, y);
+  doc.text("วันที่   /         /", rightX - 160, y);
+
+  doc.setFontSize(7);
+  doc.text("FM-SA-01 Rev.01", rightX, doc.internal.pageSize.getHeight() - 20, { align: "right" });
+
+  return { doc, refValue };
+}
+
+function generateWorkSheetPDF(order) {
+  const { doc, refValue } = buildWorkSheetDoc(order);
+  doc.save(`worksheet-${refValue}.pdf`);
+}
+
+async function handleGenerateWorkSheet(orderId) {
+  const order = orderListState.find(o => o.id === orderId);
+  if (!order) return;
+  if (!order.entity) {
+    alert("Set this order's Company (Prosun Farm or Prosun Food) first — the work sheet uses that company's letterhead.");
+    return;
+  }
+  if (!(order.sale_order_lines || []).length) {
+    alert("This order has no product lines yet — add at least one before generating its work sheet.");
+    return;
+  }
+  try {
+    generateWorkSheetPDF(order);
+  } catch (err) {
+    // If the PDF itself never built (e.g. the jsPDF CDN script didn't
+    // load), the order must NOT show as "Generated" — that flag means
+    // someone actually has the sheet in hand.
+    alert("Couldn't build the work sheet PDF: " + (err.message || err));
+    return;
+  }
+  const nowIso = new Date().toISOString();
+  const { error } = await sb.from("sale_orders")
+    .update({ work_sheet_generated_at: nowIso, work_sheet_generated_by: myProfile.id })
+    .eq("id", orderId);
+  if (!error) {
+    order.work_sheet_generated_at = nowIso;
+    order.work_sheet_generated_by = myProfile.id;
+    renderOrdersGrid();
+  }
+}
+
 // ------------------------------------------------------------------ loading
 async function loadOrders(opts) {
   const silent = opts && opts.silent;      // a refresh nobody asked for
@@ -1914,10 +2124,8 @@ async function loadOrders(opts) {
     `Order Entry — ${currentChannel === "all" ? "All channels" : currentChannel}, week of ${weekLabelText(weekMonday)}`;
   if (!silent) ordersGridBody.innerHTML = `<tr><td colspan="16">Loading...</td></tr>`;
 
-  if (!Object.keys(paceUserNames).length) {
-    const { data: users } = await sb.from("profiles").select("id, full_name");
-    (users || []).forEach(u => { paceUserNames[u.id] = u.full_name; });
-  }
+  await ensurePaceUserNames();
+  await loadPurchaseValidationOrderIds();
 
   let q = sb.from("sale_orders")
     // quantity_tbc and product_name matter as much as the values beside them:
@@ -1986,6 +2194,7 @@ const HEADER_COLS = [
   { key: "phone",       label: "Phone" },
   { key: "address",     label: "Delivery notes / area" },
   { key: "delivery",    label: "Delivery" },
+  { key: "worksheet",   label: "Work sheet" },
 ];
 const LINE_COLS = ["Type", "Product", "Weight spec", "Qty", "Unit", "Description", "Packaging"];
 
@@ -2087,6 +2296,9 @@ function renderOrdersGrid() {
         o.pace_customer_id ? "" : ` <span class="unlinked" title="Not matched to a customer on the list">•</span>`}${
         orderIsCalcCounted(o, upcomingDeliveryDates)
           ? ` <span class="calc-star" title="Already counted in the upcoming poultry calculation">★</span>`
+          : ""}${
+        orderIsPurchaseValidated(o.id)
+          ? ` <span class="calc-validated-mark" title="Included in a validated purchase for an upcoming cycle">✓</span>`
           : ""}`,
       canEnter
         ? editCell("sale_orders", o.id, refField, refValue, { placeholder: "—" })
@@ -2111,6 +2323,22 @@ function renderOrdersGrid() {
             ? `${shortDate(o.delivery_date)}<span class="muted-code">, ${dayName(o.delivery_date)}</span>${
                 o.delivery_time ? `<br><span class="muted-code">${escapeHtml(String(o.delivery_time).slice(0, 5))}</span>` : ""}`
             : "—"),
+      // Not computed like the calc-star/validated-mark above — a genuine
+      // per-order flag (Migration 013), since generating the sheet is a
+      // discrete action someone takes, not a live fact about the order.
+      // Clément, 7 Sep 2026: "let the team send the work sheet" — sale
+      // support/admin trigger it per order; everyone else sees status only.
+      o.work_sheet_generated_at
+        ? (canEnter
+            ? `<button type="button" class="btn-link worksheet-btn" data-order="${o.id}" title="Generated by ${
+                escapeHtml(paceUserNames[o.work_sheet_generated_by] || "—")} on ${fmtValidationTime(o.work_sheet_generated_at)}. Click to regenerate.">✓ Generated</button>`
+            : `<span class="worksheet-generated-mark" title="Generated by ${
+                escapeHtml(paceUserNames[o.work_sheet_generated_by] || "—")} on ${fmtValidationTime(o.work_sheet_generated_at)}">✓ Generated</span>`)
+        : (canEnter
+            ? (o.entity
+                ? `<button type="button" class="btn-link worksheet-btn" data-order="${o.id}">Generate</button>`
+                : `<span class="muted-code" title="Set this order's Company (Prosun Farm/Food) first — the sheet needs it for the letterhead">Set Company first</span>`)
+            : `<span class="muted-code">—</span>`),
     ].map((html, i) => `<td class="hdr-col" rowspan="${span}">${html}</td>`).join("");
 
     const lineRow = (l) => l ? `
@@ -2173,6 +2401,9 @@ function renderOrdersGrid() {
 
   ordersGridBody.querySelectorAll(".add-line").forEach(btn => {
     btn.addEventListener("click", () => addLineToExistingOrder(btn.dataset.order));
+  });
+  ordersGridBody.querySelectorAll(".worksheet-btn").forEach(btn => {
+    btn.addEventListener("click", () => handleGenerateWorkSheet(btn.dataset.order));
   });
 }
 
@@ -2553,6 +2784,8 @@ function aggregatePoultryDemand(orders, deliveryDates) {
 function calcCycleSectionId(calcDateIso) { return "calc-cycle-" + calcDateIso; }
 function calcCycleResultsId(calcDateIso) { return "calc-cycle-results-" + calcDateIso; }
 
+function calcCycleValidationId(calcDateIso) { return "calc-cycle-validation-" + calcDateIso; }
+
 function calcCycleSkeletonHtml(w) {
   const coverage = w.dates.map(d => shortDate(d) + " (" + dayName(d) + ")").join(", ");
   return `
@@ -2561,8 +2794,25 @@ function calcCycleSkeletonHtml(w) {
         <span class="muted-code">covers deliveries: ${escapeHtml(coverage)}</span>
       </h3>
       <div id="${calcCycleResultsId(w.calcDate)}"><p class="empty-cell">Loading…</p></div>
+      <div id="${calcCycleValidationId(w.calcDate)}"></div>
     </section>`;
 }
+
+// Loaded on demand by whichever loads first — the Orders grid's "already
+// validated" marker or the calculator's own validation panel — rather than
+// only inside loadOrders(), since a purchasing/admin user can land straight
+// on the calculator tab without ever visiting Orders first.
+async function ensurePaceUserNames() {
+  if (Object.keys(paceUserNames).length) return;
+  const { data: users } = await sb.from("profiles").select("id, full_name");
+  (users || []).forEach(u => { paceUserNames[u.id] = u.full_name; });
+}
+
+// Per calc_date: { result, ordersForWindow, dates } for whatever's currently
+// on screen. The validate/add-on/approve handlers below act on exactly this
+// — not a re-query — so "validate" always freezes what purchasing is
+// actually looking at.
+let calcCycleData = {};
 
 // Loads and renders all three upcoming calculation cycles (next Monday,
 // Wednesday and Saturday) on one page, so nothing needs a dropdown to see
@@ -2571,6 +2821,7 @@ function calcCycleSkeletonHtml(w) {
 // slice of that data is aggregated independently, so a shared slaughter
 // decision for one cycle never bleeds into another's numbers.
 async function loadCalculatorCycles() {
+  await ensurePaceUserNames();
   const cycles = upcomingCalcCycles();
 
   calcCycleNavEl.innerHTML = cycles.map(w =>
@@ -2580,7 +2831,9 @@ async function loadCalculatorCycles() {
 
   const allDates = [...new Set(cycles.flatMap(w => w.dates))];
   const { data, error } = await sb.from("sale_orders")
-    .select("customer_name, delivery_date, sale_order_lines(product_id, product_name, quantity, quantity_tbc, unit, " +
+    // "id" matters here specifically for validation: it's what lets a click
+    // on "Validate" record exactly which orders fed that cycle's snapshot.
+    .select("id, customer_name, delivery_date, sale_order_lines(product_id, product_name, quantity, quantity_tbc, unit, " +
             "order_products(name, cut_yield_id, cut_yield_reference(species, variant, cut_name, piece_weight_g, paired, leg_pool_group)))")
     .eq("channel", "Restaurant")
     .in("delivery_date", allDates);
@@ -2590,10 +2843,23 @@ async function loadCalculatorCycles() {
     return;
   }
 
+  const calcDates = cycles.map(w => w.calcDate);
+  const { data: validations } = await sb.from("poultry_purchase_validations")
+    .select("*")
+    .in("calc_date", calcDates);
+  const validationByDate = {};
+  (validations || []).forEach(v => { validationByDate[v.calc_date] = v; });
+
+  calcCycleData = {};
   cycles.forEach(w => {
     const ordersForWindow = (data || []).filter(o => w.dates.includes(o.delivery_date));
-    const target = document.getElementById(calcCycleResultsId(w.calcDate));
-    renderCalculatorResults(aggregatePoultryDemand(ordersForWindow, w.dates), target);
+    const result = aggregatePoultryDemand(ordersForWindow, w.dates);
+    calcCycleData[w.calcDate] = { result, ordersForWindow, dates: w.dates };
+
+    renderCalculatorResults(result, document.getElementById(calcCycleResultsId(w.calcDate)));
+
+    const validationEl = document.getElementById(calcCycleValidationId(w.calcDate));
+    if (validationEl) validationEl.innerHTML = renderValidationPanel(w.calcDate, result, validationByDate[w.calcDate]);
   });
 }
 
@@ -2646,11 +2912,51 @@ function calcCutsTableHtml(cuts, bottleneck) {
     </table>`;
 }
 
+// A quick, all-in-one-glance table above the per-species cards. Clément,
+// 6 Sep: "have all the birds in a summary table... not only red label and
+// ducks, but all, green label, etc." Every bird line the calculator can
+// actually compute gets a row here (today: Chicken Red Label and the two
+// Duck lines — the only ones with yield weights on file, per Migration
+// 001). A product ordered but not yet mapped to a yield weight — Green
+// Label chief among them — gets its own row too, saying so plainly,
+// rather than just vanishing: the moment Clément supplies its reference
+// weights and a migration links it, it becomes a normal computed row here
+// with no further UI change needed.
+function calcSummaryTableHtml(result) {
+  if (!result.groups.length && !result.uncounted.length) return "";
+
+  const rows = result.groups.map(g => `
+    <tr>
+      <td>${escapeHtml(g.species)} — ${escapeHtml(g.variant)}</td>
+      <td class="num">${g.recommendedBirds}</td>
+      <td class="muted-code">bottleneck: ${escapeHtml(g.bottleneck || "—")}</td>
+    </tr>`).join("");
+
+  const unmapped = new Map();
+  result.uncounted
+    .filter(u => u.reason === "not linked to a yield weight yet")
+    .forEach(u => unmapped.set(u.product, (unmapped.get(u.product) || 0) + 1));
+  const unmappedRows = [...unmapped.entries()].map(([product, count]) => `
+    <tr class="calc-summary-unmapped">
+      <td>${escapeHtml(product)}</td>
+      <td class="num">—</td>
+      <td class="muted-code">${count} line${count === 1 ? "" : "s"} ordered — no yield weight on file yet</td>
+    </tr>`).join("");
+
+  if (!rows && !unmappedRows) return "";
+  return `
+    <table class="calc-summary-table">
+      <thead><tr><th>Bird line</th><th>Birds to slaughter</th><th></th></tr></thead>
+      <tbody>${rows}${unmappedRows}</tbody>
+    </table>`;
+}
+
 function renderCalculatorResults(result, targetEl) {
+  const summary = calcSummaryTableHtml(result);
   if (!result.groups.length) {
-    targetEl.innerHTML = `<p class="empty-cell">No Restaurant orders with a linked yield weight fall in this delivery window yet.</p>`;
+    targetEl.innerHTML = summary + `<p class="empty-cell">No Restaurant orders with a linked yield weight fall in this delivery window yet.</p>`;
   } else {
-    targetEl.innerHTML = result.groups.map(g => {
+    targetEl.innerHTML = summary + result.groups.map(g => {
       const dayBlocks = g.byDate.map(bd => {
         const cutsForDate = g.cuts.map(c => {
           const cd = c.byDate.find(x => x.date === bd.date);
@@ -2699,6 +3005,159 @@ function renderCalculatorResults(result, targetEl) {
   targetEl.innerHTML += notes.join("");
 }
 
+// ------------------------------------------------------- purchase validation
+// Clément, 6 Sep: "id like to be able to validate the purchasing bird
+// quantities... a validation at an Instant T by purchasing or me... an add
+// on quantity amount [that] covers the added on orders from the moment
+// we've validate the quantities to the moment the poultry arrives at the
+// factory... it sends me a notification[,] on my email... to validate the
+// total amount." Four steps, one row per cycle in
+// poultry_purchase_validations (Migration 012):
+//   1. purchasing/admin validate  -> freezes result.groups + which orders
+//      fed it, as of right now
+//   2. purchasing/admin set the add-on -> one buffer number for the whole
+//      cycle (Clément: sized to cover the 2-day gap to arrival, not per
+//      bird line), which emails clement@klongphaifarm.com
+//   3. admin only gives final approval -> locked from then on (enforced by
+//      a DB trigger, not just by hiding the button)
+// This is a real stored snapshot, unlike the calculator itself or the
+// order grid's "already counted" star — both stay deliberately live so
+// they always reflect today's order book; this has to freeze, because the
+// whole point of the add-on step is to size a buffer for whatever changes
+// *after* the freeze.
+function fmtValidationTime(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function renderValidationPanel(calcDate, result, validation) {
+  const canValidate = myProfile.role === "purchasing" || myProfile.role === "admin";
+  const canApprove = myProfile.role === "admin";
+
+  if (!validation) {
+    if (!result.groups.length) return "";
+    return `
+      <div class="calc-validate-panel">
+        ${canValidate
+          ? `<button type="button" class="btn-secondary" data-validate-calc="${escapeAttr(calcDate)}">Validate these quantities</button>
+             <p class="calc-validate-note">Locks in the numbers above as what purchasing will buy for this cycle. Orders placed after this point still show normally everywhere else, but won't carry this cycle's validated marker in the order book.</p>`
+          : `<p class="calc-validate-note muted-code">Not yet validated by purchasing.</p>`}
+      </div>`;
+  }
+
+  const linesHtml = (validation.validated_lines || []).map(l => `
+    <li>${escapeHtml(l.species)} — ${escapeHtml(l.variant)}: <strong>${l.birds}</strong> bird${l.birds === 1 ? "" : "s"}
+      ${l.bottleneck ? `<span class="muted-code">(bottleneck: ${escapeHtml(l.bottleneck)})</span>` : ""}</li>`).join("");
+  const validatedBy = escapeHtml(paceUserNames[validation.validated_by] || "—");
+  const validatedWhen = fmtValidationTime(validation.validated_at);
+
+  if (validation.status === "quantities_validated") {
+    return `
+      <div class="calc-validate-panel calc-validate-locked">
+        <p class="calc-validate-heading">Quantities validated <span class="muted-code">— ${validatedBy}, ${validatedWhen}</span></p>
+        <ul class="calc-validate-lines">${linesHtml}</ul>
+        ${canValidate
+          ? `<form class="calc-addon-form" data-addon-calc="${escapeAttr(calcDate)}">
+               <label>Add-on buffer for orders that arrive before this run reaches the factory
+                 <input type="number" min="0" step="1" class="calc-addon-input" required />
+               </label>
+               <button type="submit" class="btn-secondary">Set add-on &amp; notify Clément</button>
+             </form>`
+          : `<p class="calc-validate-note muted-code">Waiting on purchasing to set the add-on buffer.</p>`}
+      </div>`;
+  }
+
+  const addonBy = escapeHtml(paceUserNames[validation.addon_set_by] || "—");
+  const addonWhen = fmtValidationTime(validation.addon_set_at);
+  const addonHtml = `<p class="calc-validate-addon">+ <strong>${validation.addon_birds}</strong> bird${validation.addon_birds === 1 ? "" : "s"} add-on buffer <span class="muted-code">— ${addonBy}, ${addonWhen}</span></p>`;
+
+  if (validation.status === "addon_set") {
+    return `
+      <div class="calc-validate-panel calc-validate-locked">
+        <p class="calc-validate-heading">Quantities validated <span class="muted-code">— ${validatedBy}, ${validatedWhen}</span></p>
+        <ul class="calc-validate-lines">${linesHtml}</ul>
+        ${addonHtml}
+        ${canApprove
+          ? `<button type="button" class="btn-primary" data-approve-calc="${escapeAttr(calcDate)}">Approve total to order</button>
+             <p class="calc-validate-note">Emailed to clement@klongphaifarm.com — approve here once you're ready to lock it in.</p>`
+          : `<p class="calc-validate-note muted-code">Emailed to Clément for final approval.</p>`}
+      </div>`;
+  }
+
+  // approved — locked
+  const approvedBy = escapeHtml(paceUserNames[validation.approved_by] || "—");
+  const approvedWhen = fmtValidationTime(validation.approved_at);
+  return `
+    <div class="calc-validate-panel calc-validate-approved">
+      <p class="calc-validate-heading">✓ Approved <span class="muted-code">— ${approvedBy}, ${approvedWhen}</span></p>
+      <ul class="calc-validate-lines">${linesHtml}</ul>
+      ${addonHtml}
+      <p class="calc-validate-note">Locked — this cycle's purchase is final. A change needs a fresh validation next time this cycle comes around.</p>
+    </div>`;
+}
+
+async function handleValidateCalc(calcDate) {
+  const data = calcCycleData[calcDate];
+  if (!data) return;
+  const validated_lines = data.result.groups.map(g => ({ species: g.species, variant: g.variant, birds: g.recommendedBirds, bottleneck: g.bottleneck }));
+  const order_ids = data.ordersForWindow
+    .filter(o => (o.sale_order_lines || []).some(lineCountsForCalculator))
+    .map(o => o.id);
+  const { error } = await sb.from("poultry_purchase_validations").upsert({
+    calc_date: calcDate,
+    delivery_dates: data.dates,
+    status: "quantities_validated",
+    validated_by: myProfile.id,
+    validated_at: new Date().toISOString(),
+    validated_lines,
+    order_ids,
+  });
+  if (error) { alert("Couldn't validate these quantities: " + error.message); return; }
+  await loadCalculatorCycles();
+}
+
+async function handleSetAddon(calcDate, rawValue) {
+  const addon_birds = Number(rawValue);
+  if (!Number.isFinite(addon_birds) || addon_birds < 0) return;
+  const { error } = await sb.from("poultry_purchase_validations")
+    .update({ addon_birds, addon_set_by: myProfile.id, addon_set_at: new Date().toISOString(), status: "addon_set" })
+    .eq("calc_date", calcDate);
+  if (error) { alert("Couldn't set the add-on: " + error.message); return; }
+
+  // Best-effort, same pattern as the quotation notification — a failure here
+  // should never block purchasing from having already saved the add-on.
+  if (typeof emailjs !== "undefined" && EMAILJS_SERVICE_ID &&
+      typeof EMAILJS_PURCHASE_TEMPLATE_ID !== "undefined" && EMAILJS_PURCHASE_TEMPLATE_ID) {
+    const data = calcCycleData[calcDate];
+    const linesText = (data ? data.result.groups : [])
+      .map(g => `${g.species} — ${g.variant}: ${g.recommendedBirds} birds`).join("\n");
+    emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_PURCHASE_TEMPLATE_ID, {
+      to_email: "clement@klongphaifarm.com",
+      calc_day: calcDayLabel(calcDate),
+      validated_lines: linesText,
+      addon_birds,
+      set_by: myProfile.full_name,
+    }).catch(err => console.warn("Purchase approval email failed:", err));
+  }
+  await loadCalculatorCycles();
+}
+
+async function handleApproveCalc(calcDate) {
+  const { error } = await sb.from("poultry_purchase_validations")
+    .update({ approved: true, approved_by: myProfile.id, approved_at: new Date().toISOString(), status: "approved" })
+    .eq("calc_date", calcDate);
+  if (error) { alert("Couldn't approve: " + error.message); return; }
+  await loadCalculatorCycles();
+}
+
+calcCyclesEl.addEventListener("submit", (e) => {
+  const form = e.target.closest("[data-addon-calc]");
+  if (!form) return;
+  e.preventDefault();
+  const input = form.querySelector(".calc-addon-input");
+  handleSetAddon(form.dataset.addonCalc, input ? input.value : "");
+});
+
 // Click (or Enter/Space) on a card's header reveals that species/variant's
 // birds-needed-per-delivery-day breakdown. Delegated on the whole
 // calc-cycles container since every cycle's cards are rebuilt wholesale on
@@ -2727,7 +3186,11 @@ calcCyclesEl.addEventListener("click", (e) => {
   const head = e.target.closest("[data-calc-toggle]");
   if (head) { toggleCalcDaybreak(head); return; }
   const cutRow = e.target.closest("[data-cut-toggle]");
-  if (cutRow) toggleCutOrders(cutRow);
+  if (cutRow) { toggleCutOrders(cutRow); return; }
+  const validateBtn = e.target.closest("[data-validate-calc]");
+  if (validateBtn) { handleValidateCalc(validateBtn.dataset.validateCalc); return; }
+  const approveBtn = e.target.closest("[data-approve-calc]");
+  if (approveBtn) handleApproveCalc(approveBtn.dataset.approveCalc);
 });
 calcCyclesEl.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" && e.key !== " ") return;
@@ -2755,6 +3218,27 @@ function orderIsCalcCounted(o, upcomingDeliveryDates) {
   if (o.channel !== "Restaurant") return false;
   if (!upcomingDeliveryDates.includes(o.delivery_date)) return false;
   return (o.sale_order_lines || []).some(lineCountsForCalculator);
+}
+
+// -------------------------------------------------- order-grid validated mark
+// A second, separate marker from the star above — this one is NOT live. It
+// reflects an actual purchasing decision (Migration 012): an order shows
+// this mark only if it was in the order_ids snapshot taken the moment
+// purchasing (or Clément) clicked "Validate" for some upcoming cycle. An
+// order placed afterwards keeps the live star (if it qualifies) but never
+// this mark, even if its delivery date falls in the same window — Clément,
+// 6 Sep: "All the orders added will be in normal color," which is exactly
+// what the add-on buffer step exists to cover.
+let purchaseValidationOrderIds = new Set();
+async function loadPurchaseValidationOrderIds() {
+  const calcDates = upcomingCalcCycles().map(w => w.calcDate);
+  const { data, error } = await sb.from("poultry_purchase_validations")
+    .select("order_ids")
+    .in("calc_date", calcDates);
+  purchaseValidationOrderIds = error ? new Set() : new Set((data || []).flatMap(v => v.order_ids || []));
+}
+function orderIsPurchaseValidated(orderId) {
+  return purchaseValidationOrderIds.has(orderId);
 }
 
 // ------------------------------------------------------------------- wiring
