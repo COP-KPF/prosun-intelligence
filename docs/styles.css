@@ -663,12 +663,26 @@ tr.clickable-row:hover { background: #fafbfc; cursor: pointer; }
    Description, Packaging) — matches the select's own min-width above so the
    column doesn't clamp back down to it. */
 #orders-grid th.line-col:nth-of-type(5) { min-width: 80px; }
-#orders-grid td.hdr-col:nth-child(6),
-#orders-grid th.hdr-col:nth-child(6) { min-width: 150px; }
-/* Company (8th hdr-col): "Prosun Farm"/"Prosun Food" plus the select's own
-   arrow need more room than the column would otherwise size itself to. */
-#orders-grid td.hdr-col:nth-child(8),
-#orders-grid th.hdr-col:nth-child(8) { min-width: 150px; }
+/* Targeted by data-col rather than position — Contact/Phone only show for
+   the Individual channel (Clément, 7 Sep 2026), which shifts every column
+   after them, so a positional nth-child selector would drift onto the wrong
+   column depending on which channel is open. */
+#orders-grid td.hdr-col[data-col="address"],
+#orders-grid th.hdr-col[data-col="address"] { min-width: 150px; }
+/* Company: "Prosun Farm"/"Prosun Food" plus the select's own arrow need more
+   room than the column would otherwise size itself to. */
+#orders-grid td.hdr-col[data-col="entity"],
+#orders-grid th.hdr-col[data-col="entity"] { min-width: 150px; }
+/* Description (Clément, 7 Sep 2026): sale support's own notes on a line —
+   "ตัดหัว ตัดขา ไม่เอาเครื่องใน", "ค่าส่ง 90 บาท" — were reading cramped and
+   wrapping to several short lines. Given it more room; the grid picked up
+   two new columns this week (Company, Work sheet), so a step down in font
+   size here is the trade that keeps the whole table from overflowing.
+   escapeHtml/textContent still hold — this only changes layout. */
+#orders-grid td.desc-cell,
+#orders-grid th.line-col[data-line-col="description"] { min-width: 220px; }
+#orders-grid td.desc-cell { font-size: 0.76rem; }
+#orders-grid td.desc-cell textarea.cell-edit { min-height: 3.2em; }
 
 /* --- brand + live status ------------------------------------------------- */
 .brand { display: flex; flex-direction: column; line-height: 1.15; }

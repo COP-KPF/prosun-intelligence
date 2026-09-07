@@ -2237,14 +2237,20 @@ function editSelect(table, rowId, field, value, options) {
 function renderOrdersGrid() {
   const term = document.getElementById("order-search").value.trim().toLowerCase();
   const showChannel = currentChannel === "all";
+  // Clément, 7 Sep 2026: Contact/Phone earn their columns only for Individual
+  // — Restaurant/Department Store/Retail run through an established account
+  // (the client directory already has a number if one's needed), while an
+  // Individual order is a one-off walk-in a driver may need to call directly.
+  const showContact = currentChannel === "Individual";
+  const visibleCols = c => showContact || (c.key !== "contact" && c.key !== "phone");
 
   const head = [
     ...(showChannel ? [{ key: "channel", label: "Channel" }] : []),
-    ...HEADER_COLS,
+    ...HEADER_COLS.filter(visibleCols),
   ];
   ordersGridHead.innerHTML = `<tr>
-    ${head.map(c => `<th class="hdr-col">${c.label}</th>`).join("")}
-    ${LINE_COLS.map(c => `<th class="line-col">${c}</th>`).join("")}
+    ${head.map(c => `<th class="hdr-col" data-col="${c.key}">${c.label}</th>`).join("")}
+    ${LINE_COLS.map(c => `<th class="line-col" data-line-col="${c.toLowerCase().replace(/\s+/g, "-")}">${c}</th>`).join("")}
   </tr>`;
   const colCount = head.length + LINE_COLS.length;
 
@@ -2281,18 +2287,18 @@ function renderOrdersGrid() {
     const refValue = o.po_number || o.order_number || "";
 
     const headerCells = [
-      ...(showChannel ? [`<span class="channel-pill channel-${o.channel.replace(/\s/g, "")}">${escapeHtml(o.channel)}</span>`] : []),
+      ...(showChannel ? [{ key: "channel", html: `<span class="channel-pill channel-${o.channel.replace(/\s/g, "")}">${escapeHtml(o.channel)}</span>` }] : []),
       // For a standing arrangement the date column holds the day the
       // arrangement began, not when this delivery was ordered. Saying so is
       // the difference between useful context and a date that looks stale.
       // Not made editable here — changing it changes whether the order reads
       // as standing at all, which deserves its own control, not a bare date.
-      o.standing_since
+      { key: "order_date", html: o.standing_since
         ? `<span class="muted-code">standing since</span><br>${shortDate(o.standing_since)}`
-        : shortDate(o.order_date),
+        : shortDate(o.order_date) },
       // Client identity stays locked even for sale support — see the note
       // above editCell. Everything else on the order is theirs to fix.
-      `<strong>${escapeHtml(o.customer_name || "—")}</strong>${
+      { key: "customer", html: `<strong>${escapeHtml(o.customer_name || "—")}</strong>${
         o.customer_code ? ` <span class="muted-code">(${escapeHtml(o.customer_code)})</span>` : ""}${
         o.pace_customer_id ? "" : ` <span class="unlinked" title="Not matched to a customer on the list">•</span>`}${
         orderIsCalcCounted(o, upcomingDeliveryDates)
@@ -2300,20 +2306,22 @@ function renderOrdersGrid() {
           : ""}${
         orderIsPurchaseValidated(o.id)
           ? ` <span class="calc-validated-mark" title="Included in a validated purchase for an upcoming cycle">✓</span>`
-          : ""}`,
-      canEnter
+          : ""}` },
+      { key: "ref", html: canEnter
         ? editCell("sale_orders", o.id, refField, refValue, { placeholder: "—" })
-        : escapeHtml(refValue || "—"),
-      canEnter
+        : escapeHtml(refValue || "—") },
+      // Contact/Phone (Migration 013 revisit, 7 Sep 2026): only shown for the
+      // Individual channel — see the note above on showContact.
+      { key: "contact", html: canEnter
         ? editCell("sale_orders", o.id, "chef_name", o.chef_name, { placeholder: "—" })
-        : escapeHtml(o.chef_name || "—"),
-      canEnter
+        : escapeHtml(o.chef_name || "—") },
+      { key: "phone", html: canEnter
         ? editCell("sale_orders", o.id, "phone", o.phone, { placeholder: "—" })
-        : escapeHtml(o.phone || "—"),
-      canEnter
+        : escapeHtml(o.phone || "—") },
+      { key: "address", html: canEnter
         ? editCell("sale_orders", o.id, "delivery_address", o.delivery_address, { multiline: true, placeholder: "—" })
-        : escapeHtml(o.delivery_address || "—"),
-      canEnter
+        : escapeHtml(o.delivery_address || "—") },
+      { key: "delivery", html: canEnter
         // Plain date/time inputs rather than the day-name formatting shown
         // read-only below — changing the delivery date can move the order
         // into a different week's view once the next refresh picks it up,
@@ -2323,19 +2331,19 @@ function renderOrdersGrid() {
         : (o.delivery_date
             ? `${shortDate(o.delivery_date)}<span class="muted-code">, ${dayName(o.delivery_date)}</span>${
                 o.delivery_time ? `<br><span class="muted-code">${escapeHtml(String(o.delivery_time).slice(0, 5))}</span>` : ""}`
-            : "—"),
+            : "—") },
       // Blank stays the normal case — Odoo decides which company invoices —
       // but sale support can set it here directly once it's known, which is
       // also what the work sheet's letterhead reads from (Migration 013).
-      canEnter
+      { key: "entity", html: canEnter
         ? editSelect("sale_orders", o.id, "entity", o.entity, ["Prosun Farm", "Prosun Food"])
-        : escapeHtml(o.entity || "—"),
+        : escapeHtml(o.entity || "—") },
       // Not computed like the calc-star/validated-mark above — a genuine
       // per-order flag (Migration 013), since generating the sheet is a
       // discrete action someone takes, not a live fact about the order.
       // Clément, 7 Sep 2026: "let the team send the work sheet" — sale
       // support/admin trigger it per order; everyone else sees status only.
-      o.work_sheet_generated_at
+      { key: "worksheet", html: o.work_sheet_generated_at
         ? (canEnter
             ? `<button type="button" class="btn-link worksheet-btn worksheet-btn-done" data-order="${o.id}" title="Generated by ${
                 escapeHtml(paceUserNames[o.work_sheet_generated_by] || "—")} on ${fmtValidationTime(o.work_sheet_generated_at)}. Click to regenerate.">✓ Generated</button>`
@@ -2345,8 +2353,8 @@ function renderOrdersGrid() {
             ? (o.entity
                 ? `<button type="button" class="btn-link worksheet-btn worksheet-btn-pending" data-order="${o.id}">Generate</button>`
                 : `<span class="muted-code" title="Set this order's Company (Prosun Farm/Food) first — the sheet needs it for the letterhead">Set Company first</span>`)
-            : `<span class="muted-code">—</span>`),
-    ].map((html, i) => `<td class="hdr-col" rowspan="${span}">${html}</td>`).join("");
+            : `<span class="muted-code">—</span>`) },
+    ].filter(visibleCols).map(({ key, html }) => `<td class="hdr-col" data-col="${key}" rowspan="${span}">${html}</td>`).join("");
 
     const lineRow = (l) => l ? `
       <td class="line-col"><span class="type-pill">${escapeHtml(l.type)}</span></td>
@@ -2377,7 +2385,7 @@ function renderOrdersGrid() {
         canEnter
           ? editSelect("sale_order_lines", l.id, "unit", l.unit, ["Kg", "Pcs", "Grams", "Pack", "Jar"])
           : escapeHtml(l.unit || "—")}</td>
-      <td class="line-col">${
+      <td class="line-col desc-cell">${
         canEnter
           ? editCell("sale_order_lines", l.id, "description", l.description, { multiline: true, placeholder: "—" })
           : escapeHtml(l.description || "—")}</td>
