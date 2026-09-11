@@ -909,17 +909,34 @@ body.pace-mode .page-footer { max-width: none; padding: 8px 20px 32px; }
 }
 .calc-validate-locked { background: #fbfaf5; border-color: #e8c98a; }
 .calc-validate-approved { background: #f2faf4; border-color: #a8d9b4; }
-.calc-validate-heading { margin: 0 0 8px; font-weight: 600; }
-.calc-validate-approved .calc-validate-heading { color: #1f6b34; }
-.calc-validate-lines { margin: 0 0 10px; padding-left: 20px; font-size: 0.9rem; }
-.calc-validate-lines li { margin-bottom: 2px; }
-.calc-validate-addon { margin: 0 0 10px; font-size: 0.9rem; }
 .calc-validate-note { color: var(--muted); font-size: 0.8rem; margin: 8px 0 0; }
-.calc-addon-form { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
-.calc-addon-form label {
+.calc-confirm-form, .calc-addon-form { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.calc-confirm-form label, .calc-addon-form label {
   display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; color: var(--muted);
 }
 .calc-addon-input { width: 100px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
+
+/* The simplified confirmation table (Migration 016) — one row per bird
+   line plus the whole-cycle add-on, with the last three columns showing
+   the same purchasing/sale-support/Clément confirmation state repeated
+   down each column, so scanning a column gives one consistent answer. */
+.calc-confirm-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-bottom: 10px; }
+.calc-confirm-table th {
+  text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--muted); padding: 5px 8px; border-bottom: 1px solid var(--border);
+}
+.calc-confirm-table td { padding: 6px 8px; border-bottom: 1px dashed #eceff3; }
+.calc-confirm-table td.num { text-align: right; font-weight: 600; }
+.calc-confirm-table tr.calc-confirm-row { cursor: pointer; }
+.calc-confirm-table tr.calc-confirm-row:hover { background: #f7f8fa; }
+.calc-confirm-table tr.calc-confirm-row:focus-visible { outline: 2px solid var(--accent-dark); outline-offset: -2px; }
+.calc-confirm-table tr.calc-confirm-addon-row { cursor: default; font-style: italic; }
+.calc-confirm-table tr.calc-confirm-addon-row:hover { background: none; }
+.calc-confirm-table tr.calc-confirm-detail td { padding: 0 8px 10px 24px; border-bottom: 1px dashed #eceff3; color: var(--muted); font-size: 0.85rem; }
+.calc-confirm-row.is-open .calc-chevron-sm { transform: rotate(90deg); }
+.calc-confirm-done { color: #1f6b34; font-weight: 600; white-space: nowrap; }
+.calc-confirm-done .muted-code { display: block; font-weight: 400; }
+.calc-confirm-pending { color: var(--muted); }
 
 .calc-validated-mark { color: #1f6b34; font-size: 0.9em; font-weight: 700; }
 

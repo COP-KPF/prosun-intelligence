@@ -2158,7 +2158,7 @@ async function loadOrders(opts) {
     // filled in look identical on screen, and a product that is not on the
     // catalogue shows as nothing at all.
     .select("*, sale_order_lines(id, type, product_id, product_name, description, weight_label, quantity, quantity_tbc, unit, packaging, " +
-            "order_products(name, cut_yield_id, cut_yield_reference(species, variant, cut_name, piece_weight_g, paired, leg_pool_group))), " +
+            "order_products(name, cut_yield_id, pack_piece_count, is_whole_bird, cut_yield_reference(species, variant, cut_name, piece_weight_g, paired, leg_pool_group))), " +
             "work_sheet_generations(entity, generated_at, generated_by)")
     // An order normally belongs to the week it is delivered in; one entered
     // without a delivery date yet falls back to the week it was taken.
@@ -2707,7 +2707,7 @@ function calcDayLabel(calcDateIso) {
 // which is exactly the leftover-parts problem this v1 doesn't solve yet,
 // so it's surfaced here as a number rather than hidden.
 function aggregatePoultryDemand(orders, deliveryDates) {
-  const groups = new Map();          // "species|variant" -> { species, variant, cuts: Map }
+  const groups = new Map();          // "species|variant" -> { species, variant, cuts: Map, wholeBirds, ... }
   const uncounted = [];              // real demand this can't turn into a bird count
   const tbcLines = [];
   // The two (or more) delivery dates this window covers. Passed in from the
@@ -2734,18 +2734,47 @@ function aggregatePoultryDemand(orders, deliveryDates) {
         continue;
       }
 
+      const groupKey = cyr.species + "|" + cyr.variant;
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, { species: cyr.species, variant: cyr.variant, cuts: new Map(),
+          wholeBirds: 0, wholeBirdsByDate: new Map(), wholeBirdOrders: [] });
+      }
+      const group = groups.get(groupKey);
+
+      // Migration 015 (7 Sep 2026): a B2C SKU that sells the whole animal
+      // rather than a cut (e.g. "Red Label Chicken", "Duck Barbary Male")
+      // needs no yield conversion at all — Clément, 7 Sep: "if its whole
+      // bird than yes [quantity ordered = birds needed]". Its cut_yield_id
+      // is only there to place it in the right species/variant card above;
+      // the quantity itself IS the bird count, added on top of whatever the
+      // cuts below need, since a bird sold whole never reaches the cutting
+      // line and yields none of those cuts. Only meaningful in Pcs — a whole
+      // animal priced/ordered by weight has no established conversion here.
+      if (op.is_whole_bird) {
+        if (l.unit !== "Pcs") {
+          uncounted.push({ customer: o.customer_name, product: productName, unit: l.unit, quantity: qty,
+            reason: `sold whole — "${l.unit}" can't convert to a bird count` });
+          continue;
+        }
+        group.wholeBirds += qty;
+        group.wholeBirdsByDate.set(orderDate, (group.wholeBirdsByDate.get(orderDate) || 0) + qty);
+        group.wholeBirdOrders.push({ customer: o.customer_name, product: productName, quantity: qty, unit: l.unit, date: orderDate });
+        continue;
+      }
+
       let pieces;
       if (l.unit === "Kg")         pieces = (qty * 1000) / cyr.piece_weight_g;
       else if (l.unit === "Grams") pieces = qty / cyr.piece_weight_g;
       else if (l.unit === "Pcs")   pieces = qty;
+      // B2C sells many of these cuts by the pack rather than by weight —
+      // "Chicken Breast แพคละ 2 ชิ้น" is 2 breast pieces per pack. The piece
+      // count is right there in the product name, so Migration 015 stores it
+      // structured (pack_piece_count) rather than parsing text at calc time.
+      else if (l.unit === "Pack" && op.pack_piece_count) pieces = qty * op.pack_piece_count;
       else {
         uncounted.push({ customer: o.customer_name, product: productName, unit: l.unit, quantity: qty, reason: `"${l.unit}" can't convert to a piece count` });
         continue;
       }
-
-      const groupKey = cyr.species + "|" + cyr.variant;
-      if (!groups.has(groupKey)) groups.set(groupKey, { species: cyr.species, variant: cyr.variant, cuts: new Map() });
-      const group = groups.get(groupKey);
 
       const cutKey = cyr.leg_pool_group ? "pool:" + cyr.leg_pool_group : cyr.cut_name;
       if (!group.cuts.has(cutKey)) {
@@ -2826,8 +2855,24 @@ function aggregatePoultryDemand(orders, deliveryDates) {
         const cd = cut.byDate.find(x => x.date === d);
         if (cd && cd.birds > rb) { rb = cd.birds; bn = cut.label; }
       }
+      rb += g.wholeBirdsByDate.get(d) || 0;
       return { date: d, recommendedBirds: rb, bottleneck: bn };
     });
+
+    // Whole-bird demand (Migration 015) is appended as its own row, styled
+    // and click-through-able exactly like a real cut, but deliberately never
+    // considered for "bottleneck" above — it doesn't compete with the cuts,
+    // it adds to them, since a bird sold whole is consumed entirely by that
+    // one order and yields none of the cuts other clients ordered.
+    if (g.wholeBirds > 0) {
+      const wholeByDate = dates.map(d => {
+        const birds = g.wholeBirdsByDate.get(d) || 0;
+        return { date: d, birds, detail: { wholeBirds: birds }, orders: g.wholeBirdOrders.filter(o => o.date === d) };
+      });
+      cuts.push({ label: "Sold whole (no cutting)", birds: g.wholeBirds, detail: { wholeBirds: g.wholeBirds },
+        byDate: wholeByDate, orders: g.wholeBirdOrders });
+      recommendedBirds += g.wholeBirds;
+    }
 
     groupList.push({ species: g.species, variant: g.variant, cuts, recommendedBirds, bottleneck, byDate });
   }
@@ -2889,8 +2934,13 @@ async function loadCalculatorCycles() {
     // "id" matters here specifically for validation: it's what lets a click
     // on "Validate" record exactly which orders fed that cycle's snapshot.
     .select("id, customer_name, delivery_date, sale_order_lines(product_id, product_name, quantity, quantity_tbc, unit, " +
-            "order_products(name, cut_yield_id, cut_yield_reference(species, variant, cut_name, piece_weight_g, paired, leg_pool_group)))")
-    .eq("channel", "Restaurant")
+            "order_products(name, cut_yield_id, pack_piece_count, is_whole_bird, cut_yield_reference(species, variant, cut_name, piece_weight_g, paired, leg_pool_group)))")
+    // Migration 015 (7 Sep 2026): all four channels feed the calculator now,
+    // not Restaurant alone — the Chicken Red Label / Duck Moscovy/Barbary
+    // yield weights this aggregation already relies on apply just as well to
+    // the same species/variant wherever it's ordered from. No channel filter
+    // needed here at all: a product with no cut_yield_id link (every other
+    // species, in every channel) already falls out as "uncounted" below.
     .in("delivery_date", allDates);
 
   if (error) {
@@ -2958,8 +3008,10 @@ function calcCutsTableHtml(cuts, bottleneck) {
             <td class="muted-code">${
               c.detail.pieces !== undefined
                 ? `${c.detail.pieces.toFixed(1)} pieces ordered`
-                : `${c.detail.whole.toFixed(1)} whole-leg, ${c.detail.thigh.toFixed(1)} thigh, ${c.detail.drum.toFixed(1)} drumstick` +
-                  (c.detail.spare > 0.05 ? ` — ~${c.detail.spare.toFixed(1)} spare ${c.detail.spareCut} once split` : "")
+                : c.detail.wholeBirds !== undefined
+                  ? `${c.detail.wholeBirds.toFixed(1)} sold whole — no cutting, adds on top of the cuts above`
+                  : `${c.detail.whole.toFixed(1)} whole-leg, ${c.detail.thigh.toFixed(1)} thigh, ${c.detail.drum.toFixed(1)} drumstick` +
+                    (c.detail.spare > 0.05 ? ` — ~${c.detail.spare.toFixed(1)} spare ${c.detail.spareCut} once split` : "")
             }</td>
           </tr>
           <tr class="calc-cut-detail hidden"><td colspan="3">${calcCutOrdersHtml(c.orders)}</td></tr>`).join("")}
@@ -3009,7 +3061,7 @@ function calcSummaryTableHtml(result) {
 function renderCalculatorResults(result, targetEl) {
   const summary = calcSummaryTableHtml(result);
   if (!result.groups.length) {
-    targetEl.innerHTML = summary + `<p class="empty-cell">No Restaurant orders with a linked yield weight fall in this delivery window yet.</p>`;
+    targetEl.innerHTML = summary + `<p class="empty-cell">No orders with a linked yield weight fall in this delivery window yet.</p>`;
   } else {
     targetEl.innerHTML = summary + result.groups.map(g => {
       const dayBlocks = g.byDate.map(bd => {
@@ -3039,7 +3091,11 @@ function renderCalculatorResults(result, targetEl) {
           <span class="calc-chevron" aria-hidden="true">▸</span>
         </div>
         ${calcCutsTableHtml(g.cuts, g.bottleneck)}
-        <p class="calc-note">Every other cut on this bird line comes along with these ${g.recommendedBirds} birds regardless of whether it was ordered — cuts below the bottleneck will have surplus after this run.</p>
+        <p class="calc-note">Every other cut on this bird line comes along with these ${g.recommendedBirds} birds regardless of whether it was ordered — cuts below the bottleneck will have surplus after this run.${
+          g.cuts.some(c => c.label === "Sold whole (no cutting)")
+            ? ` Birds ordered whole don't go through cutting at all and yield none of these cuts — they're added on top, not counted against the bottleneck.`
+            : ""
+        }</p>
         <div class="calc-daybreak hidden">
           <p class="calc-daybreak-label">Birds needed per delivery day — the same slaughter run covers both, this just splits out which of that day's cuts are for which delivery:</p>
           ${dayBlocks}
@@ -3061,130 +3117,147 @@ function renderCalculatorResults(result, targetEl) {
 }
 
 // ------------------------------------------------------- purchase validation
-// Clément, 6 Sep: "id like to be able to validate the purchasing bird
-// quantities... a validation at an Instant T by purchasing or me... an add
-// on quantity amount [that] covers the added on orders from the moment
-// we've validate the quantities to the moment the poultry arrives at the
-// factory... it sends me a notification[,] on my email... to validate the
-// total amount." Four steps, one row per cycle in
-// poultry_purchase_validations (Migration 012):
-//   1. purchasing/admin validate  -> freezes result.groups + which orders
-//      fed it, as of right now
-//   2. purchasing/admin set the add-on -> one buffer number for the whole
-//      cycle (Clément: sized to cover the 2-day gap to arrival, not per
-//      bird line), which emails clement@klongphaifarm.com
-//   3. admin only gives final approval -> locked from then on (enforced by
-//      a DB trigger, not just by hiding the button)
+// Migration 012 (6 Sep) then simplified by Migration 016 (7 Sep 2026).
+// Clément, reviewing the original four-step panel: "before we move on,
+// please simplify the purchase interface. Id like something very easy to
+// read with the possibility to have the detail. And confirmation. it could
+// be a table which the two or three last columns are confirmation. With
+// Purchase manager to click, sale support manager and me at the end."
+//
+// Now three clicks, in order, one row per cycle in
+// poultry_purchase_validations:
+//   1. Purchasing (or admin) confirms the quantities AND sets the add-on
+//      buffer in the same action — folded together per Clément, rather
+//      than the old separate validate-then-set-addon sequence — which
+//      emails clement@klongphaifarm.com.
+//   2. Sale support (or admin) confirms the frozen numbers look right — a
+//      read-and-agree checkpoint, no editing power (Clément: this step
+//      means "I've looked at these and they're correct", not "the order
+//      book is settled").
+//   3. Admin gives final approval -> locked from then on (enforced by a DB
+//      trigger, not just by hiding the button).
 // This is a real stored snapshot, unlike the calculator itself or the
 // order grid's "already counted" star — both stay deliberately live so
 // they always reflect today's order book; this has to freeze, because the
 // whole point of the add-on step is to size a buffer for whatever changes
 // *after* the freeze.
+//
+// Which stage a row is at is read directly off which columns are actually
+// populated (validated_by, addon_birds, ss_confirmed_by, approved) rather
+// than the `status` text column — this is what let Migration 016 add the
+// sale-support step without needing to touch the status CHECK constraint
+// or rewrite any row already sitting in production under the old flow.
 function fmtValidationTime(iso) {
   if (!iso) return "";
   return new Date(iso).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+// One row's worth of "who's confirmed" cells, identical across every row of
+// the table since all three confirmations apply to the whole cycle, not to
+// one bird line at a time — scanning down a column is meant to show one
+// consistent answer.
+function calcConfirmCellsHtml(validation) {
+  const cell = (who, when) => who
+    ? `<td class="calc-confirm-done">✓ ${escapeHtml(who)}<span class="muted-code">${when}</span></td>`
+    : `<td class="calc-confirm-pending">—</td>`;
+  return cell(paceUserNames[validation.validated_by], fmtValidationTime(validation.validated_at)) +
+         cell(paceUserNames[validation.ss_confirmed_by], fmtValidationTime(validation.ss_confirmed_at)) +
+         cell(paceUserNames[validation.approved_by], fmtValidationTime(validation.approved_at));
+}
+
 function renderValidationPanel(calcDate, result, validation) {
-  const canValidate = myProfile.role === "purchasing" || myProfile.role === "admin";
+  const canConfirmPurchasing = myProfile.role === "purchasing" || myProfile.role === "admin";
+  const canConfirmSaleSupport = myProfile.role === "sale_support" || myProfile.role === "admin";
   const canApprove = myProfile.role === "admin";
 
   if (!validation) {
     if (!result.groups.length) return "";
     return `
       <div class="calc-validate-panel">
-        ${canValidate
-          ? `<button type="button" class="btn-secondary" data-validate-calc="${escapeAttr(calcDate)}">Validate these quantities</button>
-             <p class="calc-validate-note">Locks in the numbers above as what purchasing will buy for this cycle. Orders placed after this point still show normally everywhere else, but won't carry this cycle's validated marker in the order book.</p>`
-          : `<p class="calc-validate-note muted-code">Not yet validated by purchasing.</p>`}
-      </div>`;
-  }
-
-  const linesHtml = (validation.validated_lines || []).map(l => `
-    <li>${escapeHtml(l.species)} — ${escapeHtml(l.variant)}: <strong>${l.birds}</strong> bird${l.birds === 1 ? "" : "s"}
-      ${l.bottleneck ? `<span class="muted-code">(bottleneck: ${escapeHtml(l.bottleneck)})</span>` : ""}</li>`).join("");
-  const validatedBy = escapeHtml(paceUserNames[validation.validated_by] || "—");
-  const validatedWhen = fmtValidationTime(validation.validated_at);
-
-  if (validation.status === "quantities_validated") {
-    return `
-      <div class="calc-validate-panel calc-validate-locked">
-        <p class="calc-validate-heading">Quantities validated <span class="muted-code">— ${validatedBy}, ${validatedWhen}</span></p>
-        <ul class="calc-validate-lines">${linesHtml}</ul>
-        ${canValidate
-          ? `<form class="calc-addon-form" data-addon-calc="${escapeAttr(calcDate)}">
+        ${canConfirmPurchasing
+          ? `<form class="calc-confirm-form" data-confirm-purchasing="${escapeAttr(calcDate)}">
                <label>Add-on buffer for orders that arrive before this run reaches the factory
                  <input type="number" min="0" step="1" class="calc-addon-input" required />
                </label>
-               <button type="submit" class="btn-secondary">Set add-on &amp; notify Clément</button>
-             </form>`
-          : `<p class="calc-validate-note muted-code">Waiting on purchasing to set the add-on buffer.</p>`}
+               <button type="submit" class="btn-secondary">Confirm quantities &amp; add-on</button>
+             </form>
+             <p class="calc-validate-note">Locks in the numbers above as what purchasing will buy for this cycle, with your buffer on top. Orders placed after this point still show normally everywhere else, but won't carry this cycle's validated marker in the order book.</p>`
+          : `<p class="calc-validate-note muted-code">Not yet confirmed by purchasing.</p>`}
       </div>`;
   }
 
-  const addonBy = escapeHtml(paceUserNames[validation.addon_set_by] || "—");
-  const addonWhen = fmtValidationTime(validation.addon_set_at);
-  const addonHtml = `<p class="calc-validate-addon">+ <strong>${validation.addon_birds}</strong> bird${validation.addon_birds === 1 ? "" : "s"} add-on buffer <span class="muted-code">— ${addonBy}, ${addonWhen}</span></p>`;
+  const rowsHtml = (validation.validated_lines || []).map((l, i) => `
+    <tr class="calc-confirm-row" data-confirm-toggle="${calcDate}-${i}" role="button" tabindex="0"
+        aria-expanded="false" title="Click to see the bottleneck cut">
+      <td>${escapeHtml(l.species)} — ${escapeHtml(l.variant)} <span class="calc-chevron-sm" aria-hidden="true">▸</span></td>
+      <td class="num">${l.birds}</td>
+      ${calcConfirmCellsHtml(validation)}
+    </tr>
+    <tr class="calc-confirm-detail hidden"><td colspan="5">${
+      l.bottleneck
+        ? `Bottleneck cut: <strong>${escapeHtml(l.bottleneck)}</strong> — every other cut on this bird line comes along with these ${l.birds} birds regardless of whether it was ordered.`
+        : `No single bottleneck cut recorded for this line.`
+    }</td></tr>`).join("");
 
-  if (validation.status === "addon_set") {
-    return `
-      <div class="calc-validate-panel calc-validate-locked">
-        <p class="calc-validate-heading">Quantities validated <span class="muted-code">— ${validatedBy}, ${validatedWhen}</span></p>
-        <ul class="calc-validate-lines">${linesHtml}</ul>
-        ${addonHtml}
-        ${canApprove
-          ? `<button type="button" class="btn-primary" data-approve-calc="${escapeAttr(calcDate)}">Approve total to order</button>
-             <p class="calc-validate-note">Emailed to clement@klongphaifarm.com — approve here once you're ready to lock it in.</p>`
-          : `<p class="calc-validate-note muted-code">Emailed to Clément for final approval.</p>`}
-      </div>`;
+  const addonRowHtml = validation.addon_birds != null ? `
+    <tr class="calc-confirm-row calc-confirm-addon-row">
+      <td>Add-on buffer <span class="muted-code">(whole cycle, not per bird line)</span></td>
+      <td class="num">+${validation.addon_birds}</td>
+      ${calcConfirmCellsHtml(validation)}
+    </tr>` : "";
+
+  const tableHtml = `
+    <table class="calc-confirm-table">
+      <thead><tr><th>Bird line</th><th>Birds</th><th>Purchasing</th><th>Sale support</th><th>Clément</th></tr></thead>
+      <tbody>${rowsHtml}${addonRowHtml}</tbody>
+    </table>`;
+
+  let actionHtml;
+  if (validation.approved) {
+    actionHtml = `<p class="calc-validate-note">Locked — this cycle's purchase is final. A change needs a fresh validation next time this cycle comes around.</p>`;
+  } else if (validation.ss_confirmed_by) {
+    actionHtml = canApprove
+      ? `<button type="button" class="btn-primary" data-approve-calc="${escapeAttr(calcDate)}">Approve &amp; lock</button>`
+      : `<p class="calc-validate-note muted-code">Waiting on Clément's final approval.</p>`;
+  } else {
+    actionHtml = canConfirmSaleSupport
+      ? `<button type="button" class="btn-secondary" data-confirm-sale-support="${escapeAttr(calcDate)}">Confirm — these look right</button>`
+      : `<p class="calc-validate-note muted-code">Waiting on sale support to confirm.</p>`;
   }
 
-  // approved — locked
-  const approvedBy = escapeHtml(paceUserNames[validation.approved_by] || "—");
-  const approvedWhen = fmtValidationTime(validation.approved_at);
-  return `
-    <div class="calc-validate-panel calc-validate-approved">
-      <p class="calc-validate-heading">✓ Approved <span class="muted-code">— ${approvedBy}, ${approvedWhen}</span></p>
-      <ul class="calc-validate-lines">${linesHtml}</ul>
-      ${addonHtml}
-      <p class="calc-validate-note">Locked — this cycle's purchase is final. A change needs a fresh validation next time this cycle comes around.</p>
-    </div>`;
+  const stateClass = validation.approved ? "calc-validate-approved" : (validation.ss_confirmed_by ? "calc-validate-locked" : "");
+  return `<div class="calc-validate-panel ${stateClass}">${tableHtml}${actionHtml}</div>`;
 }
 
-async function handleValidateCalc(calcDate) {
+async function handleConfirmPurchasing(calcDate, addonRawValue) {
+  const addon_birds = Number(addonRawValue);
+  if (!Number.isFinite(addon_birds) || addon_birds < 0) return;
   const data = calcCycleData[calcDate];
   if (!data) return;
   const validated_lines = data.result.groups.map(g => ({ species: g.species, variant: g.variant, birds: g.recommendedBirds, bottleneck: g.bottleneck }));
   const order_ids = data.ordersForWindow
     .filter(o => (o.sale_order_lines || []).some(lineCountsForCalculator))
     .map(o => o.id);
+  const nowIso = new Date().toISOString();
   const { error } = await sb.from("poultry_purchase_validations").upsert({
     calc_date: calcDate,
     delivery_dates: data.dates,
     status: "quantities_validated",
     validated_by: myProfile.id,
-    validated_at: new Date().toISOString(),
+    validated_at: nowIso,
     validated_lines,
     order_ids,
+    addon_birds,
+    addon_set_by: myProfile.id,
+    addon_set_at: nowIso,
   });
-  if (error) { alert("Couldn't validate these quantities: " + error.message); return; }
-  await loadCalculatorCycles();
-}
+  if (error) { alert("Couldn't confirm these quantities: " + error.message); return; }
 
-async function handleSetAddon(calcDate, rawValue) {
-  const addon_birds = Number(rawValue);
-  if (!Number.isFinite(addon_birds) || addon_birds < 0) return;
-  const { error } = await sb.from("poultry_purchase_validations")
-    .update({ addon_birds, addon_set_by: myProfile.id, addon_set_at: new Date().toISOString(), status: "addon_set" })
-    .eq("calc_date", calcDate);
-  if (error) { alert("Couldn't set the add-on: " + error.message); return; }
-
-  // Best-effort, same pattern as the quotation notification — a failure here
-  // should never block purchasing from having already saved the add-on.
+  // Best-effort, same pattern as the quotation notification — a failure
+  // here should never block purchasing from having already saved this.
   if (typeof emailjs !== "undefined" && EMAILJS_SERVICE_ID &&
       typeof EMAILJS_PURCHASE_TEMPLATE_ID !== "undefined" && EMAILJS_PURCHASE_TEMPLATE_ID) {
-    const data = calcCycleData[calcDate];
-    const linesText = (data ? data.result.groups : [])
+    const linesText = data.result.groups
       .map(g => `${g.species} — ${g.variant}: ${g.recommendedBirds} birds`).join("\n");
     emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_PURCHASE_TEMPLATE_ID, {
       to_email: "clement@klongphaifarm.com",
@@ -3192,8 +3265,16 @@ async function handleSetAddon(calcDate, rawValue) {
       validated_lines: linesText,
       addon_birds,
       set_by: myProfile.full_name,
-    }).catch(err => console.warn("Purchase approval email failed:", err));
+    }).catch(err => console.warn("Purchase confirmation email failed:", err));
   }
+  await loadCalculatorCycles();
+}
+
+async function handleConfirmSaleSupport(calcDate) {
+  const { error } = await sb.from("poultry_purchase_validations")
+    .update({ ss_confirmed_by: myProfile.id, ss_confirmed_at: new Date().toISOString() })
+    .eq("calc_date", calcDate);
+  if (error) { alert("Couldn't confirm: " + error.message); return; }
   await loadCalculatorCycles();
 }
 
@@ -3206,12 +3287,23 @@ async function handleApproveCalc(calcDate) {
 }
 
 calcCyclesEl.addEventListener("submit", (e) => {
-  const form = e.target.closest("[data-addon-calc]");
+  const form = e.target.closest("[data-confirm-purchasing]");
   if (!form) return;
   e.preventDefault();
   const input = form.querySelector(".calc-addon-input");
-  handleSetAddon(form.dataset.addonCalc, input ? input.value : "");
+  handleConfirmPurchasing(form.dataset.confirmPurchasing, input ? input.value : "");
 });
+
+// Click (or Enter/Space) on a bird-line row in the confirmation table
+// reveals its bottleneck cut — the "possibility to have the detail" Clément
+// asked for alongside a table that's otherwise just numbers and checkmarks.
+function toggleConfirmDetail(row) {
+  const detailRow = row.nextElementSibling;
+  if (!detailRow || !detailRow.classList.contains("calc-confirm-detail")) return;
+  const nowOpen = detailRow.classList.toggle("hidden") === false;
+  row.classList.toggle("is-open", nowOpen);
+  row.setAttribute("aria-expanded", String(nowOpen));
+}
 
 // Click (or Enter/Space) on a card's header reveals that species/variant's
 // birds-needed-per-delivery-day breakdown. Delegated on the whole
@@ -3242,8 +3334,10 @@ calcCyclesEl.addEventListener("click", (e) => {
   if (head) { toggleCalcDaybreak(head); return; }
   const cutRow = e.target.closest("[data-cut-toggle]");
   if (cutRow) { toggleCutOrders(cutRow); return; }
-  const validateBtn = e.target.closest("[data-validate-calc]");
-  if (validateBtn) { handleValidateCalc(validateBtn.dataset.validateCalc); return; }
+  const confirmRow = e.target.closest("[data-confirm-toggle]");
+  if (confirmRow) { toggleConfirmDetail(confirmRow); return; }
+  const ssConfirmBtn = e.target.closest("[data-confirm-sale-support]");
+  if (ssConfirmBtn) { handleConfirmSaleSupport(ssConfirmBtn.dataset.confirmSaleSupport); return; }
   const approveBtn = e.target.closest("[data-approve-calc]");
   if (approveBtn) handleApproveCalc(approveBtn.dataset.approveCalc);
 });
@@ -3252,7 +3346,9 @@ calcCyclesEl.addEventListener("keydown", (e) => {
   const head = e.target.closest("[data-calc-toggle]");
   if (head) { e.preventDefault(); toggleCalcDaybreak(head); return; }
   const cutRow = e.target.closest("[data-cut-toggle]");
-  if (cutRow) { e.preventDefault(); toggleCutOrders(cutRow); }
+  if (cutRow) { e.preventDefault(); toggleCutOrders(cutRow); return; }
+  const confirmRow = e.target.closest("[data-confirm-toggle]");
+  if (confirmRow) { e.preventDefault(); toggleConfirmDetail(confirmRow); }
 });
 
 // -------------------------------------------------------- order-grid star
@@ -3266,11 +3362,17 @@ calcCyclesEl.addEventListener("keydown", (e) => {
 function lineCountsForCalculator(l) {
   if (l.quantity_tbc) return false;
   if (!Number(l.quantity)) return false;
-  if (!(l.order_products && l.order_products.cut_yield_reference)) return false;
-  return l.unit === "Kg" || l.unit === "Grams" || l.unit === "Pcs";
+  const op = l.order_products;
+  if (!op) return false;
+  // Migration 015 (7 Sep 2026): a whole-bird SKU counts on its own terms —
+  // no cut_yield_reference piece weight involved, just a direct Pcs count —
+  // and all four channels feed the calculator now, not Restaurant alone.
+  if (op.is_whole_bird) return l.unit === "Pcs";
+  if (!op.cut_yield_reference) return false;
+  if (l.unit === "Kg" || l.unit === "Grams" || l.unit === "Pcs") return true;
+  return l.unit === "Pack" && !!op.pack_piece_count;
 }
 function orderIsCalcCounted(o, upcomingDeliveryDates) {
-  if (o.channel !== "Restaurant") return false;
   if (!upcomingDeliveryDates.includes(o.delivery_date)) return false;
   return (o.sale_order_lines || []).some(lineCountsForCalculator);
 }
