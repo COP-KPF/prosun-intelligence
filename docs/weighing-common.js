@@ -4,6 +4,15 @@
 // ============================================================================
 
 const WEIGH_BUCKET = "weighing-photos";
+
+// Thai / English for the weighing screen and the phone page (28 Oct 2026).
+// Remembered per browser; empty = not chosen yet (the screen picks a default).
+let WEIGH_LANG = (() => { try { return localStorage.getItem("weigh-lang") || ""; } catch (e) { return ""; } })();
+function weighSetLang(lang) {
+  WEIGH_LANG = lang === "en" ? "en" : "th";
+  try { localStorage.setItem("weigh-lang", WEIGH_LANG); } catch (e) { /* private mode */ }
+}
+function T(th, en) { return WEIGH_LANG === "en" ? en : th; }
 // Supabase edge function that receives the photos and reads them. Deployed
 // on 13 Oct 2026 under the auto-generated name "smart-api" (a function's
 // URL name cannot be changed after creation). Code: supabase/functions/weighing.
@@ -22,7 +31,7 @@ async function weighResizePhoto(file, maxSide = 2000, quality = 0.85) {
     source = await new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error("ไฟล์นี้ไม่ใช่รูปภาพที่เปิดได้"));
+      img.onerror = () => reject(new Error(T("ไฟล์นี้ไม่ใช่รูปภาพที่เปิดได้", "This file is not a picture that can be opened")));
       img.src = URL.createObjectURL(file);
     });
     w = source.naturalWidth; h = source.naturalHeight;
@@ -34,7 +43,7 @@ async function weighResizePhoto(file, maxSide = 2000, quality = 0.85) {
   canvas.getContext("2d").drawImage(source, 0, 0, canvas.width, canvas.height);
   if (source.close) source.close();
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
-  if (!blob) throw new Error("ย่อรูปไม่สำเร็จ");
+  if (!blob) throw new Error(T("ย่อรูปไม่สำเร็จ", "Could not resize the photo"));
   return blob;
 }
 
@@ -53,14 +62,14 @@ async function weighCallFn(body, accessToken) {
       body: JSON.stringify(body),
     });
   } catch (e) {
-    const err = new Error("ไม่มีสัญญาณอินเทอร์เน็ต");
+    const err = new Error(T("ไม่มีสัญญาณอินเทอร์เน็ต", "No internet connection"));
     err.code = "offline";
     throw err;
   }
   let data = null;
   try { data = await res.json(); } catch (e) { /* empty body */ }
   if (!res.ok) {
-    const err = new Error((data && data.error) || ("ข้อผิดพลาด " + res.status));
+    const err = new Error((data && data.error) || (T("ข้อผิดพลาด ", "Error ") + res.status));
     err.status = res.status;
     err.code = data && data.code;
     throw err;
@@ -75,7 +84,7 @@ async function weighUploadPhoto(client, blob, extraBody, accessToken) {
   const u = await weighCallFn(Object.assign({ action: "upload_url" }, extraBody), accessToken);
   const { error } = await client.storage.from(WEIGH_BUCKET)
     .uploadToSignedUrl(u.path, u.upload_token, blob, { contentType: "image/jpeg" });
-  if (error) throw new Error("ส่งรูปไม่สำเร็จ: " + (error.message || error));
+  if (error) throw new Error(T("ส่งรูปไม่สำเร็จ: ", "Photo upload failed: ") + (error.message || error));
   await weighCallFn(Object.assign({ action: "uploaded", paper_id: u.paper_id }, extraBody), accessToken);
   return u.paper_id;
 }
@@ -83,7 +92,8 @@ async function weighUploadPhoto(client, blob, extraBody, accessToken) {
 function weighThaiDate(iso, opts) {
   if (!iso) return "";
   const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString("th-TH", opts || { weekday: "long", day: "numeric", month: "short", year: "numeric" });
+  return d.toLocaleDateString(WEIGH_LANG === "en" ? "en-GB" : "th-TH",
+    opts || { weekday: "long", day: "numeric", month: "short", year: "numeric" });
 }
 
 function weighBangkokToday() {
@@ -92,5 +102,5 @@ function weighBangkokToday() {
 
 function weighTime(isoTs) {
   if (!isoTs) return "";
-  return new Date(isoTs).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" });
+  return new Date(isoTs).toLocaleTimeString(WEIGH_LANG === "en" ? "en-GB" : "th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" });
 }

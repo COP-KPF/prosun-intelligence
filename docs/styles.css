@@ -1292,3 +1292,10 @@ header.app-header .btn-link { color: #f4efe3; }
 th { color: var(--accent); background: #edf1ea; }
 .btn-secondary { border-color: var(--accent); color: var(--accent); }
 .btn-secondary:hover { background: var(--brand-tint); }
+
+/* TH / EN switch on the weighing screen */
+.w-head-right { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.w-lang { display: inline-flex; border: 1px solid var(--accent); border-radius: 999px; overflow: hidden; }
+.w-lang button { background: var(--panel); color: var(--accent); border: 0; padding: 6px 14px; min-height: 34px; font-size: 0.85rem; font-weight: 600; }
+.w-lang button.on { background: var(--accent); color: #fff; }
+@media (max-width: 700px) { .w-head-right { align-items: flex-start; } }

@@ -10,7 +10,8 @@
 // escapeAttr, downloadXlsx, hideCrmSections, hidePaceSections, paceTabs).
 // As everywhere in this app, the database decides who sees what: a sales rep
 // or sale support calling these queries gets zero rows (Migration 018 RLS).
-// Everything on screen is Thai — this is a factory screen.
+// Thai or English (switch at the top right of the screen, remembered per
+// browser): Thai by default for the factory, English for admin.
 // ============================================================================
 
 const weighSection = document.getElementById("weighing-section");
@@ -38,16 +39,19 @@ const W = {
 
 const WEIGH_TOLERANCE = 0.05;   // ±5% → orange in the "ต่าง" column
 
+// Labels are getters so they follow the TH / EN switch (weighing-common.js).
 const WEIGH_STATUS = {
-  uploading: { label: "กำลังส่ง", cls: "w-pill-blue" },
-  queued:    { label: "กำลังอ่าน", cls: "w-pill-blue" },
-  reading:   { label: "กำลังอ่าน", cls: "w-pill-blue" },
-  read:      { label: "รอตรวจ", cls: "w-pill-amber" },
-  failed:    { label: "อ่านไม่ได้", cls: "w-pill-red" },
-  confirmed: { label: "ยืนยันแล้ว", cls: "w-pill-green" },
+  uploading: { get label() { return T("กำลังส่ง", "Sending"); }, cls: "w-pill-blue" },
+  queued:    { get label() { return T("กำลังอ่าน", "Reading"); }, cls: "w-pill-blue" },
+  reading:   { get label() { return T("กำลังอ่าน", "Reading"); }, cls: "w-pill-blue" },
+  read:      { get label() { return T("รอตรวจ", "To check"); }, cls: "w-pill-amber" },
+  failed:    { get label() { return T("อ่านไม่ได้", "Not readable"); }, cls: "w-pill-red" },
+  confirmed: { get label() { return T("ยืนยันแล้ว", "Confirmed"); }, cls: "w-pill-green" },
 };
 const WEIGH_IN_PROGRESS = ["uploading", "queued", "reading"];
 const WEIGH_UNIT_TH = { kg: "kg", g: "g", pcs: "ตัว", pack: "แพค", jar: "ขวด", other: "หน่วย" };
+const WEIGH_UNIT_EN = { kg: "kg", g: "g", pcs: "pc", pack: "pack", jar: "jar", other: "unit" };
+function weighUnit(u) { return (WEIGH_LANG === "en" ? WEIGH_UNIT_EN : WEIGH_UNIT_TH)[u] || ""; }
 
 function weighCompanyShort(c) {
   return c === "Prosun Farm" ? "PSFarm" : c === "Prosun Food" ? "PSFood" : "—";
@@ -58,7 +62,8 @@ function weighFmt(n, dp = 2) {
 function weighShortDate(iso) {
   if (!iso) return "";
   const [y, m, d] = iso.split("-");
-  return `${Number(d)}/${Number(m)}/${String(Number(y) + 543).slice(2)}`;
+  // Thai: Buddhist year as the team writes it (28/10/69); English: 28/10/26.
+  return `${Number(d)}/${Number(m)}/${String(Number(y) + (WEIGH_LANG === "en" ? 0 : 543)).slice(2)}`;
 }
 function weighPaper(id) { return W.papers.find((p) => p.id === id); }
 function weighLines(p) { return (p && p.weighing_lines) || []; }
@@ -80,12 +85,36 @@ function weighDiff(line) {
   }
   if (["pcs", "pack", "jar"].includes(line.ordered_unit)) {
     const per = a / q;
-    return { text: `${per.toFixed(2)}/${WEIGH_UNIT_TH[line.ordered_unit]}`, warn: false, kg: null, perUnit: Math.round(per * 1000) / 1000 };
+    return { text: `${per.toFixed(2)}/${weighUnit(line.ordered_unit)}`, warn: false, kg: null, perUnit: Math.round(per * 1000) / 1000 };
   }
   return { text: "", warn: false, kg: null, perUnit: null };
 }
 
 function weighNeedsLook(line) { return !!line.flag_reason && !line.checked; }
+
+function weighLangHtml() {
+  return `<div class="w-lang" role="group" aria-label="Language / ภาษา">
+    <button type="button" data-act="lang" data-lang="th" class="${WEIGH_LANG === "en" ? "" : "on"}" aria-pressed="${WEIGH_LANG !== "en"}">ไทย</button>
+    <button type="button" data-act="lang" data-lang="en" class="${WEIGH_LANG === "en" ? "on" : ""}" aria-pressed="${WEIGH_LANG === "en"}">EN</button>
+  </div>`;
+}
+
+// Reasons and notes are written by the reading function in Thai. In English,
+// the fixed phrases are translated here; a reason the AI wrote in its own
+// words stays Thai inside the English sentence.
+function weighServerText(s) {
+  if (!s || WEIGH_LANG !== "en") return s || "";
+  return String(s)
+    .replace(/เขียนไว้ (\d+) ค่า \((.+?)\) รวมให้แล้ว/g, "$1 values written ($2), added up")
+    .replace(/ไม่พบน้ำหนักในช่อง kg\./g, "No weight found in the kg. column")
+    .replace(/ต่างจากที่สั่ง \((.+?) kg\) มากกว่า (\d+)%/g, "More than $2% off the order ($1 kg)")
+    .replace(/รูปนี้ไม่ใช่ใบงาน FM-SA-01/g, "This photo is not an FM-SA-01 working paper")
+    .replace(/ลายมืออื่น:/g, "Other handwriting:")
+    .replace(/ทศนิยมไม่ชัด/g, "Unclear decimal")
+    .replace(/มีขีดฆ่าแก้ตัวเลข/g, "Number crossed out and rewritten")
+    .replace(/อ่านไม่ชัด/g, "Unclear reading")
+    .replace(/ หรือ /g, " or ");
+}
 
 async function weighToken() {
   const { data } = await sb.auth.getSession();
@@ -97,14 +126,17 @@ async function weighToken() {
 // Opened from the PROSUN PACE tab "งานชั่งน้ำหนัก" (switchPaceView in app.js),
 // which sets the header, tabs and title. This only fills the section.
 async function openWeighing() {
+  // Language: the browser's last choice; otherwise Thai for the factory,
+  // English for admin.
+  if (!WEIGH_LANG) WEIGH_LANG = myProfile.role === "admin" ? "en" : "th";
   if (myProfile.role === "factory_admin") {
-    document.getElementById("who-role").textContent = "ผู้ดูแลโรงงาน";
+    document.getElementById("who-role").textContent = T("ผู้ดูแลโรงงาน", "Factory admin");
   }
   weighSection.classList.remove("hidden");
   W.date = weighBangkokToday();
   W.view = "day";
   W.openId = null;
-  weighSection.innerHTML = '<p class="w-muted">กำลังโหลด…</p>';
+  weighSection.innerHTML = `<p class="w-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
   await weighLoad();
   weighStartRealtime();
   weighCleanupOnce();
@@ -145,7 +177,7 @@ async function weighLoad() {
     .order("uploaded_at", { ascending: true });
   if (error) {
     W.papers = [];
-    W.message = { kind: "error", text: "โหลดข้อมูลไม่ได้: " + error.message };
+    W.message = { kind: "error", text: T("โหลดข้อมูลไม่ได้: ", "Could not load: ") + error.message };
   } else {
     W.papers = (data || []).map((p) => Object.assign({}, p, {
       weighing_lines: (p.weighing_lines || []).slice().sort((a, b) => a.line_no - b.line_no),
@@ -200,7 +232,7 @@ async function weighEnsureLink(forceNew) {
     .select("token, work_date, expires_at")
     .single();
   W.link = error ? null : data;
-  if (error) W.message = { kind: "error", text: "สร้าง QR ไม่ได้: " + error.message };
+  if (error) W.message = { kind: "error", text: T("สร้าง QR ไม่ได้: ", "Could not create the QR code: ") + error.message };
 }
 
 async function weighPreparePhotos() {
@@ -304,34 +336,34 @@ function weighCounts() {
 function weighMessageHtml() {
   if (!W.message) return "";
   return `<div class="w-msg w-msg-${W.message.kind}" role="status">${escapeHtml(W.message.text)}
-    <button type="button" class="w-msg-close" data-act="dismiss" aria-label="ปิด">×</button></div>`;
+    <button type="button" class="w-msg-close" data-act="dismiss" aria-label="${T("ปิด", "Close")}">×</button></div>`;
 }
 
 function weighQrHtml() {
   if (W.date !== weighBangkokToday()) {
-    return `<p class="w-muted">QR สำหรับมือถือใช้ได้เฉพาะวันนี้ — สำหรับวันอื่นใช้ปุ่มอัปโหลดด้านล่าง</p>`;
+    return `<p class="w-muted">${T("QR สำหรับมือถือใช้ได้เฉพาะวันนี้ — สำหรับวันอื่นใช้ปุ่มอัปโหลดด้านล่าง", "The phone QR code works for today only — for another day use the upload button below.")}</p>`;
   }
-  if (!W.link) return `<p class="w-muted">ยังไม่มี QR</p>`;
+  if (!W.link) return `<p class="w-muted">${T("ยังไม่มี QR", "No QR code yet")}</p>`;
   const url = new URL("capture.html?t=" + W.link.token, location.href).href;
   let svg = "";
   if (typeof qrcode === "function") {
     const qr = qrcode(0, "M");
     qr.addData(url);
     qr.make();
-    svg = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true, alt: "QR สำหรับเปิดหน้าถ่ายรูปบนมือถือ" });
+    svg = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true, alt: T("QR สำหรับเปิดหน้าถ่ายรูปบนมือถือ", "QR code to open the phone camera page") });
   } else {
-    svg = `<a href="${escapeAttr(url)}" target="_blank" rel="noopener">เปิดหน้าถ่ายรูป</a>`;
+    svg = `<a href="${escapeAttr(url)}" target="_blank" rel="noopener">${T("เปิดหน้าถ่ายรูป", "Open the camera page")}</a>`;
   }
   return `<div class="w-qr" data-qr-url="${escapeAttr(url)}">${svg}</div>
-    <p class="w-small w-center">ใช้ได้ถึง 23:59 วันนี้ ·
-      <button type="button" class="btn-link" data-act="new-link">สร้างใหม่</button></p>`;
+    <p class="w-small w-center">${T("ใช้ได้ถึง 23:59 วันนี้", "Valid until 23:59 today")} ·
+      <button type="button" class="btn-link" data-act="new-link">${T("สร้างใหม่", "New code")}</button></p>`;
 }
 
 function weighUploadsHtml() {
   if (!W.uploads.length) return "";
   return `<ul class="w-uploads">${W.uploads.map((u) =>
     `<li><span>${escapeHtml(u.name)}</span><span class="w-pill ${u.state === "error" ? "w-pill-red" : u.state === "done" ? "w-pill-green" : "w-pill-blue"}">${
-      u.state === "error" ? "ส่งไม่สำเร็จ" : u.state === "done" ? "ส่งแล้ว" : "กำลังส่ง…"}</span>${
+      u.state === "error" ? T("ส่งไม่สำเร็จ", "Failed") : u.state === "done" ? T("ส่งแล้ว", "Sent") : T("กำลังส่ง…", "Sending…")}</span>${
       u.error ? `<small class="w-err">${escapeHtml(u.error)}</small>` : ""}</li>`).join("")}</ul>`;
 }
 
@@ -343,8 +375,8 @@ function weighPaperCardHtml(p) {
     <span class="w-thumb">${img ? `<img src="${escapeAttr(img)}" alt="" loading="lazy">` : ""}</span>
     <span class="w-card-body">
       <span class="w-card-po">${escapeHtml(p.po_number || "—")}</span>
-      <span class="w-card-cust">${escapeHtml(p.customer_name || (WEIGH_IN_PROGRESS.includes(p.status) ? "กำลังอ่าน…" : "ไม่ทราบลูกค้า"))}</span>
-      <span class="w-card-meta">${escapeHtml(weighCompanyShort(p.company))}${n ? " · " + n + " รายการ" : ""} · ${escapeHtml(weighTime(p.uploaded_at))}</span>
+      <span class="w-card-cust">${escapeHtml(p.customer_name || (WEIGH_IN_PROGRESS.includes(p.status) ? T("กำลังอ่าน…", "Reading…") : T("ไม่ทราบลูกค้า", "Unknown customer")))}</span>
+      <span class="w-card-meta">${escapeHtml(weighCompanyShort(p.company))}${n ? " · " + n + T(" รายการ", n === 1 ? " line" : " lines") : ""} · ${escapeHtml(weighTime(p.uploaded_at))}</span>
       <span class="w-pill ${st.cls}">${st.label}</span>
     </span>
   </button>`;
@@ -380,67 +412,72 @@ function weighRenderDay() {
   ${weighMessageHtml()}
   <div class="w-head">
     <div class="w-daynav">
-      <button type="button" class="w-iconbtn" data-act="day" data-delta="-1" aria-label="วันก่อนหน้า">‹</button>
+      <button type="button" class="w-iconbtn" data-act="day" data-delta="-1" aria-label="${T("วันก่อนหน้า", "Previous day")}">‹</button>
       <div>
         <h2 class="w-day">${escapeHtml(weighThaiDate(W.date))}</h2>
-        <div class="w-muted">${isToday ? "ใบงานที่ถ่ายวันนี้" : "ใบงานที่ถ่ายวันนั้น"}${
-          isToday ? "" : ` · <button type="button" class="btn-link" data-act="today">กลับไปวันนี้</button>`}</div>
+        <div class="w-muted">${isToday ? T("ใบงานที่ถ่ายวันนี้", "Papers photographed today") : T("ใบงานที่ถ่ายวันนั้น", "Papers photographed that day")}${
+          isToday ? "" : ` · <button type="button" class="btn-link" data-act="today">${T("กลับไปวันนี้", "Back to today")}</button>`}</div>
       </div>
-      <button type="button" class="w-iconbtn" data-act="day" data-delta="1" aria-label="วันถัดไป">›</button>
+      <button type="button" class="w-iconbtn" data-act="day" data-delta="1" aria-label="${T("วันถัดไป", "Next day")}">›</button>
     </div>
-    <div class="w-counters">
-      <div class="w-counter"><span>ใบงาน</span><strong>${c.all}</strong></div>
-      <div class="w-counter w-c-amber"><span>รอตรวจ</span><strong>${c.wait}</strong></div>
-      <div class="w-counter w-c-blue"><span>กำลังอ่าน</span><strong>${c.busy}</strong></div>
-      <div class="w-counter w-c-green"><span>ยืนยันแล้ว</span><strong>${c.done}</strong></div>
+    <div class="w-head-right">
+      ${weighLangHtml()}
+      <div class="w-counters">
+        <div class="w-counter"><span>${T("ใบงาน", "Papers")}</span><strong>${c.all}</strong></div>
+        <div class="w-counter w-c-amber"><span>${T("รอตรวจ", "To check")}</span><strong>${c.wait}</strong></div>
+        <div class="w-counter w-c-blue"><span>${T("กำลังอ่าน", "Reading")}</span><strong>${c.busy}</strong></div>
+        <div class="w-counter w-c-green"><span>${T("ยืนยันแล้ว", "Confirmed")}</span><strong>${c.done}</strong></div>
+      </div>
     </div>
   </div>
 
   <div class="w-row">
     <section class="w-panel w-capture">
-      <h3>ถ่ายรูปด้วยมือถือ</h3>
-      <p class="w-small">สแกน QR นี้ด้วยมือถือของโรงงาน รูปที่ถ่ายจะขึ้นในตารางนี้ทันที ไม่ต้องล็อกอินบนมือถือ</p>
+      <h3>${T("ถ่ายรูปด้วยมือถือ", "Photograph with a phone")}</h3>
+      <p class="w-small">${T("สแกน QR นี้ด้วยมือถือของโรงงาน รูปที่ถ่ายจะขึ้นในตารางนี้ทันที ไม่ต้องล็อกอินบนมือถือ", "Scan this QR code with the factory phone. Photos appear here straight away — no login on the phone.")}</p>
       ${weighQrHtml()}
       <div class="w-sep"></div>
-      <p class="w-small w-muted">ไม่มีมือถือ หรือใช้เครื่องสแกน</p>
+      <p class="w-small w-muted">${T("ไม่มีมือถือ หรือใช้เครื่องสแกน", "No phone, or using a scanner")}</p>
       <label class="w-btn w-btn-outline w-upload-label">
         <input type="file" accept="image/*" multiple data-act="upload" class="w-file">
-        อัปโหลดไฟล์รูป / สแกน
+        ${T("อัปโหลดไฟล์รูป / สแกน", "Upload photos / scans")}
       </label>
       ${weighUploadsHtml()}
     </section>
 
     <section class="w-panel w-papers">
-      <div class="w-panel-head"><h3>ใบงาน${isToday ? "วันนี้" : ""}</h3><span class="w-small w-muted">คลิกใบงานเพื่อตรวจตัวเลข</span></div>
+      <div class="w-panel-head"><h3>${isToday ? T("ใบงานวันนี้", "Today's papers") : T("ใบงาน", "Papers")}</h3><span class="w-small w-muted">${T("คลิกใบงานเพื่อตรวจตัวเลข", "Click a paper to check its numbers")}</span></div>
       ${W.papers.length
         ? `<div class="w-cards">${W.papers.map(weighPaperCardHtml).join("")}</div>`
-        : `<p class="w-empty">ยังไม่มีรูปใบงาน${isToday ? "วันนี้ — สแกน QR แล้วถ่ายรูปได้เลย" : ""}</p>`}
+        : `<p class="w-empty">${isToday ? T("ยังไม่มีรูปใบงานวันนี้ — สแกน QR แล้วถ่ายรูปได้เลย", "No papers yet today — scan the QR code and start photographing") : T("ยังไม่มีรูปใบงาน", "No papers")}</p>`}
     </section>
   </div>
 
   <section class="w-panel w-table-panel">
     <div class="w-panel-head">
       <div>
-        <h3>ตารางน้ำหนักจริง — ${escapeHtml(weighThaiDate(W.date, { day: "numeric", month: "short", year: "numeric" }))}</h3>
-        <div class="w-small w-muted">${lineCount} รายการจาก ${c.all} ใบงาน · ยืนยันแล้ว ${c.done} ใบ · รอตรวจ ${c.wait} ใบ${c.busy ? ` · กำลังอ่าน ${c.busy} ใบ` : ""}</div>
+        <h3>${T("ตารางน้ำหนักจริง", "Actual weights")} — ${escapeHtml(weighThaiDate(W.date, { day: "numeric", month: "short", year: "numeric" }))}</h3>
+        <div class="w-small w-muted">${T(
+          `${lineCount} รายการจาก ${c.all} ใบงาน · ยืนยันแล้ว ${c.done} ใบ · รอตรวจ ${c.wait} ใบ${c.busy ? ` · กำลังอ่าน ${c.busy} ใบ` : ""}`,
+          `${lineCount} lines from ${c.all} papers · ${c.done} confirmed · ${c.wait} to check${c.busy ? ` · ${c.busy} being read` : ""}`)}</div>
       </div>
       <div class="w-actions">
-        <label class="w-inline">แสดง
+        <label class="w-inline">${T("แสดง", "Show")}
           <select data-act="filter">
-            <option value="all"${W.filter === "all" ? " selected" : ""}>ทุกรายการ</option>
-            <option value="wait"${W.filter === "wait" ? " selected" : ""}>รอตรวจ</option>
-            <option value="done"${W.filter === "done" ? " selected" : ""}>ยืนยันแล้ว</option>
-            <option value="gap"${W.filter === "gap" ? " selected" : ""}>ต่างเกิน ±5%</option>
+            <option value="all"${W.filter === "all" ? " selected" : ""}>${T("ทุกรายการ", "All lines")}</option>
+            <option value="wait"${W.filter === "wait" ? " selected" : ""}>${T("รอตรวจ", "To check")}</option>
+            <option value="done"${W.filter === "done" ? " selected" : ""}>${T("ยืนยันแล้ว", "Confirmed")}</option>
+            <option value="gap"${W.filter === "gap" ? " selected" : ""}>${T("ต่างเกิน ±5%", "Off by more than ±5%")}</option>
           </select>
         </label>
-        <button type="button" class="w-btn" data-act="export"${W.papers.length ? "" : " disabled"}>ส่งออก Excel</button>
+        <button type="button" class="w-btn" data-act="export"${W.papers.length ? "" : " disabled"}>${T("ส่งออก Excel", "Export to Excel")}</button>
       </div>
     </div>
     <div class="table-scroll w-scroll">
       <table class="w-table" id="weighing-table">
-        <thead><tr><th>วันที่ส่ง</th><th>บริษัท</th><th>PO</th><th>ลูกค้า</th><th>สินค้า</th>
-          <th class="w-num">สั่ง</th><th class="w-num">ชั่งจริง (kg)</th><th class="w-num">ต่าง</th>
-          <th>สถานะ</th><th>ยืนยันโดย</th><th></th></tr></thead>
+        <thead><tr><th>${T("วันที่ส่ง", "Delivery")}</th><th>${T("บริษัท", "Company")}</th><th>PO</th><th>${T("ลูกค้า", "Customer")}</th><th>${T("สินค้า", "Product")}</th>
+          <th class="w-num">${T("สั่ง", "Ordered")}</th><th class="w-num">${T("ชั่งจริง (kg)", "Actual (kg)")}</th><th class="w-num">${T("ต่าง", "Difference")}</th>
+          <th>${T("สถานะ", "Status")}</th><th>${T("ยืนยันโดย", "Confirmed by")}</th><th></th></tr></thead>
         <tbody>${rows.length ? rows.map((r) => {
           const d = r.l ? weighDiff(r.l) : { text: "", warn: false };
           return `<tr class="${r.first ? "w-first" : ""}">
@@ -448,18 +485,18 @@ function weighRenderDay() {
             <td>${r.first ? escapeHtml(weighCompanyShort(r.p.company)) : ""}</td>
             <td class="w-mono">${r.first ? escapeHtml(r.p.po_number || "") : ""}</td>
             <td>${r.first ? escapeHtml(r.p.customer_name || "") : ""}</td>
-            <td class="w-wrap">${r.l ? escapeHtml(r.l.description) : `<span class="w-muted">${escapeHtml(r.p.status === "failed" ? "อ่านไม่ได้ — เปิดเพื่ออ่านใหม่" : WEIGH_IN_PROGRESS.includes(r.p.status) ? "กำลังอ่าน…" : "ไม่พบรายการ")}</span>`}</td>
+            <td class="w-wrap">${r.l ? escapeHtml(r.l.description) : `<span class="w-muted">${escapeHtml(r.p.status === "failed" ? T("อ่านไม่ได้ — เปิดเพื่ออ่านใหม่", "Not readable — open to read again") : WEIGH_IN_PROGRESS.includes(r.p.status) ? T("กำลังอ่าน…", "Reading…") : T("ไม่พบรายการ", "No lines found"))}</span>`}</td>
             <td class="w-num">${r.l ? escapeHtml(r.l.ordered_text || "") : ""}</td>
-            <td class="w-num w-strong">${r.l ? (r.l.actual_kg === null ? `<span class="w-muted">—</span>` : weighFmt(r.l.actual_kg)) : ""}${r.l && weighNeedsLook(r.l) && r.p.status !== "confirmed" ? ' <span class="w-q" title="ต้องตรวจกับรูป">?</span>' : ""}</td>
+            <td class="w-num w-strong">${r.l ? (r.l.actual_kg === null ? `<span class="w-muted">—</span>` : weighFmt(r.l.actual_kg)) : ""}${r.l && weighNeedsLook(r.l) && r.p.status !== "confirmed" ? ` <span class="w-q" title="${T("ต้องตรวจกับรูป", "Check against the photo")}">?</span>` : ""}</td>
             <td class="w-num ${d.warn ? "w-warn" : ""}">${escapeHtml(d.text)}</td>
             <td>${r.first ? `<span class="w-pill ${r.st.cls}">${r.st.label}</span>` : ""}</td>
             <td>${r.first ? escapeHtml(r.by) : ""}</td>
-            <td>${r.first ? `<button type="button" class="btn-link" data-act="open" data-id="${r.p.id}">ดูรูป</button>` : ""}</td>
+            <td>${r.first ? `<button type="button" class="btn-link" data-act="open" data-id="${r.p.id}">${T("ดูรูป", "View")}</button>` : ""}</td>
           </tr>`;
-        }).join("") : `<tr><td colspan="11" class="w-empty">ไม่มีรายการ</td></tr>`}</tbody>
+        }).join("") : `<tr><td colspan="11" class="w-empty">${T("ไม่มีรายการ", "No lines")}</td></tr>`}</tbody>
       </table>
     </div>
-    <p class="w-small w-muted w-foot">สินค้าที่สั่งเป็นตัว / แพค แสดงน้ำหนักเฉลี่ยต่อหน่วยในช่อง “ต่าง” · สีส้ม = ต่างจากที่สั่งเกิน ±5% · <span class="w-q">?</span> = ยังไม่ได้ตรวจกับรูป</p>
+    <p class="w-small w-muted w-foot">${T("สินค้าที่สั่งเป็นตัว / แพค แสดงน้ำหนักเฉลี่ยต่อหน่วยในช่อง “ต่าง” · สีส้ม = ต่างจากที่สั่งเกิน ±5%", "Lines ordered by the piece or pack show the average kg per unit under “Difference” · orange = more than ±5% off the order")} · <span class="w-q">?</span> = ${T("ยังไม่ได้ตรวจกับรูป", "not yet checked against the photo")}</p>
   </section>`;
 }
 
@@ -476,48 +513,49 @@ function weighRenderCheck() {
   const ro = editable ? "" : " disabled";
 
   const notes = [];
-  if (busy) notes.push(`<div class="w-note w-note-blue">กำลังอ่านรูปนี้ — ตัวเลขจะขึ้นเองในไม่กี่วินาที</div>`);
-  if (p.status === "failed") notes.push(`<div class="w-note w-note-red">อ่านรูปนี้ไม่ได้${p.read_error ? ": " + escapeHtml(p.read_error) : ""} — กด “อ่านใหม่” หรือถ่ายใหม่</div>`);
-  if (p.note) notes.push(`<div class="w-note w-note-amber">${escapeHtml(p.note)}</div>`);
+  if (busy) notes.push(`<div class="w-note w-note-blue">${T("กำลังอ่านรูปนี้ — ตัวเลขจะขึ้นเองในไม่กี่วินาที", "Reading this photo — the numbers appear by themselves in a few seconds")}</div>`);
+  if (p.status === "failed") notes.push(`<div class="w-note w-note-red">${T("อ่านรูปนี้ไม่ได้", "This photo could not be read")}${p.read_error ? ": " + escapeHtml(p.read_error) : ""} — ${T("กด “อ่านใหม่” หรือถ่ายใหม่", "press “Read again” or take a new photo")}</div>`);
+  if (p.note) notes.push(`<div class="w-note w-note-amber">${escapeHtml(weighServerText(p.note))}</div>`);
   const dup = p.po_number && W.papers.filter((o) => o.id !== p.id && o.po_number === p.po_number && o.company === p.company).length;
-  if (dup) notes.push(`<div class="w-note w-note-amber">PO ${escapeHtml(p.po_number)} มีอีกรูปในวันนี้ — ถ่ายซ้ำหรือเปล่า?</div>`);
+  if (dup) notes.push(`<div class="w-note w-note-amber">PO ${escapeHtml(p.po_number)} ${T("มีอีกรูปในวันนี้ — ถ่ายซ้ำหรือเปล่า?", "appears on another photo today — photographed twice?")}</div>`);
 
   weighSection.innerHTML = `
   ${weighMessageHtml()}
   <div class="w-check-top">
-    <button type="button" class="btn-link w-back" data-act="back">‹ กลับไปตาราง${W.date === weighBangkokToday() ? "วันนี้" : ""}</button>
+    <button type="button" class="btn-link w-back" data-act="back">‹ ${W.date === weighBangkokToday() ? T("กลับไปตารางวันนี้", "Back to today's table") : T("กลับไปตาราง", "Back to the table")}</button>
     <div class="w-stepper">
-      <button type="button" class="w-btn w-btn-outline" data-act="step" data-delta="-1"${idx <= 0 ? " disabled" : ""}>‹ ใบก่อนหน้า</button>
+      <button type="button" class="w-btn w-btn-outline" data-act="step" data-delta="-1"${idx <= 0 ? " disabled" : ""}>‹ ${T("ใบก่อนหน้า", "Previous")}</button>
       <span class="w-mono">${idx + 1} / ${W.papers.length}</span>
-      <button type="button" class="w-btn w-btn-outline" data-act="step" data-delta="1"${idx >= W.papers.length - 1 ? " disabled" : ""}>ใบถัดไป ›</button>
+      <button type="button" class="w-btn w-btn-outline" data-act="step" data-delta="1"${idx >= W.papers.length - 1 ? " disabled" : ""}>${T("ใบถัดไป", "Next")} ›</button>
+      ${weighLangHtml()}
     </div>
   </div>
 
   <div class="w-check">
-    <section class="w-photo" aria-label="รูปใบงาน">
+    <section class="w-photo" aria-label="${T("รูปใบงาน", "Paper photo")}">
       <div class="w-photo-bar">
-        <span>รูปส่งเมื่อ ${escapeHtml(weighTime(p.uploaded_at))}${p.uploaded_by ? " · " + escapeHtml(W.names[p.uploaded_by] || "") : " · มือถือ"}</span>
+        <span>${T("รูปส่งเมื่อ", "Sent at")} ${escapeHtml(weighTime(p.uploaded_at))}${p.uploaded_by ? " · " + escapeHtml(W.names[p.uploaded_by] || "") : " · " + T("มือถือ", "phone")}</span>
         <span class="w-photo-tools">
-          <button type="button" class="w-tool" data-act="zoom">${W.zoom ? "ย่อให้พอดี" : "ขยาย"}</button>
-          <button type="button" class="w-tool" data-act="rotate">หมุน</button>
-          ${!locked && !p.photo_deleted_at ? `<button type="button" class="w-tool" data-act="reread"${busy ? " disabled" : ""}>อ่านใหม่</button>` : ""}
+          <button type="button" class="w-tool" data-act="zoom">${W.zoom ? T("ย่อให้พอดี", "Fit") : T("ขยาย", "Zoom")}</button>
+          <button type="button" class="w-tool" data-act="rotate">${T("หมุน", "Rotate")}</button>
+          ${!locked && !p.photo_deleted_at ? `<button type="button" class="w-tool" data-act="reread"${busy ? " disabled" : ""}>${T("อ่านใหม่", "Read again")}</button>` : ""}
         </span>
       </div>
       <div class="w-photo-frame ${W.zoom ? "w-zoomed" : ""}">
-        ${img ? `<img id="weigh-photo" src="${escapeAttr(img)}" alt="รูปใบงาน ${escapeAttr(p.po_number || "")}" style="transform: rotate(${rot}deg)">`
-          : p.photo_deleted_at ? `<p class="w-photo-gone">รูปนี้ถูกลบอัตโนมัติ (เก็บรูปไว้ 4 สัปดาห์) — ตัวเลขยังอยู่ครบ</p>`
-          : `<p class="w-photo-gone">ไม่มีรูป</p>`}
+        ${img ? `<img id="weigh-photo" src="${escapeAttr(img)}" alt="${T("รูปใบงาน", "Paper photo")} ${escapeAttr(p.po_number || "")}" style="transform: rotate(${rot}deg)">`
+          : p.photo_deleted_at ? `<p class="w-photo-gone">${T("รูปนี้ถูกลบอัตโนมัติ (เก็บรูปไว้ 4 สัปดาห์) — ตัวเลขยังอยู่ครบ", "This photo was deleted automatically (photos are kept 4 weeks) — the numbers are all kept")}</p>`
+          : `<p class="w-photo-gone">${T("ไม่มีรูป", "No photo")}</p>`}
       </div>
     </section>
 
     <section class="w-side">
       <div class="w-panel">
         <div class="w-panel-head">
-          <h3 class="w-cust">${escapeHtml(p.customer_name || "ไม่ทราบลูกค้า")}</h3>
+          <h3 class="w-cust">${escapeHtml(p.customer_name || T("ไม่ทราบลูกค้า", "Unknown customer"))}</h3>
           <span class="w-pill ${st.cls}">${st.label}</span>
         </div>
         <div class="w-fields">
-          <label>บริษัท
+          <label>${T("บริษัท", "Company")}
             <select data-paper-field="company"${ro}>
               <option value="">—</option>
               <option value="Prosun Farm"${p.company === "Prosun Farm" ? " selected" : ""}>Prosun Farm</option>
@@ -525,9 +563,9 @@ function weighRenderCheck() {
             </select></label>
           <label>PO
             <input type="text" data-paper-field="po_number" value="${escapeAttr(p.po_number || "")}"${ro}></label>
-          <label>ลูกค้า
+          <label>${T("ลูกค้า", "Customer")}
             <input type="text" data-paper-field="customer_name" value="${escapeAttr(p.customer_name || "")}"${ro}></label>
-          <label>วันส่ง
+          <label>${T("วันส่ง", "Delivery date")}
             <input type="date" data-paper-field="delivery_date" value="${escapeAttr(p.delivery_date || "")}"${ro}></label>
         </div>
         ${notes.join("")}
@@ -535,28 +573,28 @@ function weighRenderCheck() {
 
       <div class="w-panel w-lines-panel">
         <table class="w-lines">
-          <thead><tr><th>สินค้า</th><th class="w-num">สั่ง</th><th class="w-num">ที่เขียน</th><th class="w-num">ชั่งจริง (kg)</th><th class="w-num">ต่าง</th><th></th></tr></thead>
+          <thead><tr><th>${T("สินค้า", "Product")}</th><th class="w-num">${T("สั่ง", "Ordered")}</th><th class="w-num">${T("ที่เขียน", "Written")}</th><th class="w-num">${T("ชั่งจริง (kg)", "Actual (kg)")}</th><th class="w-num">${T("ต่าง", "Difference")}</th><th></th></tr></thead>
           <tbody>
-          ${lines.length ? lines.map((l) => weighLineRowHtml(l, editable)).join("") : `<tr><td colspan="6" class="w-empty">${busy ? "กำลังอ่าน…" : "ไม่พบรายการในรูปนี้"}</td></tr>`}
+          ${lines.length ? lines.map((l) => weighLineRowHtml(l, editable)).join("") : `<tr><td colspan="6" class="w-empty">${busy ? T("กำลังอ่าน…", "Reading…") : T("ไม่พบรายการในรูปนี้", "No lines found on this photo")}</td></tr>`}
           </tbody>
         </table>
-        ${editable ? `<button type="button" class="btn-link w-add" data-act="add-line">+ เพิ่มรายการ</button>` : ""}
-        <p class="w-small w-muted w-pad">แก้ตัวเลขได้ทุกช่อง บันทึกให้อัตโนมัติ · สีส้มในช่อง “ต่าง” = ต่างจากที่สั่งเกิน ±5%</p>
+        ${editable ? `<button type="button" class="btn-link w-add" data-act="add-line">+ ${T("เพิ่มรายการ", "Add a line")}</button>` : ""}
+        <p class="w-small w-muted w-pad">${T("แก้ตัวเลขได้ทุกช่อง บันทึกให้อัตโนมัติ · สีส้มในช่อง “ต่าง” = ต่างจากที่สั่งเกิน ±5%", "Every number can be corrected and saves automatically · orange under “Difference” = more than ±5% off the order")}</p>
       </div>
 
       ${locked ? `
       <div class="w-panel w-confirmed">
-        <strong>✓ ยืนยันแล้ว · ${escapeHtml(W.names[p.confirmed_by] || "")} ${escapeHtml(weighTime(p.confirmed_at))}</strong>
+        <strong>✓ ${T("ยืนยันแล้ว", "Confirmed")} · ${escapeHtml(W.names[p.confirmed_by] || "")} ${escapeHtml(weighTime(p.confirmed_at))}</strong>
         <span class="w-actions">
-          <button type="button" class="w-btn w-btn-outline" data-act="unconfirm">แก้ไข</button>
-          ${idx < W.papers.length - 1 ? `<button type="button" class="w-btn" data-act="step" data-delta="1">ใบถัดไป ›</button>` : `<button type="button" class="w-btn" data-act="back">กลับไปตาราง</button>`}
+          <button type="button" class="w-btn w-btn-outline" data-act="unconfirm">${T("แก้ไข", "Edit")}</button>
+          ${idx < W.papers.length - 1 ? `<button type="button" class="w-btn" data-act="step" data-delta="1">${T("ใบถัดไป", "Next paper")} ›</button>` : `<button type="button" class="w-btn" data-act="back">${T("กลับไปตาราง", "Back to the table")}</button>`}
         </span>
       </div>` : `
       <div class="w-panel w-confirm-bar">
         <span class="w-small" id="weigh-helper"></span>
         <span class="w-actions">
-          <button type="button" class="w-btn w-btn-danger-outline" data-act="delete">ลบรูปนี้</button>
-          <button type="button" class="w-btn w-btn-big" id="weigh-confirm" data-act="confirm">ยืนยันน้ำหนัก</button>
+          <button type="button" class="w-btn w-btn-danger-outline" data-act="delete">${T("ลบรูปนี้", "Delete photo")}</button>
+          <button type="button" class="w-btn w-btn-big" id="weigh-confirm" data-act="confirm">${T("ยืนยันน้ำหนัก", "Confirm weights")}</button>
         </span>
       </div>`}
     </section>
@@ -571,20 +609,20 @@ function weighLineRowHtml(l, editable) {
   const manual = !l.ordered_text && l.edited && !(l.weights && l.weights.length);
   return `<tr class="w-line ${look ? "w-look" : ""}" data-line-id="${l.id}">
     <td>${manual && editable
-      ? `<input type="text" class="w-desc" data-line-field="description" value="${escapeAttr(l.description)}" placeholder="ชื่อสินค้า" aria-label="ชื่อสินค้า">`
+      ? `<input type="text" class="w-desc" data-line-field="description" value="${escapeAttr(l.description)}" placeholder="${T("ชื่อสินค้า", "Product name")}" aria-label="${T("ชื่อสินค้า", "Product name")}">`
       : escapeHtml(l.description || "—")}</td>
     <td class="w-num">${escapeHtml(l.ordered_text || "")}</td>
     <td class="w-num w-hand">${escapeHtml(l.handwritten_text || "")}</td>
     <td class="w-num"><input type="text" inputmode="decimal" class="w-kg" data-line-field="actual_kg"
         value="${escapeAttr(l.actual_kg === null || l.actual_kg === undefined ? "" : String(Number(l.actual_kg)))}"
-        aria-label="น้ำหนักจริง ${escapeAttr(l.description)}"${ro}></td>
+        aria-label="${T("น้ำหนักจริง", "Actual weight")} ${escapeAttr(l.description)}"${ro}></td>
     <td class="w-num w-diff ${d.warn ? "w-warn" : ""}">${escapeHtml(d.text)}</td>
-    <td>${editable ? `<button type="button" class="w-x" data-act="remove-line" aria-label="ลบรายการ ${escapeAttr(l.description)}">×</button>` : ""}</td>
+    <td>${editable ? `<button type="button" class="w-x" data-act="remove-line" aria-label="${T("ลบรายการ", "Remove line")} ${escapeAttr(l.description)}">×</button>` : ""}</td>
   </tr>
   ${l.flag_reason ? `<tr class="w-flag-row ${look ? "w-look" : ""}" data-flag-for="${l.id}">
     <td colspan="6"><div class="w-flag">
-      <span class="w-flag-text">⚠ ${escapeHtml(l.flag_reason)}</span>
-      <label class="w-check-label"><input type="checkbox" data-line-check="${l.id}"${l.checked ? " checked" : ""}${ro}> ตรวจกับรูปแล้ว</label>
+      <span class="w-flag-text">⚠ ${escapeHtml(weighServerText(l.flag_reason))}</span>
+      <label class="w-check-label"><input type="checkbox" data-line-check="${l.id}"${l.checked ? " checked" : ""}${ro}> ${T("ตรวจกับรูปแล้ว", "Checked against photo")}</label>
     </div></td></tr>` : ""}`;
 }
 
@@ -616,13 +654,13 @@ function weighRefreshCheckDerived() {
   const open = lines.filter(weighNeedsLook).length;
   const bad = lines.filter((l) => l._invalid).length;
   let msg, ready = false;
-  if (WEIGH_IN_PROGRESS.includes(p.status)) msg = "รอให้อ่านรูปเสร็จก่อน";
-  else if (p.status === "failed" && !lines.length) msg = "อ่านไม่ได้ — กด “อ่านใหม่” หรือเพิ่มรายการเอง";
-  else if (!lines.length) msg = "ไม่มีรายการให้ยืนยัน — เพิ่มรายการ หรือลบรูปนี้";
-  else if (bad) msg = "มีช่องน้ำหนักที่ไม่ใช่ตัวเลข";
-  else if (open) msg = `ยังเหลือ ${open} รายการที่ต้องตรวจกับรูปก่อนยืนยัน`;
-  else if (W.saving) msg = "กำลังบันทึก…";
-  else { msg = "ตัวเลขครบแล้ว กดยืนยันเพื่อบันทึกลงตารางวันนี้"; ready = true; }
+  if (WEIGH_IN_PROGRESS.includes(p.status)) msg = T("รอให้อ่านรูปเสร็จก่อน", "Wait until the photo has been read");
+  else if (p.status === "failed" && !lines.length) msg = T("อ่านไม่ได้ — กด “อ่านใหม่” หรือเพิ่มรายการเอง", "Not readable — press “Read again” or add the lines yourself");
+  else if (!lines.length) msg = T("ไม่มีรายการให้ยืนยัน — เพิ่มรายการ หรือลบรูปนี้", "Nothing to confirm — add a line or delete this photo");
+  else if (bad) msg = T("มีช่องน้ำหนักที่ไม่ใช่ตัวเลข", "A weight box contains something that is not a number");
+  else if (open) msg = T(`ยังเหลือ ${open} รายการที่ต้องตรวจกับรูปก่อนยืนยัน`, `${open} line${open === 1 ? "" : "s"} still to check against the photo before confirming`);
+  else if (W.saving) msg = T("กำลังบันทึก…", "Saving…");
+  else { msg = T("ตัวเลขครบแล้ว กดยืนยันเพื่อบันทึกลงตารางวันนี้", "All numbers checked — confirm to record them in today's table"); ready = true; }
   helper.textContent = msg;
   btn.disabled = !ready;
 }
@@ -635,6 +673,7 @@ weighSection.addEventListener("click", async (e) => {
   const act = el.dataset.act;
   if (act === "upload" || act === "filter") return;   // handled on change
   if (act === "dismiss") { W.message = null; weighRender(); return; }
+  if (act === "lang") { weighSetLang(el.dataset.lang); weighRender(); return; }
   if (act === "day") {
     const d = new Date(W.date + "T00:00:00Z");
     d.setUTCDate(d.getUTCDate() + Number(el.dataset.delta));
@@ -720,7 +759,7 @@ async function weighSaveLine(id, payload) {
     const { error } = await sb.from("weighing_lines").update(payload).eq("id", id);
     if (error) {
       Object.assign(line, before);
-      W.message = { kind: "error", text: "บันทึกไม่สำเร็จ: " + error.message };
+      W.message = { kind: "error", text: T("บันทึกไม่สำเร็จ: ", "Could not save: ") + error.message };
       weighRender();
     }
   });
@@ -733,10 +772,10 @@ async function weighSavePaperField(field, value) {
   p[field] = payload[field];
   await weighSaving(async () => {
     const { error } = await sb.from("weighing_papers").update(payload).eq("id", p.id);
-    if (error) { p[field] = before; W.message = { kind: "error", text: "บันทึกไม่สำเร็จ: " + error.message }; weighRender(); return; }
+    if (error) { p[field] = before; W.message = { kind: "error", text: T("บันทึกไม่สำเร็จ: ", "Could not save: ") + error.message }; weighRender(); return; }
     if (field === "customer_name") {
       const h = weighSection.querySelector(".w-cust");
-      if (h) h.textContent = value || "ไม่ทราบลูกค้า";
+      if (h) h.textContent = value || T("ไม่ทราบลูกค้า", "Unknown customer");
     }
   });
 }
@@ -746,7 +785,7 @@ async function weighSetStatus(status) {
   await weighSaving(async () => {
     const { data, error } = await sb.from("weighing_papers").update({ status }).eq("id", p.id)
       .select("status, confirmed_by, confirmed_at").single();
-    if (error) { W.message = { kind: "error", text: "บันทึกไม่สำเร็จ: " + error.message }; return; }
+    if (error) { W.message = { kind: "error", text: T("บันทึกไม่สำเร็จ: ", "Could not save: ") + error.message }; return; }
     Object.assign(p, data);
     W.message = null;
   });
@@ -756,13 +795,13 @@ async function weighSetStatus(status) {
 async function weighReread() {
   const p = weighPaper(W.openId);
   if (weighLines(p).some((l) => l.edited) &&
-      !confirm("อ่านใหม่จะแทนตัวเลขทั้งหมดในใบนี้ รวมถึงที่แก้ไว้ ต้องการอ่านใหม่?")) return;
+      !confirm(T("อ่านใหม่จะแทนตัวเลขทั้งหมดในใบนี้ รวมถึงที่แก้ไว้ ต้องการอ่านใหม่?", "Reading again replaces every number on this paper, including your corrections. Read again?"))) return;
   try {
     await weighCallFn({ action: "read", paper_id: p.id }, await weighToken());
     p.status = "queued";
     W.message = null;
   } catch (err) {
-    W.message = { kind: "error", text: "อ่านใหม่ไม่ได้: " + err.message };
+    W.message = { kind: "error", text: T("อ่านใหม่ไม่ได้: ", "Could not read again: ") + err.message };
   }
   weighRender();
   weighSchedulePoll();
@@ -770,13 +809,13 @@ async function weighReread() {
 
 async function weighDeletePaper() {
   const p = weighPaper(W.openId);
-  if (!confirm("ลบรูปใบงานนี้และตัวเลขที่อ่านได้?")) return;
+  if (!confirm(T("ลบรูปใบงานนี้และตัวเลขที่อ่านได้?", "Delete this photo and the numbers read from it?"))) return;
   const { error } = await sb.from("weighing_papers").delete().eq("id", p.id);
-  if (error) { W.message = { kind: "error", text: "ลบไม่สำเร็จ: " + error.message }; weighRender(); return; }
+  if (error) { W.message = { kind: "error", text: T("ลบไม่สำเร็จ: ", "Could not delete: ") + error.message }; weighRender(); return; }
   await sb.storage.from(WEIGH_BUCKET).remove([p.photo_path]);
   W.papers = W.papers.filter((x) => x.id !== p.id);
   W.view = "day"; W.openId = null;
-  W.message = { kind: "info", text: "ลบรูปแล้ว" };
+  W.message = { kind: "info", text: T("ลบรูปแล้ว", "Photo deleted") };
   weighRender();
 }
 
@@ -787,7 +826,7 @@ async function weighAddLine() {
     paper_id: p.id, line_no: next, description: "", weights: [], confidence: "high",
     edited: true, checked: true,
   }).select("*").single();
-  if (error) { W.message = { kind: "error", text: "เพิ่มรายการไม่ได้: " + error.message }; weighRender(); return; }
+  if (error) { W.message = { kind: "error", text: T("เพิ่มรายการไม่ได้: ", "Could not add a line: ") + error.message }; weighRender(); return; }
   p.weighing_lines = weighLines(p).concat([data]);
   weighRender();
   const input = weighSection.querySelector(`tr[data-line-id="${data.id}"] .w-desc`);
@@ -797,9 +836,9 @@ async function weighAddLine() {
 async function weighRemoveLine(id) {
   const p = weighPaper(W.openId);
   const line = weighLines(p).find((l) => l.id === id);
-  if (!line || !confirm(`ลบรายการ “${line.description || "ไม่มีชื่อ"}”?`)) return;
+  if (!line || !confirm(T(`ลบรายการ “${line.description || "ไม่มีชื่อ"}”?`, `Remove the line “${line.description || "no name"}”?`))) return;
   const { error } = await sb.from("weighing_lines").delete().eq("id", id);
-  if (error) { W.message = { kind: "error", text: "ลบไม่สำเร็จ: " + error.message }; weighRender(); return; }
+  if (error) { W.message = { kind: "error", text: T("ลบไม่สำเร็จ: ", "Could not delete: ") + error.message }; weighRender(); return; }
   p.weighing_lines = weighLines(p).filter((l) => l.id !== id);
   weighRender();
 }
@@ -830,22 +869,26 @@ async function weighUploadFiles(files) {
 
 // ------------------------------------------------------------ Excel export
 function weighExport() {
-  const header = ["วันที่ชั่ง", "วันที่ส่ง", "บริษัท", "PO", "ลูกค้า", "ลำดับ", "สินค้า", "สั่ง",
-    "จำนวนสั่ง", "หน่วย", "น้ำหนักจริง (kg)", "ค่าที่เขียน", "ต่าง (kg)", "kg ต่อหน่วย",
-    "สถานะ", "ยืนยันโดย", "เวลายืนยัน", "หมายเหตุ"];
+  const header = WEIGH_LANG === "en"
+    ? ["Weighing day", "Delivery", "Company", "PO", "Customer", "Line", "Product", "Ordered",
+       "Ordered qty", "Unit", "Actual (kg)", "Written", "Difference (kg)", "kg per unit",
+       "Status", "Confirmed by", "Confirmed at", "Note"]
+    : ["วันที่ชั่ง", "วันที่ส่ง", "บริษัท", "PO", "ลูกค้า", "ลำดับ", "สินค้า", "สั่ง",
+       "จำนวนสั่ง", "หน่วย", "น้ำหนักจริง (kg)", "ค่าที่เขียน", "ต่าง (kg)", "kg ต่อหน่วย",
+       "สถานะ", "ยืนยันโดย", "เวลายืนยัน", "หมายเหตุ"];
   const rows = [header];
   W.papers.forEach((p) => {
     const lines = weighLines(p);
     const st = (WEIGH_STATUS[p.status] || WEIGH_STATUS.read).label;
     const base = [p.work_date, p.delivery_date || "", p.company || "", p.po_number || "", p.customer_name || ""];
-    const tail = [st, p.confirmed_by ? (W.names[p.confirmed_by] || "") : "", p.confirmed_at ? weighTime(p.confirmed_at) : "", p.note || ""];
+    const tail = [st, p.confirmed_by ? (W.names[p.confirmed_by] || "") : "", p.confirmed_at ? weighTime(p.confirmed_at) : "", weighServerText(p.note || "")];
     if (!lines.length) { rows.push([...base, "", "", "", "", "", "", "", "", "", ...tail]); return; }
     lines.forEach((l) => {
       const d = weighDiff(l);
       rows.push([
         ...base, l.line_no, l.description || "", l.ordered_text || "",
         l.ordered_qty === null || l.ordered_qty === undefined ? "" : Number(l.ordered_qty),
-        WEIGH_UNIT_TH[l.ordered_unit] || "",
+        weighUnit(l.ordered_unit),
         l.actual_kg === null || l.actual_kg === undefined ? "" : Number(l.actual_kg),
         l.handwritten_text || "",
         d.kg === null ? "" : d.kg,
@@ -855,6 +898,6 @@ function weighExport() {
     });
   });
   // ASCII file name: some browsers drop a Thai download name entirely.
-  downloadXlsx(`Weighing ${W.date}.xlsx`, "น้ำหนักจริง " + W.date, rows,
+  downloadXlsx(`Weighing ${W.date}.xlsx`, T("น้ำหนักจริง ", "Actual weights ") + W.date, rows,
     [11, 11, 12, 13, 26, 6, 40, 12, 9, 7, 13, 14, 9, 10, 11, 14, 10, 30]);
 }

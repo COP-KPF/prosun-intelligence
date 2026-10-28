@@ -65,7 +65,7 @@ body {
   background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
 }
 .c-list:empty::before {
-  content: "ยังไม่มีรูปจากมือถือนี้"; display: block; padding: 16px; color: var(--muted); font-size: 14px;
+  content: attr(data-empty); display: block; padding: 16px; color: var(--muted); font-size: 14px;
 }
 .c-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #e6e9e8; min-height: 60px; }
 .c-item:last-child { border-bottom: 0; }
@@ -99,3 +99,6 @@ body {
 .c-link { color: #cfe3d4; }
 .c-dot { background: #8fcf9f; }
 .c-logo { background: #f4efe3; border-radius: 8px; padding: 3px 5px; box-sizing: border-box; }
+.c-lang { position: absolute; right: 16px; bottom: 12px; display: flex; border: 1px solid #5d7a66; border-radius: 999px; overflow: hidden; }
+.c-lang button { background: transparent; color: #e9e2d0; border: 0; padding: 6px 12px; min-height: 34px; font: inherit; font-size: 13px; font-weight: 600; }
+.c-lang button.on { background: #f4efe3; color: var(--accent); }

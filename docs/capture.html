@@ -6,7 +6,7 @@
 <meta name="robots" content="noindex" />
 <meta name="theme-color" content="#1f3d2a" />
 <title>ถ่ายรูปใบงาน — PROSUN</title>
-<link rel="stylesheet" href="capture.css?v=20261028-5" />
+<link rel="stylesheet" href="capture.css?v=20261028-6" />
 </head>
 <body>
   <!-- Phone camera page for the weighing photos (Migration 018). Opened by
@@ -14,10 +14,11 @@
        The QR token in the address only lets this page ADD photos for that
        day — it cannot read anything back. -->
   <header class="c-head">
-    <img src="logo.png?v=20261028-5" class="c-logo" alt="Klong Phai Farm" width="69" height="52" />
+    <img src="logo.png?v=20261028-6" class="c-logo" alt="Klong Phai Farm" width="69" height="52" />
     <div class="c-brand">PROSUN PACE · PRODUCTION</div>
-    <h1>งานชั่งน้ำหนัก</h1>
+    <h1 data-en="Weighing">งานชั่งน้ำหนัก</h1>
     <div class="c-day" id="c-day">กำลังตรวจ QR…</div>
+    <div class="c-lang" role="group" aria-label="Language / ภาษา"><button type="button" data-lang="th">ไทย</button><button type="button" data-lang="en">EN</button></div>
     <div class="c-link" id="c-link"></div>
   </header>
 
@@ -25,35 +26,33 @@
     <div id="c-ready" class="hidden">
       <label class="c-shoot" for="c-camera">
         <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="4"></circle></svg>
-        <span class="c-shoot-title">ถ่ายรูปใบงาน</span>
-        <span class="c-shoot-sub">แตะเพื่อเปิดกล้อง · 1 รูปต่อ 1 ใบ</span>
+        <span class="c-shoot-title" data-en="Photograph a paper">ถ่ายรูปใบงาน</span>
+        <span class="c-shoot-sub" data-en="Tap to open the camera · 1 photo per paper">แตะเพื่อเปิดกล้อง · 1 รูปต่อ 1 ใบ</span>
       </label>
       <input type="file" id="c-camera" accept="image/*" capture="environment" class="c-file" />
 
-      <div class="c-tip">
-        วางใบงานบนโต๊ะ ให้เห็นทั้งแผ่นและช่อง kg. ชัด ๆ ถ่ายต่อกันได้เลย ตรวจตัวเลขทีหลังที่คอมพิวเตอร์
-      </div>
+      <div class="c-tip" data-en="Lay the paper flat so the whole sheet and the kg. column are sharp. Take them one after another — the numbers are checked later on the PC.">วางใบงานบนโต๊ะ ให้เห็นทั้งแผ่นและช่อง kg. ชัด ๆ ถ่ายต่อกันได้เลย ตรวจตัวเลขทีหลังที่คอมพิวเตอร์</div>
 
       <div class="c-row">
-        <h2>ส่งแล้ววันนี้</h2>
-        <div class="c-count"><strong id="c-count">0</strong> ใบ</div>
+        <h2 data-en="Sent today">ส่งแล้ววันนี้</h2>
+        <div class="c-count"><strong id="c-count">0</strong> <span data-en="papers">ใบ</span></div>
       </div>
       <ul class="c-list" id="c-list"></ul>
 
-      <label class="c-secondary" for="c-gallery">เลือกรูปจากอัลบั้ม</label>
+      <label class="c-secondary" for="c-gallery" data-en="Choose from the photo album">เลือกรูปจากอัลบั้ม</label>
       <input type="file" id="c-gallery" accept="image/*" multiple class="c-file" />
-      <p class="c-foot">ปิดหน้านี้ได้เมื่อทุกรูปขึ้นว่า “ส่งแล้ว”</p>
+      <p class="c-foot" data-en="You can close this page once every photo shows “Sent”.">ปิดหน้านี้ได้เมื่อทุกรูปขึ้นว่า “ส่งแล้ว”</p>
     </div>
 
     <div id="c-expired" class="hidden c-expired">
-      <h2>QR นี้ใช้ไม่ได้แล้ว</h2>
-      <p>QR หมดอายุหรือถูกสร้างใหม่ — สแกน QR ใหม่จากหน้าจอคอมพิวเตอร์ (งานชั่งน้ำหนัก)</p>
+      <h2 data-en="This QR code no longer works">QR นี้ใช้ไม่ได้แล้ว</h2>
+      <p data-en="The QR code expired or was replaced — scan the new one on the PC (Weighing screen).">QR หมดอายุหรือถูกสร้างใหม่ — สแกน QR ใหม่จากหน้าจอคอมพิวเตอร์ (งานชั่งน้ำหนัก)</p>
     </div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
-  <script src="config.js?v=20261028-5"></script>
-  <script src="weighing-common.js?v=20261028-5"></script>
-  <script src="capture.js?v=20261028-5"></script>
+  <script src="config.js?v=20261028-6"></script>
+  <script src="weighing-common.js?v=20261028-6"></script>
+  <script src="capture.js?v=20261028-6"></script>
 </body>
 </html>
