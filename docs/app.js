@@ -1194,7 +1194,7 @@ function generateQuotePDF(q) {
 // deal_value or notes.
 // ============================================================================
 
-const PACE_ROLES = ["sale_support", "purchasing", "production"];
+const PACE_ROLES = ["sale_support", "purchasing", "production", "accounting"];
 const ORDER_UNITS = ["Kg", "Pcs", "Grams", "Pack", "Jar"];
 
 let paceView = "orders";
@@ -1209,6 +1209,8 @@ const tabOrdersBtn       = document.getElementById("tab-orders");
 const tabCalculatorBtn   = document.getElementById("tab-calculator");
 const tabWeighingBtn     = document.getElementById("tab-weighing");
 const tabConfirmBirdsBtn = document.getElementById("tab-confirm-birds");
+const tabWeightsBtn      = document.getElementById("tab-weights");             // Accounting (Migration 020)
+const tabWeightsBuyBtn   = document.getElementById("tab-weights-purchasing");  // same screen, Purchasing's menu
 const ordersSection      = document.getElementById("orders-section");
 const orderEntrySection  = document.getElementById("order-entry-section");
 const orderLinesBody     = document.getElementById("order-lines-body");
@@ -1891,28 +1893,33 @@ function setupPaceRole() {
     note.textContent = "Enter and review customer orders. You also maintain the product catalogue — retire a product by deactivating it rather than deleting, so past orders keep their reference.";
   } else if (myProfile.role === "purchasing") {
     note.textContent = "Read-only view of every order, so purchasing can see demand before buying. Entering and changing orders is sale support's job.";
+  } else if (myProfile.role === "accounting") {
+    note.textContent = "Weights confirmed at the factory, for invoicing in Odoo. Read-only — a wrong number is corrected by the factory on the weighing screen.";
   } else {
     note.textContent = "Read-only view of orders for production.";
   }
 }
 
 // PROSUN PACE menu by department (28 Oct 2026). Each role sees only its own
-// department; admin sees all three:
+// department; admin sees all of them:
 //   Middle office (sale_support) — Orders, plus "Confirm bird quantities":
 //     sale support's step in the purchase confirmation (Migration 016)
 //   Purchasing (purchasing)      — Poultry calculator
 //   Production (production, factory_admin) — Weighing (Migration 018)
+//   Accounting (accounting) — Confirmed weights, read-only (Migration 020);
+//     purchasing reaches the same screen from its own menu
 // This is the screen only; the database's RLS still decides what each role
 // can read (purchasing reads orders because the calculator is built on them).
 const PACE_MENU = {
-  admin:         ["orders", "calculator", "weighing"],
+  admin:         ["orders", "calculator", "weighing", "weights"],
   sale_support:  ["orders", "confirm-birds"],
-  purchasing:    ["calculator"],
+  purchasing:    ["calculator", "weights"],
   production:    ["weighing"],
   factory_admin: ["weighing"],
+  accounting:    ["weights"],
 };
-const PACE_HOME = { admin: "orders", sale_support: "orders", purchasing: "calculator", production: "weighing", factory_admin: "weighing" };
-const PACE_DEPT = { orders: "Middle office", calculator: "Purchasing", weighing: "Production" };
+const PACE_HOME = { admin: "orders", sale_support: "orders", purchasing: "calculator", production: "weighing", factory_admin: "weighing", accounting: "weights" };
+const PACE_DEPT = { orders: "Middle office", calculator: "Purchasing", weighing: "Production", weights: "Accounting" };
 
 function setPaceTabsForRole() {
   const items = PACE_MENU[myProfile && myProfile.role] || [];
@@ -1920,9 +1927,13 @@ function setPaceTabsForRole() {
   tabConfirmBirdsBtn.classList.toggle("hidden", !items.includes("confirm-birds"));
   tabCalculatorBtn.classList.toggle("hidden", !items.includes("calculator"));
   tabWeighingBtn.classList.toggle("hidden", !items.includes("weighing"));
+  const buyer = myProfile && myProfile.role === "purchasing";
+  tabWeightsBtn.classList.toggle("hidden", !items.includes("weights") || buyer);
+  tabWeightsBuyBtn.classList.toggle("hidden", !items.includes("weights") || !buyer);
   document.getElementById("pace-group-middle").classList.toggle("hidden", !items.includes("orders") && !items.includes("confirm-birds"));
   document.getElementById("pace-group-purchasing").classList.toggle("hidden", !items.includes("calculator"));
   document.getElementById("pace-group-production").classList.toggle("hidden", !items.includes("weighing"));
+  document.getElementById("pace-group-accounting").classList.toggle("hidden", !items.includes("weights") || buyer);
 }
 
 async function switchPaceView(view) {
@@ -1942,14 +1953,19 @@ async function switchPaceView(view) {
   tabCalculatorBtn.classList.toggle("active", view === "calculator");
   tabConfirmBirdsBtn.classList.toggle("active", view === "calculator");
   tabWeighingBtn.classList.toggle("active", view === "weighing");
+  tabWeightsBtn.classList.toggle("active", view === "weights");
+  tabWeightsBuyBtn.classList.toggle("active", view === "weights");
   const crumb = document.getElementById("pace-crumb");
-  const dept = view === "calculator" && myProfile.role === "sale_support" ? "Middle office" : PACE_DEPT[view];
+  const dept = view === "calculator" && myProfile.role === "sale_support" ? "Middle office"
+    : view === "weights" && myProfile.role === "purchasing" ? "Purchasing"
+    : PACE_DEPT[view];
   crumb.textContent = dept || "";
   crumb.classList.toggle("hidden", !dept);
   orderEntrySection.classList.add("hidden");
   ordersSection.classList.toggle("hidden", view !== "orders");
   calculatorSection.classList.toggle("hidden", view !== "calculator");
   if (view !== "weighing") closeWeighing();          // weighing.js
+  if (view !== "weights") closeWeights();            // weights-summary.js
 
   // Purchasing and production read; only sale support and admin write. Entry
   // also needs one specific channel, since the product list is per channel.
@@ -1966,11 +1982,17 @@ async function switchPaceView(view) {
     document.getElementById("list-title").textContent = "งานชั่งน้ำหนัก — Weighing";
     await openWeighing();                             // weighing.js
   }
+  else if (view === "weights") {
+    document.getElementById("list-title").textContent = "น้ำหนักที่ยืนยันแล้ว — Confirmed weights";
+    await openWeights();                              // weights-summary.js
+  }
 }
 
 tabCalculatorBtn.addEventListener("click", () => switchPaceView("calculator"));
 tabWeighingBtn.addEventListener("click", () => switchPaceView("weighing"));
 tabConfirmBirdsBtn.addEventListener("click", () => switchPaceView("calculator"));
+tabWeightsBtn.addEventListener("click", () => switchPaceView("weights"));
+tabWeightsBuyBtn.addEventListener("click", () => switchPaceView("weights"));
 
 document.getElementById("new-order-btn").addEventListener("click", openOrderEntry);
 

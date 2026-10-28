@@ -1299,3 +1299,47 @@ th { color: var(--accent); background: #edf1ea; }
 .w-lang button { background: var(--panel); color: var(--accent); border: 0; padding: 6px 14px; min-height: 34px; font-size: 0.85rem; font-weight: 600; }
 .w-lang button.on { background: var(--accent); color: #fff; }
 @media (max-width: 700px) { .w-head-right { align-items: flex-start; } }
+
+/* ---------------------------------------------------------------------------
+   Confirmed weights — read-only summary for accounting / purchasing
+   (weights-summary.js, Migration 020). Reuses the weighing screen's pieces.
+   --------------------------------------------------------------------------- */
+#weights-section {
+  --w-amber-bg: #fcebd3; --w-amber-bd: #f0cf9f; --w-amber-fg: #7a4300;
+  --w-blue-bg: #e4ecf8;  --w-blue-bd: #c3d4ee;  --w-blue-fg: #174a94;
+  --w-green-bg: #e3f1e7; --w-green-bd: #bfddc8; --w-green-fg: #1e6b3a;
+  --w-red-bg: #fbe4e2;   --w-red-bd: #efbcb7;   --w-red-fg: #9b2c25;
+  --w-warn: #b45309;
+  display: flex; flex-direction: column; gap: 16px;
+  font-family: -apple-system, "Segoe UI", "Noto Sans Thai", "Leelawadee UI", Tahoma, sans-serif;
+}
+#weights-section h2, #weights-section h3 { margin: 0; }
+#weights-section h3 { font-size: 1.02rem; }
+#weights-section label { margin: 0; color: var(--text); font-size: 0.86rem; display: flex; flex-direction: column; gap: 4px; }
+#weights-section .w-muted { color: var(--muted); }
+#weights-section .w-small { font-size: 0.84rem; line-height: 1.5; margin: 0; }
+#weights-section .w-mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-variant-numeric: tabular-nums; }
+#weights-section .w-empty { color: var(--muted); padding: 18px; text-align: center; }
+#weights-section select, #weights-section input { min-height: 40px; }
+.ws-filters { display: flex; flex-direction: column; gap: 14px; padding: 14px 18px; }
+.ws-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.ws-chip { min-height: 38px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--text); font-size: 0.88rem; font-weight: 600; cursor: pointer; }
+.ws-chip:hover { border-color: var(--accent); }
+.ws-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ws-chip:focus-visible { outline: 3px solid #d9c8a6; outline-offset: 2px; }
+.ws-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.ws-fields input[type=date] { width: auto; }
+.ws-fields select { width: auto; min-width: 140px; }
+.ws-search { flex: 1 1 220px; }
+.ws-search input { width: 100%; }
+.ws-counters { margin-bottom: 0; }
+#ws-results { display: flex; flex-direction: column; gap: 14px; }
+.ws-pending { margin-top: 0; }
+.ws-edited { display: inline-block; margin-left: 4px; font-size: 0.72rem; font-weight: 600; padding: 1px 7px;
+  border-radius: 999px; background: #efe8d8; color: #6b5f4a; }
+.pace-dot-accounting { background: #6b5f4a; }
+@media (max-width: 700px) {
+  .ws-fields > label:not(.ws-search) { flex: 1 1 140px; }
+  .ws-fields input[type=date], .ws-fields select { width: 100%; }
+}

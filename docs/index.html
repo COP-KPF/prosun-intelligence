@@ -4,14 +4,14 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Klong Phai Farm CRM</title>
-<link rel="stylesheet" href="styles.css?v=20261028-6" />
+<link rel="stylesheet" href="styles.css?v=20261028-7" />
 </head>
 <body>
 
   <!-- ============ LOGIN SCREEN ============ -->
   <div id="login-screen">
     <form class="login-card" id="login-form">
-      <img src="logo.png?v=20261028-6" class="login-logo" alt="Klong Phai Farm" width="160" height="120" />
+      <img src="logo.png?v=20261028-7" class="login-logo" alt="Klong Phai Farm" width="160" height="120" />
       <h1>Klong Phai Farm CRM</h1>
       <p class="subtitle">Sign in with the account your admin created for you.</p>
 
@@ -36,7 +36,7 @@
   <div id="app-screen" class="hidden">
     <header class="app-header">
       <div class="brand-wrap">
-      <img src="logo.png?v=20261028-6" class="brand-logo" alt="Klong Phai Farm" width="64" height="48" />
+      <img src="logo.png?v=20261028-7" class="brand-logo" alt="Klong Phai Farm" width="64" height="48" />
       <div class="brand">
         <strong id="app-title">Klong Phai Farm CRM</strong>
         <span class="brand-sub" id="app-subtitle"></span>
@@ -69,10 +69,17 @@
         <div class="pace-nav-group" id="pace-group-purchasing">
           <div class="pace-nav-head"><span class="pace-dot pace-dot-purchasing" aria-hidden="true"></span>Purchasing<small>จัดซื้อ</small></div>
           <button type="button" class="pace-nav-item" id="tab-calculator" data-view="calculator">Poultry calculator</button>
+          <!-- Purchasing's own entry to the confirmed weights (Migration 020) -->
+          <button type="button" class="pace-nav-item hidden" id="tab-weights-purchasing" data-view="weights">Confirmed weights<small class="pace-nav-sub">น้ำหนักที่ยืนยันแล้ว</small></button>
         </div>
         <div class="pace-nav-group" id="pace-group-production">
           <div class="pace-nav-head"><span class="pace-dot pace-dot-production" aria-hidden="true"></span>Production<small>ฝ่ายผลิต</small></div>
           <button type="button" class="pace-nav-item" id="tab-weighing" data-view="weighing">Weighing<small class="pace-nav-sub">งานชั่งน้ำหนัก</small></button>
+        </div>
+        <div class="pace-nav-group" id="pace-group-accounting">
+          <div class="pace-nav-head"><span class="pace-dot pace-dot-accounting" aria-hidden="true"></span>Accounting<small>บัญชี</small></div>
+          <!-- Read-only confirmed weights for invoicing in Odoo (Migration 020) -->
+          <button type="button" class="pace-nav-item" id="tab-weights" data-view="weights">Confirmed weights<small class="pace-nav-sub">น้ำหนักที่ยืนยันแล้ว</small></button>
         </div>
       </nav>
       <div id="main-col">
@@ -90,7 +97,7 @@
           <button type="button" class="system-card" data-system="pace">
             <span class="system-card-name">PROSUN PACE</span>
             <span class="system-card-acronym">Performance · Accountability · Coordination · Execution</span>
-            <span class="system-card-desc">Middle office, purchasing and production</span>
+            <span class="system-card-desc">Middle office, purchasing, production and accounting</span>
           </button>
         </div>
       </div>
@@ -399,6 +406,7 @@
            filled FM-SA-01 working papers, the edge function reads them, she
            checks and confirms. Filled in by weighing.js. -->
       <div id="weighing-section" class="hidden" lang="th"></div>
+      <div id="weights-section" class="hidden"></div>
 
       </div><!-- #main-col -->
     </main>
@@ -601,11 +609,12 @@
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
   <!-- QR code on the weighing screen, so the phone opens the camera page -->
   <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
-  <script src="config.js?v=20261028-6"></script>
-  <script src="weighing-common.js?v=20261028-6"></script>
+  <script src="config.js?v=20261028-7"></script>
+  <script src="weighing-common.js?v=20261028-7"></script>
   <!-- weighing.js before app.js: app.js starts the app as soon as it loads,
        and a signed-in factory admin goes straight to openWeighing(). -->
-  <script src="weighing.js?v=20261028-6"></script>
-  <script src="app.js?v=20261028-6"></script>
+  <script src="weighing.js?v=20261028-7"></script>
+  <script src="weights-summary.js?v=20261028-7"></script>
+  <script src="app.js?v=20261028-7"></script>
 </body>
 </html>

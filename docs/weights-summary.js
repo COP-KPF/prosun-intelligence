@@ -1,0 +1,327 @@
+// ============================================================================
+// Confirmed weights — read-only summary (Migration 020, 28 Oct 2026)
+// ============================================================================
+// The actual weights Khun Muay confirmed on the weighing screen, for the
+// people who use them downstream: accounting (invoices in Odoo) and
+// purchasing. Shown in PROSUN PACE › Accounting (and Purchasing) ›
+// Confirmed weights.
+//
+// Read-only by design: a wrong number is corrected at the factory, where the
+// photo is checked ("แก้ไข" on the weighing screen), so there is one source of
+// truth. The data comes from the database function weighing_confirmed_lines,
+// which returns confirmed papers only — a paper still being checked never
+// appears here.
+//
+// Loaded after weighing.js (reuses weighDiff, weighFmt, weighUnit,
+// weighCompanyShort, weighShortDate, weighLangHtml's language, T) and before
+// app.js; uses app.js globals at run time (sb, myProfile, escapeHtml,
+// escapeAttr, downloadXlsx).
+// ============================================================================
+
+const wsSection = document.getElementById("weights-section");
+
+const WS = {
+  from: null,          // ISO date, Bangkok
+  to: null,
+  preset: "today",
+  company: "all",      // all | Prosun Farm | Prosun Food
+  q: "",               // search: customer, PO or product
+  rows: [],            // weighing_confirmed_lines result
+  pending: 0,          // papers in the period not yet confirmed
+  loading: false,
+  message: null,       // { kind, text }
+};
+
+function wsAddDays(iso, n) {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+// Periods are by delivery date. Weeks run Monday to Sunday, so a Sunday
+// delivery is never left out.
+function wsPresetRange(preset) {
+  const today = weighBangkokToday();
+  const dow = (new Date(today + "T00:00:00Z").getUTCDay() + 6) % 7;   // Monday = 0
+  const monday = wsAddDays(today, -dow);
+  const first = today.slice(0, 8) + "01";
+  const nextFirst = (() => { const d = new Date(first + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() + 1); return d.toISOString().slice(0, 10); })();
+  const prevFirst = (() => { const d = new Date(first + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 10); })();
+  switch (preset) {
+    case "yesterday": return [wsAddDays(today, -1), wsAddDays(today, -1)];
+    case "tomorrow":  return [wsAddDays(today, 1), wsAddDays(today, 1)];
+    case "week":      return [monday, wsAddDays(monday, 6)];
+    case "lastweek":  return [wsAddDays(monday, -7), wsAddDays(monday, -1)];
+    case "month":     return [first, wsAddDays(nextFirst, -1)];
+    case "lastmonth": return [prevFirst, wsAddDays(first, -1)];
+    default:          return [today, today];
+  }
+}
+
+const WS_PRESETS = [
+  ["yesterday", () => T("เมื่อวาน", "Yesterday")],
+  ["today",     () => T("วันนี้", "Today")],
+  ["tomorrow",  () => T("พรุ่งนี้", "Tomorrow")],
+  ["week",      () => T("สัปดาห์นี้", "This week")],
+  ["lastweek",  () => T("สัปดาห์ที่แล้ว", "Last week")],
+  ["month",     () => T("เดือนนี้", "This month")],
+  ["lastmonth", () => T("เดือนที่แล้ว", "Last month")],
+];
+
+
+// ----------------------------------------------------------- open / close
+async function openWeights() {
+  if (!WEIGH_LANG) WEIGH_LANG = myProfile.role === "admin" ? "en" : "th";
+  if (myProfile.role === "accounting") {
+    document.getElementById("who-role").textContent = T("บัญชี", "Accounting");
+  }
+  wsSection.classList.remove("hidden");
+  if (!WS.from) [WS.from, WS.to] = wsPresetRange(WS.preset);
+  wsSection.innerHTML = `<p class="w-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
+  await wsLoad();
+}
+
+function closeWeights() {
+  if (wsSection.classList.contains("hidden")) return;
+  wsSection.classList.add("hidden");
+  wsSection.innerHTML = "";
+}
+
+document.getElementById("switch-system-btn").addEventListener("click", closeWeights);
+document.getElementById("sign-out-btn").addEventListener("click", () => {
+  closeWeights();
+  WS.from = WS.to = null; WS.preset = "today"; WS.rows = []; WS.q = ""; WS.company = "all";
+});
+
+
+// ------------------------------------------------------------------ data
+async function wsLoad() {
+  WS.loading = true;
+  WS.message = null;
+  const [lines, pending] = await Promise.all([
+    sb.rpc("weighing_confirmed_lines", { p_from: WS.from, p_to: WS.to }),
+    sb.rpc("weighing_unconfirmed_count", { p_from: WS.from, p_to: WS.to }),
+  ]);
+  WS.loading = false;
+  if (lines.error) {
+    WS.rows = [];
+    WS.message = { kind: "error", text: T("โหลดข้อมูลไม่ได้: ", "Could not load: ") + lines.error.message };
+  } else {
+    WS.rows = lines.data || [];
+  }
+  WS.pending = pending.error ? 0 : Number(pending.data) || 0;
+  wsRender();
+}
+
+function wsFiltered() {
+  const q = WS.q.trim().toLowerCase();
+  return WS.rows.filter((r) => {
+    if (WS.company !== "all" && r.company !== WS.company) return false;
+    if (!q) return true;
+    return [r.customer_name, r.po_number, r.description].some((v) => v && String(v).toLowerCase().includes(q));
+  });
+}
+
+function wsWhen(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const day = d.toLocaleDateString(WEIGH_LANG === "en" ? "en-GB" : "th-TH", { day: "numeric", month: "numeric", timeZone: "Asia/Bangkok" });
+  return `${day} ${weighTime(ts)}`;
+}
+
+function wsRangeLabel() {
+  const o = { day: "numeric", month: "short", year: "numeric" };
+  return WS.from === WS.to ? weighThaiDate(WS.from, o) : `${weighThaiDate(WS.from, o)} – ${weighThaiDate(WS.to, o)}`;
+}
+
+
+// ------------------------------------------------------------- rendering
+function wsRender() {
+  wsSection.innerHTML = `
+  ${WS.message ? `<div class="w-msg w-msg-${WS.message.kind}" role="status">${escapeHtml(WS.message.text)}
+    <button type="button" class="w-msg-close" data-ws="dismiss" aria-label="${T("ปิด", "Close")}">×</button></div>` : ""}
+  <div class="w-head">
+    <div>
+      <h2 class="w-day">${escapeHtml(wsRangeLabel())}</h2>
+      <div class="w-muted w-small">${T("น้ำหนักจริงที่โรงงานยืนยันแล้ว ตามวันส่ง — ดูอย่างเดียว ถ้าตัวเลขผิดให้โรงงานแก้", "Actual weights confirmed at the factory, by delivery date — read-only; a wrong number is corrected by the factory")}</div>
+    </div>
+    <div class="w-head-right">${weighLangHtml().replace(/data-act="lang"/g, 'data-ws="lang"')}</div>
+  </div>
+
+  <section class="w-panel ws-filters">
+    <div class="ws-presets" role="group" aria-label="${T("ช่วงวันที่", "Period")}">
+      ${WS_PRESETS.map(([k, label]) => `<button type="button" class="ws-chip${WS.preset === k ? " on" : ""}" data-ws="preset" data-preset="${k}" aria-pressed="${WS.preset === k}">${label()}</button>`).join("")}
+    </div>
+    <div class="ws-fields">
+      <label>${T("วันส่ง ตั้งแต่", "Delivery from")}<input type="date" data-ws-field="from" value="${escapeAttr(WS.from)}"></label>
+      <label>${T("ถึง", "to")}<input type="date" data-ws-field="to" value="${escapeAttr(WS.to)}"></label>
+      <label>${T("บริษัท", "Company")}
+        <select data-ws-field="company">
+          <option value="all"${WS.company === "all" ? " selected" : ""}>${T("ทั้งหมด", "All")}</option>
+          <option value="Prosun Farm"${WS.company === "Prosun Farm" ? " selected" : ""}>Prosun Farm</option>
+          <option value="Prosun Food"${WS.company === "Prosun Food" ? " selected" : ""}>Prosun Food</option>
+        </select></label>
+      <label class="ws-search">${T("ค้นหา", "Search")}<input type="search" data-ws-field="q" value="${escapeAttr(WS.q)}" placeholder="${T("ลูกค้า, PO หรือสินค้า", "Customer, PO or product")}"></label>
+      <button type="button" class="w-btn w-btn-outline" data-ws="refresh">${T("โหลดใหม่", "Refresh")}</button>
+    </div>
+  </section>
+
+  <div id="ws-results">${wsResultsHtml()}</div>`;
+}
+
+function wsResultsHtml() {
+  const rows = wsFiltered();
+  const papers = new Set(rows.map((r) => r.paper_id)).size;
+  const totalKg = rows.reduce((s, r) => s + (r.actual_kg === null ? 0 : Number(r.actual_kg)), 0);
+  let prev = null;
+
+  return `
+  <div class="w-counters ws-counters">
+    <div class="w-counter w-c-green"><span>${T("ใบงานที่ยืนยัน", "Confirmed papers")}</span><strong>${papers}</strong></div>
+    <div class="w-counter"><span>${T("รายการ", "Lines")}</span><strong>${rows.length}</strong></div>
+    <div class="w-counter"><span>${T("น้ำหนักรวม (kg)", "Total actual (kg)")}</span><strong>${weighFmt(totalKg)}</strong></div>
+    <div class="w-counter ${WS.pending ? "w-c-amber" : ""}"><span>${T("ยังไม่ยืนยัน", "Not yet confirmed")}</span><strong>${WS.pending}</strong></div>
+  </div>
+  ${WS.pending ? `<div class="w-note w-note-amber ws-pending">${T(
+    `ยังมีใบงาน ${WS.pending} ใบในช่วงนี้ที่โรงงานยังตรวจไม่เสร็จ — ยังไม่อยู่ในตาราง`,
+    `${WS.pending} paper${WS.pending === 1 ? "" : "s"} in this period ${WS.pending === 1 ? "is" : "are"} still being checked at the factory — not in the table yet`)}</div>` : ""}
+
+  <section class="w-panel w-table-panel">
+    <div class="w-panel-head">
+      <div>
+        <h3>${T("ตารางน้ำหนักที่ยืนยันแล้ว", "Confirmed weights")}</h3>
+        <div class="w-small w-muted">${T(`${rows.length} รายการจาก ${papers} ใบงาน`, `${rows.length} line${rows.length === 1 ? "" : "s"} from ${papers} paper${papers === 1 ? "" : "s"}`)}</div>
+      </div>
+      <button type="button" class="w-btn" data-ws="export"${rows.length ? "" : " disabled"}>${T("ส่งออก Excel", "Export to Excel")}</button>
+    </div>
+    <div class="table-scroll w-scroll">
+      <table class="w-table" id="weights-table">
+        <thead><tr><th>${T("วันส่ง", "Delivery")}</th><th>${T("บริษัท", "Company")}</th><th>PO</th><th>${T("ลูกค้า", "Customer")}</th><th>${T("สินค้า", "Product")}</th>
+          <th class="w-num">${T("สั่ง", "Ordered")}</th><th class="w-num">${T("ชั่งจริง (kg)", "Actual (kg)")}</th><th class="w-num">${T("ต่าง", "Difference")}</th>
+          <th>${T("ยืนยันโดย", "Confirmed by")}</th><th>${T("รูป", "Photo")}</th></tr></thead>
+        <tbody>${WS.loading ? `<tr><td colspan="10" class="w-empty">${T("กำลังโหลด…", "Loading…")}</td></tr>`
+          : rows.length ? rows.map((r) => {
+          const first = r.paper_id !== prev;
+          prev = r.paper_id;
+          const d = weighDiff(r);
+          return `<tr class="${first ? "w-first" : ""}">
+            <td>${first ? (r.delivery_date ? escapeHtml(weighShortDate(r.delivery_date)) : `<span class="w-muted" title="${T("ไม่มีวันส่งบนใบงาน — ใช้วันที่ชั่ง", "No delivery date on the paper — weighing day shown")}">${escapeHtml(weighShortDate(r.work_date))}*</span>`) : ""}</td>
+            <td>${first ? escapeHtml(weighCompanyShort(r.company)) : ""}</td>
+            <td class="w-mono">${first ? escapeHtml(r.po_number || "") : ""}</td>
+            <td>${first ? escapeHtml(r.customer_name || "") : ""}</td>
+            <td class="w-wrap">${escapeHtml(r.description || "")}${r.edited ? ` <span class="ws-edited" title="${T("แก้ตัวเลขด้วยมือที่โรงงาน", "Corrected by hand at the factory")}">${T("แก้ไข", "corrected")}</span>` : ""}</td>
+            <td class="w-num">${escapeHtml(r.ordered_text || "")}</td>
+            <td class="w-num w-strong">${r.actual_kg === null ? `<span class="w-muted">—</span>` : weighFmt(r.actual_kg)}</td>
+            <td class="w-num ${d.warn ? "w-warn" : ""}">${escapeHtml(d.text)}</td>
+            <td>${first ? escapeHtml(`${r.confirmed_by_name || ""} ${wsWhen(r.confirmed_at)}`.trim()) : ""}</td>
+            <td>${first ? (r.photo_deleted_at ? `<span class="w-muted w-small">${T("ลบแล้ว", "Deleted")}</span>`
+              : `<button type="button" class="btn-link" data-ws="photo" data-path="${escapeAttr(r.photo_path)}">${T("ดูรูป", "View")}</button>`) : ""}</td>
+          </tr>`;
+        }).join("") : `<tr><td colspan="10" class="w-empty">${WS.rows.length
+          ? T("ไม่มีรายการที่ตรงกับการค้นหา", "No lines match the search")
+          : T("ยังไม่มีน้ำหนักที่ยืนยันในช่วงนี้", "No confirmed weights in this period yet")}</td></tr>`}</tbody>
+      </table>
+    </div>
+    <p class="w-small w-muted w-foot">${T(
+      "สินค้าที่สั่งเป็นตัว / แพค แสดงน้ำหนักเฉลี่ยต่อหน่วยในช่อง “ต่าง” · สีส้ม = ต่างจากที่สั่งเกิน ±5% · * = ใบงานไม่มีวันส่ง ใช้วันที่ชั่ง · รูปเก็บไว้ 4 สัปดาห์",
+      "Lines ordered by the piece or pack show the average kg per unit under “Difference” · orange = more than ±5% off the order · * = no delivery date on the paper, weighing day used · photos are kept 4 weeks")}</p>
+  </section>`;
+}
+
+function wsRenderResults() {
+  const el = document.getElementById("ws-results");
+  if (el) el.innerHTML = wsResultsHtml();
+}
+
+
+// --------------------------------------------------------------- actions
+wsSection.addEventListener("click", async (e) => {
+  const el = e.target.closest("[data-ws]");
+  if (!el || !wsSection.contains(el)) return;
+  const act = el.dataset.ws;
+  if (act === "dismiss") { WS.message = null; wsRender(); return; }
+  if (act === "lang") {
+    weighSetLang(el.dataset.lang);
+    if (myProfile.role === "accounting") document.getElementById("who-role").textContent = T("บัญชี", "Accounting");
+    wsRender();
+    return;
+  }
+  if (act === "preset") {
+    WS.preset = el.dataset.preset;
+    [WS.from, WS.to] = wsPresetRange(WS.preset);
+    WS.loading = true; wsRender();
+    await wsLoad();
+    return;
+  }
+  if (act === "refresh") { await wsLoad(); return; }
+  if (act === "export") { wsExport(); return; }
+  if (act === "photo") { await wsOpenPhoto(el.dataset.path); }
+});
+
+wsSection.addEventListener("change", async (e) => {
+  const f = e.target.dataset.wsField;
+  if (!f || f === "q") return;
+  if (f === "company") { WS.company = e.target.value; wsRenderResults(); return; }
+  if (!e.target.value) return;
+  WS[f] = e.target.value;
+  if (WS.from > WS.to) { if (f === "from") WS.to = WS.from; else WS.from = WS.to; }
+  WS.preset = "custom";
+  WS.loading = true; wsRender();
+  await wsLoad();
+});
+
+// Search filters as you type, redrawing only the results (the box keeps focus).
+wsSection.addEventListener("input", (e) => {
+  if (e.target.dataset.wsField !== "q") return;
+  WS.q = e.target.value;
+  wsRenderResults();
+});
+
+// The window is opened during the click itself, so browsers don't block it,
+// then pointed at a short-lived signed link to the private photo.
+async function wsOpenPhoto(path) {
+  const win = window.open("", "_blank");
+  const { data, error } = await sb.storage.from(WEIGH_BUCKET).createSignedUrl(path, 600);
+  if (error || !data || !data.signedUrl) {
+    if (win) win.close();
+    WS.message = { kind: "error", text: T("เปิดรูปไม่ได้: ", "Could not open the photo: ") + ((error && error.message) || T("ไม่พบรูป", "photo not found")) };
+    wsRender();
+    return;
+  }
+  if (win) win.location.href = data.signedUrl;
+  else window.location.href = data.signedUrl;
+}
+
+
+// ------------------------------------------------------------ Excel export
+// One row per line, numbers as numbers and dates as YYYY-MM-DD, so the sheet
+// can be filtered, totalled or prepared for an Odoo import without retyping.
+function wsExport() {
+  const rows = wsFiltered();
+  const header = WEIGH_LANG === "en"
+    ? ["Delivery date", "Weighing day", "Company", "PO", "Customer", "Line", "Product", "Ordered",
+       "Ordered qty", "Unit", "Actual (kg)", "Difference (kg)", "kg per unit", "Corrected by hand",
+       "Confirmed by", "Confirmed at"]
+    : ["วันส่ง", "วันที่ชั่ง", "บริษัท", "PO", "ลูกค้า", "ลำดับ", "สินค้า", "สั่ง",
+       "จำนวนสั่ง", "หน่วย", "น้ำหนักจริง (kg)", "ต่าง (kg)", "kg ต่อหน่วย", "แก้ไขด้วยมือ",
+       "ยืนยันโดย", "เวลายืนยัน"];
+  const out = [header];
+  rows.forEach((r) => {
+    const d = weighDiff(r);
+    out.push([
+      r.delivery_date || "", r.work_date || "", r.company || "", r.po_number || "", r.customer_name || "",
+      r.line_no, r.description || "", r.ordered_text || "",
+      r.ordered_qty === null || r.ordered_qty === undefined ? "" : Number(r.ordered_qty),
+      weighUnit(r.ordered_unit),
+      r.actual_kg === null || r.actual_kg === undefined ? "" : Number(r.actual_kg),
+      d.kg === null ? "" : d.kg,
+      d.perUnit === null ? "" : d.perUnit,
+      r.edited ? T("ใช่", "Yes") : "",
+      r.confirmed_by_name || "",
+      r.confirmed_at ? new Date(new Date(r.confirmed_at).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ") : "",
+    ]);
+  });
+  const name = WS.from === WS.to ? WS.from : `${WS.from} to ${WS.to}`;
+  downloadXlsx(`Confirmed weights ${name}.xlsx`, T("น้ำหนักที่ยืนยันแล้ว", "Confirmed weights"), out,
+    [12, 12, 12, 13, 26, 6, 40, 12, 9, 7, 12, 12, 10, 10, 16, 16]);
+}
