@@ -152,9 +152,18 @@ async function onSignedIn() {
   document.getElementById("who-name").textContent = myProfile.full_name;
   document.getElementById("who-role").textContent = myProfile.role;
 
+  // Factory admin (Migration 018) works in PROSUN PACE with one tab only:
+  // the weighing photos. No CRM, no order book — and the database refuses
+  // those reads anyway.
+  if (myProfile.role === "factory_admin") {
+    setupPaceRole();
+    await switchPaceView("weighing");
+    return;
+  }
+
   setupForRole();
   if (PACE_ROLES.includes(myProfile.role)) {
-    await switchPaceView("orders");
+    await switchPaceView(PACE_HOME[myProfile.role] || "orders");
   } else if (myProfile.role === "admin") {
     showSystemChooser();
   } else {
@@ -1190,6 +1199,7 @@ const ORDER_UNITS = ["Kg", "Pcs", "Grams", "Pack", "Jar"];
 
 let paceView = "orders";
 let orderListState = [];          // last loaded orders, filtered client-side
+let renderedOrderList = [];       // orderListState after the grid's own search filter — what Back/Next in the Edit panel actually steps through
 const customerDirectory = {};     // channel -> its own customer list
 let paceUserNames = {};           // profile id -> full name
 const channelProductCache = {};   // channel -> product rows, loaded on demand
@@ -1197,6 +1207,8 @@ const channelProductCache = {};   // channel -> product rows, loaded on demand
 const paceTabs           = document.getElementById("pace-tabs");
 const tabOrdersBtn       = document.getElementById("tab-orders");
 const tabCalculatorBtn   = document.getElementById("tab-calculator");
+const tabWeighingBtn     = document.getElementById("tab-weighing");
+const tabConfirmBirdsBtn = document.getElementById("tab-confirm-birds");
 const ordersSection      = document.getElementById("orders-section");
 const orderEntrySection  = document.getElementById("order-entry-section");
 const orderLinesBody     = document.getElementById("order-lines-body");
@@ -1205,6 +1217,8 @@ const calculatorSection  = document.getElementById("calculator-section");
 const calcCycleNavEl     = document.getElementById("calc-cycle-nav");
 const calcCyclesEl       = document.getElementById("calc-cycles");
 const oChannel           = document.getElementById("o-channel");
+const editBackBtn        = document.getElementById("edit-back-btn");
+const editNextBtn        = document.getElementById("edit-next-btn");
 
 // --------------------------------------------------------------- entry form
 // Channel decides which header fields make sense: a restaurant order has a PO
@@ -1253,16 +1267,28 @@ async function addOrderLineRow(prefill) {
   const channel = oChannel.value;
   const products = await loadChannelProducts(channel);
   const types = typesForChannel(products);
+  // A pre-filled line may carry a type no longer active in the current
+  // catalogue (types and products get retired — Migration 002's "catalogues
+  // drift month to month"). Keep it selectable rather than have the value
+  // silently fail to select, which would otherwise turn an untouched legacy
+  // line into an unsaveable one ("incomplete — missing a type") the moment
+  // anything else on the order is edited.
+  const typeOptions = prefill && prefill.type && !types.includes(prefill.type)
+    ? [...types, prefill.type].sort()
+    : types;
 
   const tr = document.createElement("tr");
   tr.innerHTML = `
     <td>
       <select class="l-type">
         <option value="">Type...</option>
-        ${types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}
+        ${typeOptions.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}${types.includes(t) ? "" : " (retired)"}</option>`).join("")}
       </select>
     </td>
-    <td><select class="l-product"><option value="">Pick a type first</option></select></td>
+    <td>
+      <select class="l-product"><option value="">Pick a type first</option></select>
+      <small class="l-prod-note muted-code hidden"></small>
+    </td>
     <td><input type="text" class="l-weight" placeholder="e.g. 1.6-1.8" /></td>
     <td><input type="number" class="l-qty" step="0.01" min="0" /></td>
     <td>
@@ -1301,13 +1327,37 @@ async function addOrderLineRow(prefill) {
     if (p && p.default_unit && !unitSel.value) unitSel.value = p.default_unit;
   });
 
-  tr.querySelector(".line-remove").addEventListener("click", () => tr.remove());
+  tr.querySelector(".line-remove").addEventListener("click", () => {
+    tr.remove();
+    // A click doesn't bubble as "input"/"change", so the delegated
+    // dirty-tracking on the section wouldn't otherwise see a removal.
+    markEntryDirty();
+  });
 
   if (prefill) {
+    // An existing line carries its own id so saveOrder() can tell an update
+    // from a brand-new line, and — since removing the row from the DOM loses
+    // this entirely — from a genuine deletion (11 Sep 2026, full Edit).
+    if (prefill.id) tr.dataset.lineId = prefill.id;
     typeSel.value = prefill.type || "";
     refreshProducts(prefill.product_id);
+    // A line whose product was never matched to the catalogue (Migration
+    // 008/009's product_name fallback — shorthand sale support typed, or a
+    // product genuinely not on the list) has no product_id to select here at
+    // all. Surface the original typed text rather than leave the row looking
+    // simply blank — she can still re-pick a real catalogue product below if
+    // one now matches.
+    if (!prefill.product_id && prefill.product_name) {
+      const note = tr.querySelector(".l-prod-note");
+      note.textContent = `Typed as "${prefill.product_name}" — not on the list`;
+      note.classList.remove("hidden");
+    }
     tr.querySelector(".l-weight").value = prefill.weight_label || "";
-    tr.querySelector(".l-qty").value = prefill.quantity ?? "";
+    // A standing order's still-unconfirmed quantity (Migration 008) starts
+    // blank on purpose, same as the grid's own inline editing — leaving it
+    // blank here means "still not confirmed", not "delete this line".
+    if (prefill.quantity_tbc) tr.dataset.qtyTbc = "1";
+    tr.querySelector(".l-qty").value = prefill.quantity_tbc ? "" : (prefill.quantity ?? "");
     unitSel.value = prefill.unit || "";
     tr.querySelector(".l-desc").value = prefill.description || "";
     tr.querySelector(".l-pack").value = prefill.packaging || "";
@@ -1355,6 +1405,12 @@ function collectOrderLines() {
   let incomplete = 0;
 
   rows.forEach(tr => {
+    const lineId = tr.dataset.lineId || null;
+    // Set by addOrderLineRow when this row was pre-filled from a standing
+    // order's still-unconfirmed quantity — leaving quantity blank here means
+    // "still TBC", the same as the grid's own inline editing, not "drop the
+    // line" or "reject as incomplete".
+    const wasTbc = tr.dataset.qtyTbc === "1";
     const type = tr.querySelector(".l-type").value;
     const productId = tr.querySelector(".l-product").value;
     const qtyRaw = tr.querySelector(".l-qty").value;
@@ -1363,12 +1419,13 @@ function collectOrderLines() {
     const desc = tr.querySelector(".l-desc").value.trim();
     const pack = tr.querySelector(".l-pack").value.trim();
 
-    const blank = !type && !productId && qtyRaw === "" && !unit && !desc && !pack;
+    const blank = !type && !productId && qtyRaw === "" && !unit && !desc && !pack && !wasTbc;
     if (blank) { tr.classList.remove("line-incomplete"); return; }   // ignore empty rows
 
     // A line needs at minimum a type and a quantity to mean anything to
-    // production or to the bird calculation.
-    if (!type || qtyRaw === "") {
+    // production or to the bird calculation — unless it's a standing order
+    // still waiting on this week's number, which is allowed to stay blank.
+    if (!type || (qtyRaw === "" && !wasTbc)) {
       tr.classList.add("line-incomplete");
       incomplete++;
       return;
@@ -1376,9 +1433,11 @@ function collectOrderLines() {
     tr.classList.remove("line-incomplete");
 
     lines.push({
+      ...(lineId ? { id: lineId } : {}),
       type,
       product_id: productId || null,
-      quantity: Number(qtyRaw),
+      quantity: qtyRaw === "" ? null : Number(qtyRaw),
+      quantity_tbc: qtyRaw === "" && wasTbc,
       unit: unit || null,
       weight_label: weight.label,
       weight_min_kg: weight.min,
@@ -1400,59 +1459,100 @@ function resetOrderEntry() {
   const today = new Date().toISOString().slice(0, 10);
   document.getElementById("o-order-date").value = today;
   document.getElementById("o-delivery-date").value = "";
+  document.getElementById("o-ws-farm").checked = false;
+  document.getElementById("o-ws-food").checked = false;
+  entryDirty = false;
 }
 
-// entryMode is either a new order, or extra product lines for one already on
-// the sheet — a client phoning back to add an item, which today means finding
-// their block in the spreadsheet and inserting a row under it.
+// Set once per open (openOrderEntry), cleared on every keystroke/change
+// inside the panel — Back/Next/Cancel check it before discarding whatever
+// is currently on screen. Programmatic prefill (assigning .value directly)
+// does not fire input/change, so opening the panel never marks it dirty by
+// itself; only something the person actually typed or picked does.
+let entryDirty = false;
+function markEntryDirty() { entryDirty = true; }
+function confirmDiscardIfDirty() {
+  return !entryDirty || confirm("You have unsaved changes on this order. Discard them and continue?");
+}
+
+// entryMode is either a brand-new order, or a full edit of one already on
+// the sheet. Edit (11 Sep 2026, replacing the old narrower "add lines to an
+// existing order" mode) unlocks every header field Jane's feedback asked
+// for — customer name, PO number, delivery date and the rest — and shows
+// every existing product line pre-filled and editable, not just blank rows
+// for adding more. Only Channel stays fixed once an order exists: changing
+// it would swap out the whole product catalogue and customer directory
+// every already-picked line depends on, which nobody asked for.
 let entryMode = { mode: "new", order: null };
 
 async function openOrderEntry(opts) {
-  const addTo = opts && opts.addTo ? opts.addTo : null;
-  entryMode = addTo ? { mode: "addLines", order: addTo } : { mode: "new", order: null };
+  const editOrder = opts && opts.editOrder ? opts.editOrder : null;
+  entryMode = editOrder ? { mode: "edit", order: editOrder } : { mode: "new", order: null };
 
   resetOrderEntry();
-  oChannel.value = addTo ? addTo.channel : (currentChannel === "all" ? "Restaurant" : currentChannel);
+  oChannel.value = editOrder ? editOrder.channel : (currentChannel === "all" ? "Restaurant" : currentChannel);
   applyChannelFields(oChannel.value);
   await loadCustomerDirectory();
 
   const heading = document.getElementById("order-entry-title");
   const headerBox = document.querySelector(".order-header-grid");
-  if (addTo) {
-    // The client's details are already agreed on this order — show them, but
-    // read-only, so the extra lines can't quietly change them.
-    heading.textContent = `Add product lines — ${addTo.customer_name || "order"}`;
-    document.getElementById("o-customer").value = addTo.customer_name || "";
-    document.getElementById("o-customer-code").value = addTo.customer_code || "";
-    document.getElementById("o-po-number").value = addTo.po_number || "";
-    document.getElementById("o-order-number").value = addTo.order_number || "";
-    document.getElementById("o-chef").value = addTo.chef_name || "";
-    document.getElementById("o-phone").value = addTo.phone || "";
-    document.getElementById("o-address").value = addTo.delivery_address || "";
-    document.getElementById("o-note").value = addTo.note || "";
-    document.getElementById("o-order-date").value = addTo.order_date || "";
-    document.getElementById("o-delivery-date").value = addTo.delivery_date || "";
-    document.getElementById("o-delivery-time").value = addTo.delivery_time ? String(addTo.delivery_time).slice(0, 5) : "";
-    document.getElementById("o-entity").value = addTo.entity || "";
-    headerBox.classList.add("header-locked");
-    headerBox.querySelectorAll("input, select, textarea").forEach(el => { el.disabled = true; });
+  headerBox.classList.remove("header-locked");
+  headerBox.querySelectorAll("input, select, textarea").forEach(el => { el.disabled = false; });
+
+  if (editOrder) {
+    heading.textContent = `Edit order — ${editOrder.customer_name || "order"}`;
+    document.getElementById("o-customer").value = editOrder.customer_name || "";
+    document.getElementById("o-customer-code").value = editOrder.customer_code || "";
+    document.getElementById("o-po-number").value = editOrder.po_number || "";
+    document.getElementById("o-order-number").value = editOrder.order_number || "";
+    document.getElementById("o-chef").value = editOrder.chef_name || "";
+    document.getElementById("o-phone").value = editOrder.phone || "";
+    document.getElementById("o-address").value = editOrder.delivery_address || "";
+    document.getElementById("o-note").value = editOrder.note || "";
+    document.getElementById("o-order-date").value = editOrder.order_date || "";
+    document.getElementById("o-delivery-date").value = editOrder.delivery_date || "";
+    document.getElementById("o-delivery-time").value = editOrder.delivery_time ? String(editOrder.delivery_time).slice(0, 5) : "";
+    document.getElementById("o-entity").value = editOrder.entity || "";
+    document.getElementById("o-total-order").value = editOrder.total_order ?? "";
+    document.getElementById("o-delivery-fee").value = editOrder.delivery_fee ?? "";
+    document.getElementById("o-total-amount").value = editOrder.total_amount ?? "";
+    document.getElementById("o-payment-status").value = editOrder.payment_status_text || "";
+    document.getElementById("o-ws-farm").checked = !!editOrder.ws_company_farm;
+    document.getElementById("o-ws-food").checked = !!editOrder.ws_company_food;
+    oChannel.disabled = true;
+
+    editBackBtn.classList.remove("hidden");
+    editNextBtn.classList.remove("hidden");
+    updateEditNavButtons();
   } else {
     heading.textContent = "New order";
-    headerBox.classList.remove("header-locked");
-    headerBox.querySelectorAll("input, select, textarea").forEach(el => { el.disabled = false; });
+    editBackBtn.classList.add("hidden");
+    editNextBtn.classList.add("hidden");
   }
 
   ordersSection.classList.add("hidden");
   orderEntrySection.classList.remove("hidden");
-  // Three blank lines to start — most orders have a handful of products.
-  await addOrderLineRow(); await addOrderLineRow(); await addOrderLineRow();
-  (addTo ? orderLinesBody.querySelector(".l-type") : document.getElementById("o-customer")).focus();
+
+  if (editOrder) {
+    // Every existing line, pre-filled and fully editable (type/product
+    // included — Jane, 11 Sep 2026: "the Edit function should allow me to
+    // modify all the information that was previously entered"), plus one
+    // blank row for adding something new without a separate action.
+    for (const l of (editOrder.sale_order_lines || [])) await addOrderLineRow(l);
+    await addOrderLineRow();
+  } else {
+    // Three blank lines to start — most orders have a handful of products.
+    await addOrderLineRow(); await addOrderLineRow(); await addOrderLineRow();
+  }
+  document.getElementById("o-customer").focus();
+  entryDirty = false;
 }
 
 function closeOrderEntry() {
   const headerBox = document.querySelector(".order-header-grid");
   headerBox.classList.remove("header-locked");
   headerBox.querySelectorAll("input, select, textarea").forEach(el => { el.disabled = false; });
+  oChannel.disabled = false;
   entryMode = { mode: "new", order: null };
   orderEntrySection.classList.add("hidden");
   ordersSection.classList.remove("hidden");
@@ -1460,6 +1560,24 @@ function closeOrderEntry() {
   document.getElementById("new-order-btn")
     .classList.toggle("hidden", !canEnter || currentChannel === "all");
 }
+
+// Steps to the previous/next order in the currently rendered grid (the same
+// filtered, sorted list the person is looking at) — Jane, 11 Sep 2026, so she
+// can work through a batch of orders without closing and reopening the panel
+// each time. Disabled at either end of that list.
+function updateEditNavButtons() {
+  const idx = renderedOrderList.findIndex(o => o.id === entryMode.order.id);
+  editBackBtn.disabled = idx <= 0;
+  editNextBtn.disabled = idx === -1 || idx >= renderedOrderList.length - 1;
+}
+async function stepEditOrder(delta) {
+  if (entryMode.mode !== "edit" || !confirmDiscardIfDirty()) return;
+  const idx = renderedOrderList.findIndex(o => o.id === entryMode.order.id);
+  const next = renderedOrderList[idx + delta];
+  if (next) await openOrderEntry({ editOrder: next });
+}
+editBackBtn.addEventListener("click", () => stepEditOrder(-1));
+editNextBtn.addEventListener("click", () => stepEditOrder(1));
 
 // PACE keeps its own customer list rather than reading the CRM's clients
 // (Clément, 6 Sep 2026 — the two systems stay separate). Scoped to the
@@ -1488,20 +1606,110 @@ function paintCustomerOptions(ch) {
 async function saveOrder() {
   orderError.textContent = "";
 
-  // Adding lines to an existing order: no header to write, just the lines.
-  if (entryMode.mode === "addLines") {
+  // Full edit of an order already on the sheet (11 Sep 2026, replacing the
+  // old narrower "just add a line" mode): header fields are all editable
+  // now, and existing lines come back from collectOrderLines() carrying
+  // their own id, so this can update in place, insert whatever's new, and
+  // delete whatever the person removed — a real edit, not just an append.
+  if (entryMode.mode === "edit") {
+    const order = entryMode.order;
+    const customerName = document.getElementById("o-customer").value.trim();
+    if (!customerName) {
+      orderError.textContent = "Enter a customer name.";
+      document.getElementById("o-customer").focus();
+      return;
+    }
+
     const { lines, incomplete } = collectOrderLines();
     if (incomplete) {
       orderError.textContent = `${incomplete} product line${incomplete > 1 ? "s are" : " is"} missing a type or quantity — highlighted below.`;
       return;
     }
     if (!lines.length) { orderError.textContent = "Add at least one product line."; return; }
-    const btn = document.getElementById("save-order-btn");
-    btn.disabled = true; btn.textContent = "Saving...";
-    const { error } = await sb.from("sale_order_lines")
-      .insert(lines.map(l => ({ ...l, order_id: entryMode.order.id })));
-    btn.disabled = false; btn.textContent = "Save order";
-    if (error) { orderError.textContent = "Couldn't save the product lines: " + error.message; return; }
+
+    const channel = order.channel;
+    await loadCustomerDirectory(channel);
+    const isB2C = channel === "Individual" || channel === "Retail";
+    const num = id => { const v = document.getElementById(id).value; return v === "" ? null : Number(v); };
+    const txt = id => document.getElementById(id).value.trim() || null;
+    const match = (customerDirectory[channel] || []).find(
+      c => c.name.toLowerCase() === customerName.toLowerCase()
+    );
+
+    const header = {
+      entity: document.getElementById("o-entity").value || null,
+      pace_customer_id: match ? match.id : null,
+      customer_name: customerName,
+      customer_code: txt("o-customer-code") || (match ? match.code : null),
+      po_number: channel === "Restaurant" ? txt("o-po-number") : null,
+      order_number: isB2C ? txt("o-order-number") : null,
+      chef_name: channel === "Restaurant" ? txt("o-chef") : null,
+      phone: txt("o-phone"),
+      note: txt("o-note"),
+      delivery_address: txt("o-address"),
+      order_date: document.getElementById("o-order-date").value || null,
+      delivery_date: document.getElementById("o-delivery-date").value || null,
+      delivery_time: document.getElementById("o-delivery-time").value || null,
+      total_order: isB2C ? num("o-total-order") : null,
+      delivery_fee: isB2C ? num("o-delivery-fee") : null,
+      total_amount: isB2C ? num("o-total-amount") : null,
+      payment_status_text: channel === "Individual" ? txt("o-payment-status") : null,
+      // Migration 017: manually set from here on, not recomputed from the
+      // lines below, even though the lines themselves may also be changing
+      // in this same save.
+      ws_company_farm: document.getElementById("o-ws-farm").checked,
+      ws_company_food: document.getElementById("o-ws-food").checked,
+    };
+
+    const saveBtn = document.getElementById("save-order-btn");
+    saveBtn.disabled = true; saveBtn.textContent = "Saving...";
+
+    const { error: headErr } = await sb.from("sale_orders").update(header).eq("id", order.id);
+    if (headErr) {
+      orderError.textContent = "Couldn't save the order: " + headErr.message;
+      saveBtn.disabled = false; saveBtn.textContent = "Save order";
+      return;
+    }
+
+    // Lines: whatever still carries an id from the original order gets
+    // updated; a line whose id no longer appears (its row was removed with
+    // the × button) gets deleted; everything else is a brand-new line.
+    const keptIds = new Set(lines.filter(l => l.id).map(l => l.id));
+    const removedIds = (order.sale_order_lines || []).map(l => l.id).filter(id => !keptIds.has(id));
+    const toUpdate = lines.filter(l => l.id);
+    const toInsert = lines.filter(l => !l.id).map(l => ({ ...l, order_id: order.id }));
+
+    for (const id of removedIds) {
+      const { error } = await sb.from("sale_order_lines").delete().eq("id", id);
+      if (error) {
+        orderError.textContent = "The order was saved, but a removed line couldn't be deleted: " + error.message;
+        saveBtn.disabled = false; saveBtn.textContent = "Save order";
+        await loadOrders();
+        return;
+      }
+    }
+    for (const l of toUpdate) {
+      const { id, ...rest } = l;
+      const { error } = await sb.from("sale_order_lines").update(rest).eq("id", id);
+      if (error) {
+        orderError.textContent = "The order was saved, but a line failed to update: " + error.message;
+        saveBtn.disabled = false; saveBtn.textContent = "Save order";
+        await loadOrders();
+        return;
+      }
+    }
+    if (toInsert.length) {
+      const { error } = await sb.from("sale_order_lines").insert(toInsert);
+      if (error) {
+        orderError.textContent = "The order was saved, but a new line failed to save: " + error.message;
+        saveBtn.disabled = false; saveBtn.textContent = "Save order";
+        await loadOrders();
+        return;
+      }
+    }
+
+    saveBtn.disabled = false; saveBtn.textContent = "Save order";
+    entryDirty = false;
     closeOrderEntry();
     await loadOrders();
     return;
@@ -1561,6 +1769,11 @@ async function saveOrder() {
     delivery_fee: isB2C ? num("o-delivery-fee") : null,
     total_amount: isB2C ? num("o-total-amount") : null,
     payment_status_text: channel === "Individual" ? txt("o-payment-status") : null,
+    // Migration 017: manual, per order — nothing here is computed from the
+    // lines below, so an order created with neither box ticked simply shows
+    // no work-sheet button until someone edits it and ticks one.
+    ws_company_farm: document.getElementById("o-ws-farm").checked,
+    ws_company_food: document.getElementById("o-ws-food").checked,
     created_by: myProfile.id,
   };
 
@@ -1595,6 +1808,7 @@ async function saveOrder() {
   }
 
   saveBtn.disabled = false; saveBtn.textContent = "Save order";
+  entryDirty = false;
   closeOrderEntry();
   await loadOrders();
 }
@@ -1612,7 +1826,16 @@ oChannel.addEventListener("change", async () => {
 
 document.getElementById("add-order-line-btn").addEventListener("click", () => addOrderLineRow());
 document.getElementById("save-order-btn").addEventListener("click", saveOrder);
-document.getElementById("cancel-order-btn").addEventListener("click", closeOrderEntry);
+document.getElementById("cancel-order-btn").addEventListener("click", () => {
+  if (confirmDiscardIfDirty()) closeOrderEntry();
+});
+// Dirty-tracking for the discard-confirmation on Back/Next/Cancel — anything
+// actually typed or picked inside the panel marks it, whether that's a
+// header field or a product-line cell (delegated, since line rows are
+// created dynamically). Programmatic prefill in openOrderEntry runs before
+// entryDirty is reset back to false, so opening the panel never counts.
+orderEntrySection.addEventListener("input", markEntryDirty);
+orderEntrySection.addEventListener("change", markEntryDirty);
 
 // B2C total is order + delivery fee unless someone types something else.
 ["o-total-order", "o-delivery-fee"].forEach(id => {
@@ -1632,6 +1855,7 @@ document.getElementById("o-total-amount").addEventListener("input", (e) => {
 // The CRM and PACE are one app but two workspaces. These keep the two from
 // bleeding into each other when a role — or admin — moves between them.
 function hidePaceSections() {
+  document.getElementById("pace-crumb").classList.add("hidden");
   ordersSection.classList.add("hidden");
   orderEntrySection.classList.add("hidden");
   calculatorSection.classList.add("hidden");
@@ -1654,13 +1878,16 @@ function setupPaceRole() {
   document.body.classList.add("pace-mode");
   hideCrmSections();
   paceTabs.classList.remove("hidden");
+  setPaceTabsForRole();
   tabOrdersBtn.classList.add("active");
   document.getElementById("app-title").textContent = "PROSUN PACE";
   document.getElementById("app-subtitle").textContent =
     "Performance · Accountability · Coordination · Execution";
 
   const note = document.getElementById("role-note");
-  if (myProfile.role === "sale_support") {
+  if (myProfile.role === "factory_admin") {
+    note.textContent = "ถ่ายรูปใบงาน ตรวจตัวเลขกับรูป แล้วกดยืนยัน — น้ำหนักที่ยืนยันแล้วใช้ออกบิล";
+  } else if (myProfile.role === "sale_support") {
     note.textContent = "Enter and review customer orders. You also maintain the product catalogue — retire a product by deactivating it rather than deleting, so past orders keep their reference.";
   } else if (myProfile.role === "purchasing") {
     note.textContent = "Read-only view of every order, so purchasing can see demand before buying. Entering and changing orders is sale support's job.";
@@ -1669,8 +1896,38 @@ function setupPaceRole() {
   }
 }
 
+// PROSUN PACE menu by department (28 Oct 2026). Each role sees only its own
+// department; admin sees all three:
+//   Middle office (sale_support) — Orders, plus "Confirm bird quantities":
+//     sale support's step in the purchase confirmation (Migration 016)
+//   Purchasing (purchasing)      — Poultry calculator
+//   Production (production, factory_admin) — Weighing (Migration 018)
+// This is the screen only; the database's RLS still decides what each role
+// can read (purchasing reads orders because the calculator is built on them).
+const PACE_MENU = {
+  admin:         ["orders", "calculator", "weighing"],
+  sale_support:  ["orders", "confirm-birds"],
+  purchasing:    ["calculator"],
+  production:    ["weighing"],
+  factory_admin: ["weighing"],
+};
+const PACE_HOME = { admin: "orders", sale_support: "orders", purchasing: "calculator", production: "weighing", factory_admin: "weighing" };
+const PACE_DEPT = { orders: "Middle office", calculator: "Purchasing", weighing: "Production" };
+
+function setPaceTabsForRole() {
+  const items = PACE_MENU[myProfile && myProfile.role] || [];
+  tabOrdersBtn.classList.toggle("hidden", !items.includes("orders"));
+  tabConfirmBirdsBtn.classList.toggle("hidden", !items.includes("confirm-birds"));
+  tabCalculatorBtn.classList.toggle("hidden", !items.includes("calculator"));
+  tabWeighingBtn.classList.toggle("hidden", !items.includes("weighing"));
+  document.getElementById("pace-group-middle").classList.toggle("hidden", !items.includes("orders") && !items.includes("confirm-birds"));
+  document.getElementById("pace-group-purchasing").classList.toggle("hidden", !items.includes("calculator"));
+  document.getElementById("pace-group-production").classList.toggle("hidden", !items.includes("weighing"));
+}
+
 async function switchPaceView(view) {
   paceView = view;
+  setPaceTabsForRole();
   if (myProfile.role === "admin") {
     // Coming from the chooser: close the CRM side entirely.
     document.getElementById("app-title").textContent = "PROSUN PACE";
@@ -1683,9 +1940,16 @@ async function switchPaceView(view) {
   }
   tabOrdersBtn.classList.toggle("active", view === "orders");
   tabCalculatorBtn.classList.toggle("active", view === "calculator");
+  tabConfirmBirdsBtn.classList.toggle("active", view === "calculator");
+  tabWeighingBtn.classList.toggle("active", view === "weighing");
+  const crumb = document.getElementById("pace-crumb");
+  const dept = view === "calculator" && myProfile.role === "sale_support" ? "Middle office" : PACE_DEPT[view];
+  crumb.textContent = dept || "";
+  crumb.classList.toggle("hidden", !dept);
   orderEntrySection.classList.add("hidden");
   ordersSection.classList.toggle("hidden", view !== "orders");
   calculatorSection.classList.toggle("hidden", view !== "calculator");
+  if (view !== "weighing") closeWeighing();          // weighing.js
 
   // Purchasing and production read; only sale support and admin write. Entry
   // also needs one specific channel, since the product list is per channel.
@@ -1698,9 +1962,15 @@ async function switchPaceView(view) {
     document.getElementById("list-title").textContent = "Poultry calculator";
     await loadCalculatorCycles();
   }
+  else if (view === "weighing") {
+    document.getElementById("list-title").textContent = "งานชั่งน้ำหนัก — Weighing";
+    await openWeighing();                             // weighing.js
+  }
 }
 
 tabCalculatorBtn.addEventListener("click", () => switchPaceView("calculator"));
+tabWeighingBtn.addEventListener("click", () => switchPaceView("weighing"));
+tabConfirmBirdsBtn.addEventListener("click", () => switchPaceView("calculator"));
 
 document.getElementById("new-order-btn").addEventListener("click", openOrderEntry);
 
@@ -2298,13 +2568,29 @@ function renderOrdersGrid() {
 
   const canEnter = myProfile.role === "sale_support" || myProfile.role === "admin";
   const upcomingDeliveryDates = upcomingCalcDeliveryDates();
+  renderedOrderList = orders;
+
+  // Item 5 of Jane's 11 Sep feedback: colour banding per delivery day,
+  // similar to the original Excel sheet, in place of the old plain
+  // odd/even zebra stripe — assigned in the order each date first appears
+  // among the orders actually being rendered, so it stays stable for this
+  // view regardless of which days have orders this week.
+  const DAY_BAND_CLASSES = ["day-band-a", "day-band-b", "day-band-c", "day-band-d", "day-band-e"];
+  const dayBandByDate = new Map();
+  function dayBandClassFor(dateStr) {
+    if (!dateStr) return "";
+    if (!dayBandByDate.has(dateStr)) {
+      dayBandByDate.set(dateStr, DAY_BAND_CLASSES[dayBandByDate.size % DAY_BAND_CLASSES.length]);
+    }
+    return dayBandByDate.get(dateStr);
+  }
 
   ordersGridBody.innerHTML = orders.map((o, idx) => {
     const lines = (o.sale_order_lines || []).slice();
     const bodyRows = lines.length ? lines : [null];
     // +1 for the "add product line" row, which only writers see
     const span = bodyRows.length + (canEnter ? 1 : 0);
-    const zebra = idx % 2 ? " order-alt" : "";
+    const dayBand = dayBandClassFor(o.delivery_date);
 
     // PO / Order no. collapses two columns (po_number, order_number) into one
     // cell for display. An edit has to land on whichever one is actually in
@@ -2312,12 +2598,22 @@ function renderOrdersGrid() {
     const refField = o.po_number ? "po_number" : (o.order_number ? "order_number" : "po_number");
     const refValue = o.po_number || o.order_number || "";
 
-    // Which companies this order's work sheet needs (Migration 014) — zero,
-    // one, or both, purely from what's actually on the order (see
-    // lineCompany). Farm listed before Food when both are present, matching
-    // the order Clément gave them in "psfarm and psfood".
+    // Which companies this order's work sheet needs — Migration 017: a
+    // manual per-order choice (ws_company_farm/ws_company_food) rather than
+    // computed live from the lines, per Jane's 11 Sep feedback ("we want to
+    // manually select which company Prosun Farm/Food for each work order").
+    // Farm listed before Food when both are set, matching the order Clément
+    // gave them in "psfarm and psfood". Note this is separate from
+    // lineCompany() below, which still decides — automatically, from each
+    // line's own product type — which lines print on which company's PDF;
+    // this only decides which button(s) show in the first place.
     const orderCompanies = ["Prosun Farm", "Prosun Food"]
-      .filter(company => lines.some(l => lineCompany(l.type) === company));
+      .filter(company => company === "Prosun Farm" ? o.ws_company_farm : o.ws_company_food);
+    // Item 6: a plain-text reminder under the customer name once any of
+    // this order's work sheets has actually been generated.
+    const sentTo = orderCompanies
+      .filter(company => workSheetGenerationFor(o, company))
+      .map(company => WORK_SHEET_SHORT_NAME[company]);
 
     const headerCells = [
       ...(showChannel ? [{ key: "channel", html: `<span class="channel-pill channel-${o.channel.replace(/\s/g, "")}">${escapeHtml(o.channel)}</span>` }] : []),
@@ -2330,16 +2626,29 @@ function renderOrdersGrid() {
         ? `<span class="muted-code">standing since</span><br>${shortDate(o.standing_since)}`
         : shortDate(o.order_date) },
       // Client identity stays locked even for sale support — see the note
-      // above editCell. Everything else on the order is theirs to fix.
-      { key: "customer", html: `<strong>${escapeHtml(o.customer_name || "—")}</strong>${
-        o.customer_code ? ` <span class="muted-code">(${escapeHtml(o.customer_code)})</span>` : ""}${
-        o.pace_customer_id ? "" : ` <span class="unlinked" title="Not matched to a customer on the list">•</span>`}${
-        orderIsCalcCounted(o, upcomingDeliveryDates)
+      // above editCell (the Edit panel, unlike this grid cell, does let it
+      // be corrected — see openOrderEntry). The code — and, for an
+      // unmatched customer, the small "not on the list" marker — now always
+      // sits on its own line under the name rather than crowding onto the
+      // same line, per Jane's 11 Sep feedback: a new customer's shorter
+      // name+code combination could fit on one line while a longer-established
+      // customer's happened to wrap, which read as if new customers were
+      // being singled out for different (bolder) treatment. They aren't —
+      // this makes the layout consistent regardless of match status.
+      { key: "customer", html: `<strong>${escapeHtml(o.customer_name || "—")}</strong>` +
+        (o.customer_code || !o.pace_customer_id
+          ? `<br><span class="muted-code">${o.customer_code ? `(${escapeHtml(o.customer_code)})` : ""}</span>${
+              o.pace_customer_id ? "" : ` <span class="unlinked" title="Not matched to a customer on the list">•</span>`}`
+          : "") +
+        (orderIsCalcCounted(o, upcomingDeliveryDates)
           ? ` <span class="calc-star" title="Already counted in the upcoming poultry calculation">★</span>`
-          : ""}${
-        orderIsPurchaseValidated(o.id)
+          : "") +
+        (orderIsPurchaseValidated(o.id)
           ? ` <span class="calc-validated-mark" title="Included in a validated purchase for an upcoming cycle">✓</span>`
-          : ""}` },
+          : "") +
+        (sentTo.length
+          ? `<br><span class="ws-sent-note">Already sent to Production/Kitchen (${sentTo.join(", ")})</span>`
+          : "") },
       { key: "ref", html: canEnter
         ? editCell("sale_orders", o.id, refField, refValue, { placeholder: "—" })
         : escapeHtml(refValue || "—") },
@@ -2367,8 +2676,8 @@ function renderOrdersGrid() {
             : "—") },
       // Blank stays the normal case — Odoo decides which company invoices —
       // but sale support can set it here directly once it's known. Separate
-      // from the Work sheet column: which company a work sheet uses is
-      // derived automatically per line (Migration 014), not from this field.
+      // from the Work sheet column: which PSFarm/PSFood button(s) show is a
+      // manual choice made in the Edit panel (Migration 017), not this field.
       { key: "entity", html: canEnter
         ? editSelect("sale_orders", o.id, "entity", o.entity, ["Prosun Farm", "Prosun Food"])
         : escapeHtml(o.entity || "—") },
@@ -2436,13 +2745,17 @@ function renderOrdersGrid() {
       : `<td class="line-col empty-cell" colspan="7">No product lines on this order yet.</td>`;
 
     const rows = bodyRows.map((l, i) =>
-      `<tr class="order-line${zebra}${i === 0 ? " order-first" : ""}" data-order="${o.id}">${i === 0 ? headerCells : ""}${lineRow(l)}</tr>`
+      `<tr class="order-line ${dayBand}${i === 0 ? " order-first" : ""}" data-order="${o.id}">${i === 0 ? headerCells : ""}${lineRow(l)}</tr>`
     );
 
     if (canEnter) {
-      rows.push(`<tr class="order-line add-line-row${zebra}" data-order="${o.id}">
+      // Renamed from "+ Add product line" (11 Sep 2026, Jane's feedback) —
+      // it now opens a full edit of the order (customer, PO number,
+      // delivery date, company, and every existing product line), not just
+      // a way to append one more.
+      rows.push(`<tr class="order-line add-line-row ${dayBand}" data-order="${o.id}">
         <td class="line-col" colspan="7">
-          <button type="button" class="btn-link add-line" data-order="${o.id}">+ Add product line</button>
+          <button type="button" class="btn-link edit-order-btn" data-order="${o.id}">Edit</button>
         </td></tr>`);
     }
     return rows.join("");
@@ -2454,8 +2767,8 @@ function renderOrdersGrid() {
     (term ? ` (filtered from ${orderListState.length})` : "") +
     ` · week of ${weekLabelText(weekMonday)}`;
 
-  ordersGridBody.querySelectorAll(".add-line").forEach(btn => {
-    btn.addEventListener("click", () => addLineToExistingOrder(btn.dataset.order));
+  ordersGridBody.querySelectorAll(".edit-order-btn").forEach(btn => {
+    btn.addEventListener("click", () => openEditOrder(btn.dataset.order));
   });
   ordersGridBody.querySelectorAll(".worksheet-btn").forEach(btn => {
     btn.addEventListener("click", () => handleGenerateWorkSheet(btn.dataset.order, btn.dataset.entity));
@@ -2554,13 +2867,13 @@ ordersGridBody.addEventListener("keydown", (e) => {
   }
 });
 
-// Adding a line to an order already on the sheet: the common case of a client
-// phoning back to add one more item, which today means finding their row block
-// and inserting a row underneath it.
-async function addLineToExistingOrder(orderId) {
+// Full edit of an order already on the sheet (11 Sep 2026, replacing the old
+// narrower "add a line" flow) — customer, PO number, delivery date, company
+// and every product line all become editable, per Jane's feedback.
+async function openEditOrder(orderId) {
   const order = orderListState.find(o => o.id === orderId);
   if (!order) return;
-  openOrderEntry({ addTo: order });
+  await openOrderEntry({ editOrder: order });
 }
 
 // ------------------------------------------------------------------- export

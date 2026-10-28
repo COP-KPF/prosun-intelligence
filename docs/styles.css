@@ -447,6 +447,12 @@ tr.clickable-row:hover { background: #fafbfc; cursor: pointer; }
   margin-top: 3px;
   line-height: 1.3;
 }
+.ws-company-checks { display: flex; gap: 16px; align-items: center; height: 100%; }
+.ws-company-checks .ws-check {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.85rem; font-weight: 400; color: var(--text); margin-bottom: 0;
+}
+.ws-company-checks .ws-check input { width: auto; }
 
 .order-lines-title {
   margin: 4px 0 8px;
@@ -508,6 +514,7 @@ tr.clickable-row:hover { background: #fafbfc; cursor: pointer; }
 }
 .order-lines-table .line-remove:hover { color: var(--danger); }
 .order-lines-table tr.line-incomplete td { background: #fffaf0; }
+.order-lines-table .l-prod-note { display: block; padding: 0 7px; color: #9c6b16; font-style: italic; }
 
 #add-order-line-btn { margin-top: 10px; }
 
@@ -589,6 +596,25 @@ tr.clickable-row:hover { background: #fafbfc; cursor: pointer; }
 #orders-grid .empty-cell { color: var(--muted); font-style: italic; }
 #orders-grid .muted-code { color: var(--muted); font-weight: 400; font-size: 0.78rem; }
 #orders-grid .unlinked { color: #c08a2e; font-weight: 700; }
+
+/* Item 5 of Jane's 11 Sep feedback: colour banding per delivery day, similar
+   to the original Excel sheet, replacing the old plain odd/even zebra
+   stripe. Cycles through a small pastel palette as the delivery date
+   changes going down the grid — assigned in renderOrdersGrid() in the order
+   each date first appears, not by weekday, so it stays stable within one
+   week's view regardless of which days actually have orders. */
+#orders-grid tr.day-band-a td { background: #eef6f2; }
+#orders-grid tr.day-band-b td { background: #eef2fb; }
+#orders-grid tr.day-band-c td { background: #fbf3e6; }
+#orders-grid tr.day-band-d td { background: #f6eefb; }
+#orders-grid tr.day-band-e td { background: #eef8fa; }
+
+/* Item 6: a plain-text reminder under the customer name once any of this
+   order's work sheets has been generated — in addition to the checkmark on
+   the button itself (worksheet-btn-done/worksheet-generated-mark below),
+   meant to catch the eye before someone resends a sheet that already went
+   out to Production/Kitchen. */
+#orders-grid .ws-sent-note { display: block; color: #9c6b16; font-size: 0.74rem; font-style: italic; margin-top: 2px; }
 
 /* A standing order whose quantity for this week is not settled yet. It has to
    read as "still to come", not as a zero and not as an empty cell. */
@@ -949,3 +975,320 @@ body.pace-mode .page-footer { max-width: none; padding: 8px 20px 32px; }
    reading as a single crowded line. */
 .worksheet-btn-pending { color: var(--danger); }
 .worksheet-btn-done { color: #1f6b34; }
+
+/* ===========================================================================
+   Weighing photos (Migration 018) — factory admin screen, Thai.
+   Scoped to #weighing-section so nothing here touches the CRM or PACE.
+   =========================================================================== */
+body.weigh-mode main { max-width: 1400px; padding: 20px 20px 8px; }
+body.weigh-mode .page-footer { max-width: 1400px; }
+.system-cards { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+#system-chooser { max-width: 980px; }
+
+#weighing-section {
+  --w-amber-bg: #fcebd3; --w-amber-bd: #f0cf9f; --w-amber-fg: #7a4300;
+  --w-blue-bg: #e4ecf8;  --w-blue-bd: #c3d4ee;  --w-blue-fg: #174a94;
+  --w-green-bg: #e3f1e7; --w-green-bd: #bfddc8; --w-green-fg: #1e6b3a;
+  --w-red-bg: #fbe4e2;   --w-red-bd: #efbcb7;   --w-red-fg: #9b2c25;
+  --w-warn: #b45309;
+  display: flex; flex-direction: column; gap: 18px;
+  font-family: -apple-system, "Segoe UI", "Noto Sans Thai", "Leelawadee UI", Tahoma, sans-serif;
+}
+#weighing-section h2, #weighing-section h3 { margin: 0; }
+#weighing-section h3 { font-size: 1.02rem; }
+#weighing-section label { margin: 0; color: var(--text); font-size: 0.9rem; }
+#weighing-section .w-muted { color: var(--muted); }
+#weighing-section .w-small { font-size: 0.84rem; line-height: 1.5; margin: 0; }
+#weighing-section .w-center { text-align: center; }
+#weighing-section .w-mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-variant-numeric: tabular-nums; }
+#weighing-section .w-empty { color: var(--muted); padding: 18px; text-align: center; }
+
+.w-msg { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  border-radius: var(--radius); padding: 10px 14px; font-size: 0.9rem; }
+.w-msg-error { background: var(--w-red-bg); border: 1px solid var(--w-red-bd); color: var(--w-red-fg); }
+.w-msg-info  { background: var(--w-green-bg); border: 1px solid var(--w-green-bd); color: var(--w-green-fg); }
+.w-msg-close { background: none; border: 0; font-size: 1.3rem; line-height: 1; color: inherit; min-width: 36px; min-height: 36px; }
+
+.w-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px; }
+.w-daynav { display: flex; align-items: center; gap: 10px; }
+.w-day { font-size: 1.45rem; font-weight: 600; line-height: 1.2; }
+.w-iconbtn { width: 44px; height: 44px; border: 1px solid var(--border); background: var(--panel);
+  border-radius: 8px; font-size: 1.4rem; line-height: 1; color: var(--text); }
+.w-counters { display: flex; flex-wrap: wrap; gap: 10px; }
+.w-counter { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 8px 14px; min-width: 104px; display: flex; flex-direction: column; font-size: 0.82rem; color: var(--muted); }
+.w-counter strong { font-size: 1.5rem; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.w-c-amber { background: var(--w-amber-bg); border-color: var(--w-amber-bd); color: var(--w-amber-fg); }
+.w-c-amber strong { color: var(--w-amber-fg); }
+.w-c-blue { background: var(--w-blue-bg); border-color: var(--w-blue-bd); color: var(--w-blue-fg); }
+.w-c-blue strong { color: var(--w-blue-fg); }
+.w-c-green { background: var(--w-green-bg); border-color: var(--w-green-bd); color: var(--w-green-fg); }
+.w-c-green strong { color: var(--w-green-fg); }
+
+.w-row { display: flex; flex-wrap: wrap; gap: 18px; align-items: stretch; }
+.w-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+.w-panel-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
+.w-capture { flex: 1 1 260px; max-width: 320px; display: flex; flex-direction: column; gap: 12px; }
+.w-papers { flex: 999 1 520px; min-width: 0; }
+.w-qr { align-self: center; width: 210px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+.w-qr svg { display: block; width: 100%; height: auto; }
+.w-sep { border-top: 1px solid var(--border); }
+.w-file { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.w-upload-label { position: relative; }
+.w-uploads { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; }
+.w-uploads li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; }
+.w-err { color: var(--w-red-fg); width: 100%; }
+
+.w-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 44px; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--accent);
+  background: var(--accent); color: #fff; font-size: 0.95rem; font-weight: 600; cursor: pointer; }
+.w-btn:hover { background: var(--accent-dark); }
+.w-btn:disabled { background: #d5dad8; border-color: #d5dad8; color: #57605d; cursor: not-allowed; }
+.w-btn-outline { background: var(--panel); color: var(--accent-dark); }
+.w-btn-outline:hover { background: #eef5f1; }
+.w-btn-outline:disabled { background: var(--panel); }
+.w-btn-danger-outline { background: var(--panel); color: var(--danger); border-color: #e3b8b5; }
+.w-btn-danger-outline:hover { background: #fbefee; }
+.w-btn-big { font-size: 1.1rem; min-height: 54px; padding: 10px 26px; }
+.w-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.w-inline { display: inline-flex !important; align-items: center; gap: 8px; }
+#weighing-section select, #weighing-section input[type=text], #weighing-section input[type=date] { min-height: 40px; }
+.w-inline select { width: auto; }
+
+.w-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.w-card { display: flex; gap: 12px; text-align: left; padding: 10px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--panel); color: var(--text); min-height: 92px; }
+.w-card:hover { border-color: var(--accent); }
+.w-thumb { width: 54px; height: 72px; flex: none; border-radius: 4px; overflow: hidden; background: #eceae2; border: 1px solid #d9d5c8; }
+.w-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.w-card-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; align-items: flex-start; }
+.w-card-po { font-family: ui-monospace, Consolas, monospace; font-size: 0.8rem; color: #3f4744; }
+.w-card-cust { font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.w-card-meta { font-size: 0.78rem; color: var(--muted); }
+
+.w-pill { display: inline-block; font-size: 0.76rem; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.w-pill-amber { background: var(--w-amber-bg); color: var(--w-amber-fg); }
+.w-pill-blue  { background: var(--w-blue-bg);  color: var(--w-blue-fg); }
+.w-pill-green { background: var(--w-green-bg); color: var(--w-green-fg); }
+.w-pill-red   { background: var(--w-red-bg);   color: var(--w-red-fg); }
+
+.w-table-panel { padding: 0; }
+.w-table-panel > .w-panel-head { padding: 16px 18px; margin: 0; border-bottom: 1px solid var(--border); }
+.w-scroll { border: 0; border-radius: 0; margin: 0; }
+.w-table { width: 100%; border: 0; border-radius: 0; font-size: 0.86rem; }
+.w-table th, .w-table td { white-space: nowrap; padding: 8px 10px; vertical-align: top; }
+.w-table td.w-wrap { white-space: normal; min-width: 220px; }
+.w-table tr.w-first td { border-top: 1px solid #c9cfcd; }
+.w-num { text-align: right; font-variant-numeric: tabular-nums; }
+.w-strong { font-weight: 600; }
+.w-warn { color: var(--w-warn); font-weight: 600; }
+.w-q { display: inline-block; min-width: 18px; text-align: center; border-radius: 50%; background: var(--w-amber-bg); color: var(--w-amber-fg); font-weight: 700; font-size: 0.75rem; }
+.w-foot { padding: 10px 18px 14px; }
+
+/* check screen */
+.w-check-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; }
+.w-back { font-size: 0.95rem; min-height: 44px; }
+.w-stepper { display: flex; align-items: center; gap: 10px; }
+.w-check { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+.w-photo { flex: 1 1 440px; min-width: 0; background: #2a2f2d; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px;
+  position: sticky; top: 10px; }
+.w-photo-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; color: #e9ecea; font-size: 0.82rem; }
+.w-photo-tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.w-tool { min-height: 38px; padding: 0 12px; border-radius: 8px; border: 1px solid #59615e; background: #353b39; color: #e9ecea; font-size: 0.85rem; }
+.w-tool:disabled { opacity: 0.5; }
+.w-photo-frame { overflow: auto; max-height: calc(100vh - 140px); display: flex; justify-content: center; align-items: flex-start; background: #1f2322; border-radius: 6px; }
+.w-photo-frame img { max-width: 100%; height: auto; display: block; transition: transform 0.2s; }
+.w-photo-frame.w-zoomed { justify-content: flex-start; }
+.w-photo-frame.w-zoomed img { max-width: none; width: 200%; }
+.w-side { flex: 999 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.w-cust { font-size: 1.35rem !important; }
+.w-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.w-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem !important; color: var(--muted) !important; }
+.w-note { margin-top: 10px; border-radius: 8px; padding: 8px 12px; font-size: 0.88rem; }
+.w-note-blue  { background: var(--w-blue-bg);  color: var(--w-blue-fg); }
+.w-note-amber { background: var(--w-amber-bg); color: var(--w-amber-fg); }
+.w-note-red   { background: var(--w-red-bg);   color: var(--w-red-fg); }
+
+.w-lines-panel { padding: 0; overflow-x: auto; }
+.w-lines { width: 100%; border: 0; border-radius: 0; font-size: 0.92rem; }
+.w-lines th { padding: 10px 12px; }
+.w-lines td { padding: 10px 12px; vertical-align: middle; }
+.w-lines tr.w-line td { border-bottom: 0; }
+.w-lines tr.w-look { background: #fff7ec; }
+.w-hand { color: #2346a0; font-style: italic; white-space: nowrap; }
+input.w-kg { width: 110px !important; text-align: right; font-size: 1.15rem; font-variant-numeric: tabular-nums;
+  border: 2px solid #9aa3a0; min-height: 46px; }
+input.w-kg:focus { outline: 3px solid #b7d4c3; border-color: var(--accent); }
+input.w-kg:disabled { background: #f6f7f6; border-color: var(--border); }
+input.w-input-bad { border-color: var(--danger) !important; background: #fbefee; }
+input.w-desc { min-width: 180px; }
+.w-diff { font-weight: 600; white-space: nowrap; }
+.w-x { background: none; border: 0; color: var(--muted); font-size: 1.3rem; min-width: 36px; min-height: 36px; }
+.w-x:hover { color: var(--danger); }
+.w-flag { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.w-flag-text { color: var(--w-amber-fg); font-size: 0.88rem; }
+.w-flag-row td { padding-top: 0 !important; }
+.w-flag-row:not(.w-look) .w-flag-text { color: var(--muted); }
+.w-check-label { display: inline-flex !important; align-items: center; gap: 8px; font-weight: 600; min-height: 44px;
+  padding: 0 12px; border: 1px solid #e0b678; border-radius: 8px; background: #fff; cursor: pointer; }
+.w-check-label input { width: 20px; height: 20px; margin: 0; }
+.w-add { margin: 8px 12px 0; min-height: 40px; }
+.w-pad { padding: 6px 12px 12px !important; }
+.w-confirm-bar, .w-confirmed { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
+.w-confirmed { background: var(--w-green-bg); border-color: var(--w-green-bd); color: var(--w-green-fg); }
+
+@media (max-width: 700px) {
+  .w-capture { max-width: none; }
+  .w-photo { position: static; }
+}
+.w-photo-gone { color: #c9cfcd; padding: 40px 20px; text-align: center; margin: 0; }
+
+/* ===========================================================================
+   PROSUN PACE — department menu (28 Oct 2026)
+   Left side menu in PACE, grouped by department; CRM side unchanged
+   (#main-col is a plain block there). On narrow screens the menu becomes a
+   horizontal strip above the page.
+   =========================================================================== */
+#main-col { min-width: 0; }
+body.pace-mode main {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  padding-left: 0;
+}
+body.pace-mode #main-col { flex: 1 1 auto; }
+.pace-nav {
+  flex: 0 0 220px;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 18px 12px 18px 16px;
+  min-height: calc(100vh - 70px);
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+}
+.pace-nav-group { display: flex; flex-direction: column; gap: 2px; }
+.pace-nav-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted); padding: 0 8px 6px;
+}
+.pace-nav-head small {
+  width: 100%; padding-left: 18px; margin-top: -2px;
+  font-size: 0.72rem; font-weight: 500; letter-spacing: 0; text-transform: none; color: #8a9196;
+}
+.pace-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.pace-dot-middle     { background: #2f6f4f; }
+.pace-dot-purchasing { background: #b7791f; }
+.pace-dot-production { background: #2f5d9e; }
+.pace-nav-item {
+  text-align: left;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: 0.93rem;
+  padding: 9px 10px 9px 26px;
+  border-radius: 8px;
+  min-height: 40px;
+  cursor: pointer;
+}
+.pace-nav-item:hover { background: #f1f4f2; }
+.pace-nav-item.active { background: #e6f0ea; color: var(--accent-dark); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
+.pace-crumb {
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 2px;
+}
+@media (max-width: 900px) {
+  body.pace-mode main { flex-direction: column; align-items: stretch; padding-left: 12px; gap: 12px; }
+  .pace-nav {
+    position: static; flex: none; width: 100%; min-height: 0;
+    flex-direction: row; overflow-x: auto; gap: 14px;
+    border-right: 0; border-bottom: 1px solid var(--border); padding: 10px 0;
+  }
+  .pace-nav-group { flex-direction: row; align-items: center; flex: none; }
+  .pace-nav-head small { display: none; }
+  .pace-nav-head { padding: 0 4px 0 0; }
+  .pace-nav-item { padding: 8px 12px; white-space: nowrap; }
+}
+.pace-nav-sub { display: block; font-size: 0.78rem; font-weight: 400; color: var(--muted); }
+@media (min-width: 901px) { .pace-nav { margin-top: -20px; min-height: calc(100vh - 60px); } }
+@media (max-width: 900px) { .pace-nav-sub { display: inline; margin-left: 6px; } }
+
+/* ===========================================================================
+   Company look (28 Oct 2026) — Klong Phai Farm brand colours (Clément):
+     #f4efe3 cream · #1f3d2a forest green · #241905 dark brown · #b59767 tan
+   Cream is the page, green the action colour, dark brown the text, tan the
+   accent line and details (never small text: too light to read on white).
+   Red is kept for warnings only. Overrides the tokens at the top of this
+   file, so CRM and PACE both follow.
+   =========================================================================== */
+:root {
+  --bg: #f4efe3;          /* cream */
+  --panel: #ffffff;
+  --border: #e2d8c3;
+  --text: #241905;        /* dark brown */
+  --muted: #6b5f4a;
+  --accent: #1f3d2a;      /* forest green */
+  --accent-dark: #142a1c;
+  --gold: #b59767;        /* tan */
+  --danger: #a8262c;
+  --brand-tint: #e7ece4;  /* green wash for selected items */
+}
+header.app-header {
+  border-bottom: 3px solid var(--gold);
+  padding: 10px 24px;
+}
+.brand-wrap { display: flex; align-items: center; gap: 14px; }
+.brand-logo { height: 48px; width: auto; display: block; }
+#app-title { font-family: Georgia, "Times New Roman", serif; letter-spacing: 0.04em; font-size: 1.15rem; color: var(--accent); }
+.brand-sub { color: var(--muted) !important; }
+.btn-link { color: var(--accent); }
+
+/* login */
+#login-screen { background: var(--bg); }
+.login-card { border-top: 4px solid var(--gold); box-shadow: 0 8px 30px rgba(36, 25, 5, 0.07); text-align: left; }
+.login-logo { display: block; margin: 0 auto 12px; height: 110px; width: auto; }
+.login-card h1 { font-family: Georgia, "Times New Roman", serif; letter-spacing: 0.03em; text-align: center; color: var(--accent); }
+.login-card p.subtitle { text-align: center; }
+
+/* tabs, pills and selected states */
+.tab-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pace-nav { background: var(--panel); }
+.pace-nav-item:hover { background: #f6f2e8; }
+.pace-nav-item.active { background: var(--brand-tint); color: var(--accent-dark); box-shadow: inset 3px 0 0 var(--gold); }
+.pace-dot-middle     { background: #1f3d2a; }
+.pace-dot-purchasing { background: #b59767; }
+.pace-dot-production { background: #241905; }
+.pace-crumb { color: var(--accent); }
+.system-card:hover { border-color: var(--gold); }
+.system-card-acronym { color: var(--accent); }
+
+/* weighing screen */
+.w-btn-outline { color: var(--accent); }
+.w-btn-outline:hover { background: var(--brand-tint); }
+input.w-kg:focus { outline-color: #d9c8a6; border-color: var(--accent); }
+.w-card:hover { border-color: var(--gold); }
+.pace-nav-item:focus-visible, .w-btn:focus-visible, .tab-btn:focus-visible { outline: 3px solid #d9c8a6; outline-offset: 2px; }
+.info-banner { background: #faf6ec; border-color: var(--border); color: var(--text); }
+.w-photo { background: #2b2214; }
+.w-photo-frame { background: #1c150a; }
+.w-tool { background: #3a2f1d; border-color: #5a4a2f; }
+
+/* More forest green (28 Oct 2026, Clément): green header band with the logo
+   on a cream badge, solid green selected menu item, green table headings and
+   outlined green secondary buttons. */
+header.app-header { background: var(--accent); }
+header.app-header .who, header.app-header .who span { color: #e9e2d0; }
+header.app-header .who strong { color: #ffffff; }
+header.app-header .btn-link { color: #f4efe3; }
+#app-title { color: #f4efe3; }
+.brand-sub { color: #cdbf9c !important; }
+.brand-logo { background: #f4efe3; border-radius: 8px; padding: 3px 6px; height: 52px; box-sizing: border-box; }
+.pace-nav-item.active { background: var(--accent); color: #ffffff; box-shadow: inset 4px 0 0 var(--gold); }
+.pace-nav-item.active .pace-nav-sub { color: #d6cbb0; }
+th { color: var(--accent); background: #edf1ea; }
+.btn-secondary { border-color: var(--accent); color: var(--accent); }
+.btn-secondary:hover { background: var(--brand-tint); }

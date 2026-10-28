@@ -4,13 +4,14 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Klong Phai Farm CRM</title>
-<link rel="stylesheet" href="styles.css?v=20260907-0930" />
+<link rel="stylesheet" href="styles.css?v=20261028-5" />
 </head>
 <body>
 
   <!-- ============ LOGIN SCREEN ============ -->
   <div id="login-screen">
     <form class="login-card" id="login-form">
+      <img src="logo.png?v=20261028-5" class="login-logo" alt="Klong Phai Farm" width="160" height="120" />
       <h1>Klong Phai Farm CRM</h1>
       <p class="subtitle">Sign in with the account your admin created for you.</p>
 
@@ -34,9 +35,12 @@
   <!-- ============ APP SHELL ============ -->
   <div id="app-screen" class="hidden">
     <header class="app-header">
+      <div class="brand-wrap">
+      <img src="logo.png?v=20261028-5" class="brand-logo" alt="Klong Phai Farm" width="64" height="48" />
       <div class="brand">
         <strong id="app-title">Klong Phai Farm CRM</strong>
         <span class="brand-sub" id="app-subtitle"></span>
+      </div>
       </div>
       <div class="who">
         <button class="btn-link hidden" id="switch-system-btn">Switch system</button>
@@ -48,6 +52,30 @@
     </header>
 
     <main>
+      <!-- PROSUN PACE menu, by department (28 Oct 2026, Clément: orders are
+           for the middle office, the poultry calculator for purchasing, the
+           weighing for production). Each role sees only its own department;
+           admin sees all three. Hidden on the CRM side. The ids tab-orders /
+           tab-calculator / tab-weighing are what app.js switches on. -->
+      <nav id="pace-tabs" class="pace-nav hidden" aria-label="PROSUN PACE sections">
+        <div class="pace-nav-group" id="pace-group-middle">
+          <div class="pace-nav-head"><span class="pace-dot pace-dot-middle" aria-hidden="true"></span>Middle office<small>Sale support</small></div>
+          <button type="button" class="pace-nav-item" id="tab-orders" data-view="orders">Orders</button>
+          <!-- Sale support's own entry to the purchase confirmation (Migration
+               016: purchasing → sale support → Clément). Opens the same
+               calculator page; shown to sale support only. -->
+          <button type="button" class="pace-nav-item hidden" id="tab-confirm-birds" data-view="calculator">Confirm bird quantities</button>
+        </div>
+        <div class="pace-nav-group" id="pace-group-purchasing">
+          <div class="pace-nav-head"><span class="pace-dot pace-dot-purchasing" aria-hidden="true"></span>Purchasing<small>จัดซื้อ</small></div>
+          <button type="button" class="pace-nav-item" id="tab-calculator" data-view="calculator">Poultry calculator</button>
+        </div>
+        <div class="pace-nav-group" id="pace-group-production">
+          <div class="pace-nav-head"><span class="pace-dot pace-dot-production" aria-hidden="true"></span>Production<small>ฝ่ายผลิต</small></div>
+          <button type="button" class="pace-nav-item" id="tab-weighing" data-view="weighing">Weighing<small class="pace-nav-sub">งานชั่งน้ำหนัก</small></button>
+        </div>
+      </nav>
+      <div id="main-col">
       <!-- Admin works on both sides, so rather than burying PACE in a tab row
            among the CRM's own tabs, signing in asks which system to open.
            Everyone else goes straight to the one system that is theirs. -->
@@ -62,13 +90,15 @@
           <button type="button" class="system-card" data-system="pace">
             <span class="system-card-name">PROSUN PACE</span>
             <span class="system-card-acronym">Performance · Accountability · Coordination · Execution</span>
-            <span class="system-card-desc">Order book and middle office</span>
+            <span class="system-card-desc">Middle office, purchasing and production</span>
           </button>
         </div>
       </div>
 
       <div class="toolbar">
         <div>
+          <!-- PACE only: which department this page belongs to -->
+          <div id="pace-crumb" class="pace-crumb hidden"></div>
           <h2 id="list-title">Your pipeline</h2>
           <!-- Director only: their own pipeline vs. the org-wide new-leads feed -->
           <div id="director-tabs" class="tabs hidden">
@@ -81,12 +111,6 @@
             <button type="button" class="tab-btn active" id="tab-all" data-view="all">All clients &amp; deals</button>
             <button type="button" class="tab-btn" id="tab-summary" data-view="summary">Team summary</button>
             <button type="button" class="tab-btn" id="tab-products" data-view="products">Products</button>
-          </div>
-          <!-- PACE side: sale support and purchasing. Admin sees this row too,
-               alongside the CRM tabs above. -->
-          <div id="pace-tabs" class="tabs hidden">
-            <button type="button" class="tab-btn active" id="tab-orders" data-view="orders">Orders</button>
-            <button type="button" class="tab-btn" id="tab-calculator" data-view="calculator">Poultry calculator</button>
           </div>
         </div>
         <button class="btn-secondary" id="new-client-btn">+ New client / lead</button>
@@ -211,6 +235,13 @@
         <div class="order-entry-head">
           <h3 id="order-entry-title">New order</h3>
           <div class="order-entry-actions">
+            <!-- Edit only (11 Sep 2026, Jane's feedback): step through the
+                 other orders in the currently filtered/sorted grid without
+                 closing and reopening the panel each time. Hidden entirely
+                 for a brand-new order, where there is no "other order" to
+                 step to yet. -->
+            <button type="button" class="btn-secondary hidden" id="edit-back-btn">&lsaquo; Back</button>
+            <button type="button" class="btn-secondary hidden" id="edit-next-btn">Next &rsaquo;</button>
             <button type="button" class="btn-secondary" id="cancel-order-btn">Cancel</button>
             <button type="button" class="btn-primary" id="save-order-btn">Save order</button>
           </div>
@@ -234,6 +265,22 @@
               <option value="Prosun Food">Prosun Food</option>
             </select>
             <small class="fld-hint">Leave as-is unless you know it. Invoicing is decided in Odoo.</small>
+          </div>
+          <!-- Work sheet company (Migration 017, 11 Sep 2026): which PSFarm/
+               PSFood button(s) show on this order in the grid. Separate from
+               "Company" above, which is Odoo's invoicing field and has
+               nothing to do with which work sheet(s) get generated — a point
+               worth restating in the hint, since the two fields sit right
+               next to each other and easily get conflated. Manually set by
+               whoever enters or edits the order; no longer computed from the
+               products on it. -->
+          <div class="fld fld-wide">
+            <label>Work sheet company</label>
+            <div class="ws-company-checks">
+              <label class="ws-check"><input type="checkbox" id="o-ws-farm" /> Prosun Farm (PSFarm)</label>
+              <label class="ws-check"><input type="checkbox" id="o-ws-food" /> Prosun Food (PSFood)</label>
+            </div>
+            <small class="fld-hint">Tick whichever factory work sheet(s) this order needs — not the same as Company above, and no longer worked out automatically from the products on it.</small>
           </div>
           <div class="fld fld-wide">
             <label for="o-customer">Customer</label>
@@ -331,20 +378,29 @@
       </div>
 
       <!-- PACE: the poultry calculator.
-           v1, per Clément (6 Sep 2026): Restaurant channel only (the only
-           one whose products are linked to a yield weight so far) and bird
-           count only (no leftover-parts ledger yet — that's a later step).
-           Turns real order demand for a chosen calculation day into how
-           many birds to slaughter, the same arithmetic Clément does by hand
-           today, using the weekly cycle from the process doc. -->
+           v1 (6 Sep 2026): Restaurant channel only, bird count only.
+           Migration 015 (7 Sep 2026) extended it to all four channels for
+           the Chicken Red Label and Duck Moscovy/Barbary lines specifically
+           — the only lines with yield weights on file — including B2C's
+           pack-based cuts (via pack_piece_count) and whole-bird SKUs
+           (counted directly, no cutting). Other species (Green Label,
+           Rabbit, Capon, Quail, Turkey, Guinea Fowl, Pigeon) still have no
+           yield weights on file and stay unmapped. Leftover-parts
+           reconciliation is still a later step. -->
       <div id="calculator-section" class="hidden">
-        <p class="orders-sub">Restaurant channel only for now — Department Store, Individual and Retail aren&rsquo;t linked to a yield weight yet. This is the bird count only; matching it against what's left over after cutting is a later step. All three upcoming calculation days — Monday, Wednesday and Saturday — are shown below.</p>
+        <p class="orders-sub">Covers all four channels for Chicken Red Label and Duck Moscovy/Barbary — the only lines with yield weights on file. Other species (Green Label, Rabbit, Capon, Quail, Turkey, Guinea Fowl, Pigeon) aren&rsquo;t mapped yet and show up as unmapped demand below. This is the bird count only; matching it against what's left over after cutting is a later step. All three upcoming calculation days — Monday, Wednesday and Saturday — are shown below.</p>
 
         <nav class="calc-cycle-nav" id="calc-cycle-nav"></nav>
 
         <div id="calc-cycles"></div>
       </div>
 
+      <!-- Weighing photos (Migration 018): factory admin photographs the
+           filled FM-SA-01 working papers, the edge function reads them, she
+           checks and confirms. Filled in by weighing.js. -->
+      <div id="weighing-section" class="hidden" lang="th"></div>
+
+      </div><!-- #main-col -->
     </main>
 
     <footer class="page-footer">
@@ -543,7 +599,13 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
   <!-- Quotation notification email — see config.js for one-time setup -->
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-  <script src="config.js?v=20260907-0930"></script>
-  <script src="app.js?v=20260907-0930"></script>
+  <!-- QR code on the weighing screen, so the phone opens the camera page -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+  <script src="config.js?v=20261028-5"></script>
+  <script src="weighing-common.js?v=20261028-5"></script>
+  <!-- weighing.js before app.js: app.js starts the app as soon as it loads,
+       and a signed-in factory admin goes straight to openWeighing(). -->
+  <script src="weighing.js?v=20261028-5"></script>
+  <script src="app.js?v=20261028-5"></script>
 </body>
 </html>

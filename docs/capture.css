@@ -1,0 +1,101 @@
+/* Phone camera page (capture.html) — big targets, one main action. */
+:root {
+  --bg: #f4efe3;          /* Klong Phai Farm cream */
+  --panel: #ffffff;
+  --border: #e2d8c3;
+  --text: #241905;        /* dark brown */
+  --muted: #6b5f4a;
+  --accent: #1f3d2a;      /* forest green */
+  --accent-dark: #142a1c;
+  --gold: #b59767;        /* tan */
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "Segoe UI", "Noto Sans Thai", "Leelawadee UI", Tahoma, sans-serif;
+  min-height: 100vh;
+  -webkit-text-size-adjust: 100%;
+}
+.hidden { display: none !important; }
+
+.c-head {
+  background: var(--panel);
+  border-bottom: 3px solid var(--gold);
+  position: relative;
+  padding: 16px 18px 12px;
+  padding-top: max(16px, env(safe-area-inset-top));
+}
+.c-brand { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; color: var(--muted); }
+.c-head h1 { margin: 4px 0 2px; font-size: 22px; }
+.c-day { font-size: 15px; color: #3f4744; }
+.c-link { margin-top: 6px; font-size: 12px; color: #1e6b3a; display: flex; align-items: center; gap: 6px; }
+.c-link:empty { display: none; }
+.c-dot { width: 8px; height: 8px; border-radius: 50%; background: #2e8b4e; display: inline-block; }
+
+.c-main { padding: 18px; max-width: 520px; margin: 0 auto; }
+
+.c-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+.c-shoot {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; min-height: 200px; border-radius: 18px;
+  background: var(--accent); color: #fff; cursor: pointer;
+  box-shadow: 0 4px 0 var(--accent-dark);
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.c-shoot:active { transform: translateY(2px); box-shadow: 0 2px 0 var(--accent-dark); }
+.c-shoot-title { font-size: 28px; font-weight: 700; }
+.c-shoot-sub { font-size: 15px; opacity: 0.92; }
+
+.c-tip {
+  margin: 16px 0; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px; padding: 12px 14px; font-size: 14px; line-height: 1.5; color: #3f4744;
+}
+
+.c-row { display: flex; justify-content: space-between; align-items: baseline; }
+.c-row h2 { font-size: 17px; margin: 0; }
+.c-count { font-size: 15px; color: var(--muted); }
+.c-count strong { font-size: 24px; color: var(--text); font-variant-numeric: tabular-nums; }
+
+.c-list {
+  list-style: none; margin: 10px 0 16px; padding: 0;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+}
+.c-list:empty::before {
+  content: "ยังไม่มีรูปจากมือถือนี้"; display: block; padding: 16px; color: var(--muted); font-size: 14px;
+}
+.c-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #e6e9e8; min-height: 60px; }
+.c-item:last-child { border-bottom: 0; }
+.c-item img { width: 36px; height: 48px; object-fit: cover; border-radius: 3px; background: #ecebe4; flex: none; }
+.c-item-body { flex: 1; min-width: 0; }
+.c-item-title { font-size: 15px; font-weight: 600; }
+.c-item-time { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+
+.c-pill { font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 999px; border: 0; font-family: inherit; white-space: nowrap; }
+.c-pill-green { background: #e3f1e7; color: #1e6b3a; }
+.c-pill-blue { background: #e4ecf8; color: #174a94; }
+.c-pill-red { background: #fbe4e2; color: #9b2c25; min-height: 44px; white-space: normal; text-align: left; }
+
+.c-secondary {
+  display: flex; align-items: center; justify-content: center; min-height: 52px;
+  border: 1px solid var(--border); background: var(--panel); border-radius: 12px;
+  font-size: 16px; font-weight: 600; cursor: pointer;
+}
+.c-foot { text-align: center; color: var(--muted); font-size: 13px; margin: 14px 0 30px; }
+
+.c-expired { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+.c-expired h2 { margin: 0 0 8px; font-size: 20px; color: #9b2c25; }
+.c-expired p { margin: 0; font-size: 15px; line-height: 1.55; }
+.c-logo { position: absolute; right: 16px; top: max(12px, env(safe-area-inset-top)); height: 52px; width: auto; }
+.c-head h1 { font-family: Georgia, "Times New Roman", serif; letter-spacing: 0.02em; color: var(--accent); }
+/* green header band, as on the PC */
+.c-head { background: var(--accent); color: #f4efe3; }
+.c-brand { color: #cdbf9c; }
+.c-head h1 { color: #f4efe3; }
+.c-day { color: #e9e2d0; }
+.c-link { color: #cfe3d4; }
+.c-dot { background: #8fcf9f; }
+.c-logo { background: #f4efe3; border-radius: 8px; padding: 3px 5px; box-sizing: border-box; }

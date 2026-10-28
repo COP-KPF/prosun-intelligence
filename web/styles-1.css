@@ -1,0 +1,906 @@
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --border: #e2e5ea;
+  --text: #1c2126;
+  --muted: #6b7280;
+  --accent: #2f6f4f;   /* Klong Phai Farm-ish green */
+  --accent-dark: #234f39;
+  --danger: #b3423d;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.hidden { display: none !important; }
+
+/* ---------- Login ---------- */
+#login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 32px;
+  width: 100%;
+  max-width: 360px;
+}
+
+.login-card h1 {
+  font-size: 1.25rem;
+  margin: 0 0 4px;
+}
+
+.login-card p.subtitle {
+  color: var(--muted);
+  margin: 0 0 20px;
+  font-size: 0.9rem;
+}
+
+label {
+  display: block;
+  font-size: 0.85rem;
+  margin: 14px 0 4px;
+  color: var(--muted);
+}
+
+input, select, textarea {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.btn-primary {
+  margin-top: 18px;
+  width: 100%;
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.btn-primary:hover { background: var(--accent-dark); }
+
+.error-text {
+  color: var(--danger);
+  font-size: 0.85rem;
+  margin-top: 10px;
+  min-height: 1.1em;
+}
+
+/* ---------- App shell ---------- */
+header.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+header.app-header .who { font-size: 0.9rem; color: var(--muted); }
+header.app-header .who strong { color: var(--text); }
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--accent-dark);
+  text-decoration: underline;
+  font-size: 0.85rem;
+  padding: 0;
+}
+
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.toolbar h2 { margin: 0; font-size: 1.05rem; }
+
+.tabs { display: flex; gap: 6px; margin-top: 8px; }
+
+.tab-btn {
+  background: white;
+  border: 1px solid var(--border);
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.tab-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+tr.totals-row td {
+  font-weight: 600;
+  background: #fafbfc;
+}
+
+.stats-strip {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.stats-strip .stat strong {
+  color: var(--text);
+  font-size: 1.05rem;
+  margin-right: 5px;
+}
+
+.stats-strip .stat.win-rate-good strong { color: var(--accent-dark); }
+.stats-strip .stat.win-rate-bad strong { color: var(--danger); }
+
+.btn-secondary {
+  background: white;
+  border: 1px solid var(--border);
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+/* ---------- Client list: search / status filter / archived toggle ---------- */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.filter-bar input[type="search"] {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.filter-bar select {
+  flex: 0 1 160px;
+  width: auto;
+}
+
+.filter-bar .archived-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.filter-bar .archived-toggle input { width: auto; }
+
+/* Lets a wide table (Team summary especially) scroll horizontally instead
+   of forcing the whole page to zoom out on a phone. */
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+th, td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.88rem;
+}
+
+th { color: var(--muted); font-weight: 600; background: #fafbfc; }
+
+tr:last-child td { border-bottom: none; }
+
+tr.clickable-row:hover { background: #fafbfc; cursor: pointer; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.badge-lead { background: #e6f0ff; color: #1e4fa3; }
+.badge-qualified { background: #eef1f6; color: #445; }
+.badge-proposal { background: #fff3d6; color: #916a00; }
+.badge-won { background: #e3f5e9; color: #1c7c3f; }
+.badge-at_risk { background: #ffe7e5; color: #a5322c; }
+.badge-dormant { background: #f0f0f0; color: #777; }
+.badge-lost { background: #f0f0f0; color: #999; }
+
+.badge-status-active { background: #e3f5e9; color: #1c7c3f; }
+.badge-status-inactive { background: #f0f0f0; color: #777; }
+
+/* ---------- Modal ---------- */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(20, 22, 25, 0.4);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+
+.modal {
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 24px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal h3 { margin-top: 0; }
+
+.modal .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.modal-actions-left {
+  display: flex;
+  gap: 10px;
+  margin-right: auto;
+}
+
+.archived-note {
+  background: #ece9f7;
+  color: #5b4d9c;
+  font-size: 0.82rem;
+  padding: 8px 10px;
+  border-radius: 8px;
+  margin: -4px 0 14px;
+}
+
+.note {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 18px;
+  line-height: 1.4;
+}
+
+/* ---------- Products (admin) ---------- */
+.product-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.product-form input { width: auto; flex: 1; }
+.product-form input#p-price { flex: 0 0 140px; }
+.product-form button { flex: 0 0 auto; white-space: nowrap; }
+
+/* ---------- Quotation builder ---------- */
+.modal.modal-wide { max-width: 720px; }
+
+.quote-lines-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+}
+
+.quote-lines-table th {
+  text-align: left;
+  font-size: 0.78rem;
+  color: var(--muted);
+  padding: 4px 6px;
+}
+
+.quote-lines-table td {
+  padding: 4px 6px;
+  vertical-align: middle;
+}
+
+.quote-lines-table select,
+.quote-lines-table input {
+  padding: 6px 8px;
+  font-size: 0.85rem;
+}
+
+.quote-lines-table input[type="number"] { width: 80px; }
+.quote-lines-table .line-amount { font-size: 0.88rem; white-space: nowrap; }
+
+.btn-icon {
+  background: none;
+  border: none;
+  color: var(--danger);
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.quote-totals {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.quote-totals-lines {
+  margin-top: 8px;
+  text-align: right;
+}
+
+.quote-totals-lines p {
+  margin: 4px 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.quote-totals-lines strong { color: var(--text); margin-left: 8px; }
+
+.quote-totals-lines p.quote-grand-total {
+  font-size: 1.05rem;
+  color: var(--text);
+  font-weight: 600;
+  margin-top: 8px;
+}
+
+/* ============================================================================
+   PROSUN PACE — middle office order entry.
+   Uses the same tokens as the CRM side (--panel, --border, --accent...) so
+   the two sides of the app stay visually one product, while the layout is
+   deliberately wide and grid-like rather than the CRM's modal pattern.
+   ========================================================================== */
+
+.filter-bar .date-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.filter-bar .date-filter input { width: auto; }
+
+.order-entry-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 14px;
+}
+.order-entry-head h3 { margin: 0; font-size: 1.05rem; }
+.order-entry-actions { display: flex; gap: 8px; }
+.order-entry-actions button { margin-top: 0; width: auto; padding: 9px 18px; }
+
+/* Header fields: entered once per order, however many product lines follow. */
+.order-header-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 18px;
+}
+.order-header-grid .fld { display: flex; flex-direction: column; min-width: 0; }
+.order-header-grid .fld-wide { grid-column: span 2; }
+.order-header-grid label {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.order-header-grid input,
+.order-header-grid select,
+.order-header-grid textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+}
+.order-header-grid textarea { resize: vertical; font-family: inherit; }
+.fld-hint {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-top: 3px;
+  line-height: 1.3;
+}
+
+.order-lines-title {
+  margin: 4px 0 8px;
+  font-size: 0.95rem;
+}
+
+/* The product lines grid. Real inputs in a wide table rather than a
+   component library: it tabs through like a spreadsheet, works with no
+   extra dependency, and stays editable by hand later. */
+.order-lines-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  font-size: 0.85rem;
+}
+.order-lines-table th {
+  text-align: left;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.order-lines-table td {
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.order-lines-table input,
+.order-lines-table select {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 6px 7px;
+  font-size: 0.85rem;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 6px;
+}
+.order-lines-table input:hover,
+.order-lines-table select:hover { border-color: var(--border); }
+.order-lines-table input:focus,
+.order-lines-table select:focus {
+  border-color: var(--accent);
+  background: #fff;
+  outline: none;
+}
+.order-lines-table .line-remove {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 4px 6px;
+}
+.order-lines-table .line-remove:hover { color: var(--danger); }
+.order-lines-table tr.line-incomplete td { background: #fffaf0; }
+
+#add-order-line-btn { margin-top: 10px; }
+
+/* Order list */
+#orders-table td.num { text-align: right; }
+.channel-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  background: #eef1f6;
+  color: #445;
+  white-space: nowrap;
+}
+.channel-Restaurant { background: #e6f0ff; color: #1e4fa3; }
+.channel-DepartmentStore { background: #fff3d6; color: #916a00; }
+.channel-Individual { background: #e3f5e9; color: #1c7c3f; }
+.channel-Retail { background: #f3e8ff; color: #6b3fa0; }
+
+@media (max-width: 700px) {
+  .order-header-grid { grid-template-columns: 1fr; }
+  .order-header-grid .fld-wide { grid-column: span 1; }
+}
+
+/* --- the order book grid ------------------------------------------------ */
+.orders-sub { color: var(--muted); font-size: 0.85rem; margin: 2px 0 12px; }
+.channel-tabs { margin-bottom: 12px; flex-wrap: wrap; }
+
+.orders-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.orders-toolbar input[type="search"] {
+  width: 260px; margin: 0; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.orders-toolbar-right { margin-left: auto; display: flex; gap: 8px; }
+.orders-toolbar-right button { margin-top: 0; width: auto; padding: 8px 14px; white-space: nowrap; }
+
+.week-nav { display: flex; align-items: center; gap: 6px; font-size: 0.9rem; }
+.week-nav button:not(.btn-link) {
+  border: 1px solid var(--border); background: #fff; border-radius: 8px;
+  width: 30px; height: 30px; cursor: pointer; color: var(--text);
+  font-size: 1.1rem; line-height: 1; padding: 0;
+}
+.week-nav button:not(.btn-link):hover { background: var(--bg); }
+.week-nav #week-label { min-width: 108px; text-align: center; font-weight: 600; }
+
+.info-banner {
+  background: #f2f6fb; border: 1px solid #dbe6f3; color: #33506e;
+  border-radius: 8px; padding: 9px 12px; font-size: 0.82rem; margin-bottom: 12px;
+}
+
+#orders-grid { width: 100%; border-collapse: collapse; font-size: 0.83rem; background: var(--panel); }
+#orders-grid th {
+  text-align: left; font-size: 0.68rem; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--muted); font-weight: 600;
+  padding: 9px 8px; border-bottom: 1px solid var(--border);
+  white-space: nowrap; background: var(--panel);
+  position: sticky; top: 0; z-index: 1;
+}
+#orders-grid th.line-col { background: #fafbfc; }
+#orders-grid td { padding: 7px 8px; vertical-align: top; }
+/* The header block of an order spans its product lines, so the client's
+   details are written once — the same shape as the spreadsheet. */
+#orders-grid td.hdr-col {
+  border-top: 1px solid var(--border);
+  border-right: 2px solid var(--border);
+  vertical-align: top;
+}
+#orders-grid td.line-col { border-bottom: 1px dashed #eceff3; }
+#orders-grid tr.order-first td { border-top: 1px solid var(--border); }
+#orders-grid tr.order-alt td { background: #fcfcfd; }
+#orders-grid td.num { text-align: right; }
+#orders-grid .prod-cell { max-width: 320px; }
+#orders-grid .empty-cell { color: var(--muted); font-style: italic; }
+#orders-grid .muted-code { color: var(--muted); font-weight: 400; font-size: 0.78rem; }
+#orders-grid .unlinked { color: #c08a2e; font-weight: 700; }
+
+/* A standing order whose quantity for this week is not settled yet. It has to
+   read as "still to come", not as a zero and not as an empty cell. */
+#orders-grid .tbc-pill {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  color: #8a5a00;
+  background: #fdf1d6;
+  border: 1px solid #e8c98a;
+}
+.add-line-row td { border-bottom: 1px solid var(--border) !important; }
+.add-line-row .btn-link { font-size: 0.8rem; }
+
+/* Inline editing for sale support: a cell looks like plain text until it's
+   focused, so a grid full of writable cells doesn't read as a form. */
+#orders-grid .cell-edit {
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  padding: 2px 4px;
+  border-radius: 4px;
+  resize: none;
+}
+#orders-grid textarea.cell-edit { min-height: 2.4em; }
+/* The Unit column held a two/three-letter value with no room to spare —
+   fine as plain text, too tight once it's a <select> with a native arrow.
+   Without this, the column stays sized to the old plain text and the arrow
+   crowds out the letters (a "g" or "s" reads as clipped). */
+#orders-grid select.cell-edit { min-width: 74px; padding-right: 18px; }
+#orders-grid .cell-edit:hover { background: #f4f6f5; }
+#orders-grid .cell-edit:focus {
+  background: #fff;
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(47, 111, 79, 0.15);
+}
+#orders-grid .cell-edit.cell-saving { opacity: 0.6; }
+#orders-grid .cell-edit.cell-saved {
+  background: #eaf6ee;
+  border-color: var(--accent);
+  transition: background 1s ease;
+}
+#orders-grid .cell-edit.cell-error {
+  background: #fdecea;
+  border-color: #c0392b;
+}
+
+.type-pill {
+  display: inline-block; padding: 2px 7px; border-radius: 999px;
+  font-size: 0.7rem; background: #eef1f6; color: #445; white-space: nowrap;
+}
+.orders-foot { color: var(--muted); font-size: 0.8rem; margin-top: 10px; }
+
+/* Adding lines to an existing order: its header is shown for context but
+   locked, so extra lines can't quietly rewrite the agreed details. */
+.order-header-grid.header-locked { background: #fbfbfc; }
+.order-header-grid.header-locked input,
+.order-header-grid.header-locked select,
+.order-header-grid.header-locked textarea { color: var(--muted); background: #f4f5f7; }
+
+/* Product names carry both English and Thai, so they need real room —
+   without this the column wraps to four lines and the grid reads badly. */
+#orders-grid .prod-cell { min-width: 230px; max-width: 340px; }
+#orders-grid th.line-col:nth-of-type(2) { min-width: 230px; }
+/* Unit (5th of the 7 line columns: Type, Product, Weight spec, Qty, Unit,
+   Description, Packaging) — matches the select's own min-width above so the
+   column doesn't clamp back down to it. */
+#orders-grid th.line-col:nth-of-type(5) { min-width: 80px; }
+#orders-grid td.hdr-col:nth-child(6),
+#orders-grid th.hdr-col:nth-child(6) { min-width: 150px; }
+
+/* --- brand + live status ------------------------------------------------- */
+.brand { display: flex; flex-direction: column; line-height: 1.15; }
+.brand-sub {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.live-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--muted);
+  flex: 0 0 auto;
+}
+.live-status.is-live .live-dot { background: var(--accent); }
+.live-status.is-live .live-dot { animation: live-pulse 2.4s ease-in-out infinite; }
+.live-status.is-down .live-dot { background: var(--danger); }
+@keyframes live-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(47,111,79,0.45); }
+  50%      { box-shadow: 0 0 0 4px rgba(47,111,79,0); }
+}
+
+/* A colleague's order arriving is worth noticing, not startling. */
+@keyframes row-arrive {
+  from { background: #eaf4ee; }
+  to   { background: transparent; }
+}
+#orders-grid tr.just-arrived td { animation: row-arrive 2.5s ease-out; }
+
+.confidential-note {
+  font-style: italic;
+  font-size: 0.78rem;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 14px;
+  max-width: 720px;
+  line-height: 1.5;
+}
+
+/* --- full-width order book ------------------------------------------------
+   The CRM is a reading view and stays comfortably centred at 1100px. The
+   order book is a working grid of 15 columns that people scan across all
+   day, so on the PACE side the page gives it the whole screen. */
+body.pace-mode main {
+  max-width: none;
+  padding: 20px 20px 8px;
+}
+body.pace-mode .table-scroll { margin: 0; }
+body.pace-mode #orders-grid { width: 100%; }
+
+/* Both notices sit together at the foot of the page, out of the way of the
+   grid but always present. */
+.page-footer {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 8px 24px 32px;
+}
+body.pace-mode .page-footer { max-width: none; padding: 8px 20px 32px; }
+.page-footer .note,
+.page-footer .confidential-note {
+  font-style: italic;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.55;
+  margin: 0 0 6px;
+  max-width: 900px;
+}
+.page-footer .confidential-note {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+/* --- choosing a system ----------------------------------------------------
+   Only admin sees this: everyone else belongs to exactly one side. */
+#system-chooser { max-width: 760px; margin: 40px auto; }
+.chooser-title { margin: 0 0 4px; font-size: 1.2rem; }
+.chooser-sub { color: var(--muted); font-size: 0.88rem; margin: 0 0 22px; }
+
+.system-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.system-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px 20px;
+  cursor: pointer;
+  width: 100%;
+  margin: 0;
+  transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
+}
+.system-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 2px 10px rgba(28,33,38,0.07);
+  transform: translateY(-1px);
+}
+.system-card-name { font-size: 1.02rem; font-weight: 700; color: var(--text); }
+.system-card-acronym {
+  font-size: 0.66rem; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--accent-dark); font-weight: 600;
+}
+.system-card-desc { font-size: 0.85rem; color: var(--muted); line-height: 1.45; }
+
+@media (max-width: 620px) { .system-cards { grid-template-columns: 1fr; } }
+
+/* --- poultry calculator --------------------------------------------------- */
+.calc-cycle-nav {
+  display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px;
+}
+.calc-cycle-link {
+  display: inline-block; padding: 6px 12px; border: 1px solid var(--border);
+  border-radius: 999px; font-size: 0.82rem; color: var(--text); text-decoration: none;
+  background: var(--panel);
+}
+.calc-cycle-link:hover { background: #f7f8fa; }
+
+.calc-cycle { margin-bottom: 32px; }
+.calc-cycle:last-child { margin-bottom: 0; }
+.calc-cycle-title {
+  font-size: 1.05rem; margin: 0 0 14px; padding-bottom: 8px;
+  border-bottom: 2px solid var(--border);
+}
+.calc-cycle-title .muted-code { display: block; font-size: 0.78rem; font-weight: 400; margin-top: 3px; }
+
+.calc-star { color: #c98a00; font-size: 0.85em; }
+
+.calc-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px 18px; margin-bottom: 16px;
+}
+.calc-card-head {
+  display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap;
+  gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 10px;
+  cursor: pointer; border-radius: 6px; margin: -4px -6px 12px; padding: 4px 6px 10px;
+}
+.calc-card-head:hover { background: #f7f8fa; }
+.calc-card-head:focus-visible { outline: 2px solid var(--accent-dark); outline-offset: 2px; }
+.calc-card-head h4 { margin: 0; font-size: 1rem; }
+.calc-recommend { font-size: 0.95rem; text-align: right; }
+.calc-recommend strong { font-size: 1.4rem; color: var(--accent-dark); margin-right: 4px; }
+.calc-recommend .muted-code { display: block; font-size: 0.75rem; margin-top: 2px; }
+.calc-chevron {
+  align-self: center; color: var(--muted); font-size: 0.9rem; transition: transform 0.15s ease;
+}
+.calc-card-head.is-open .calc-chevron { transform: rotate(90deg); }
+
+.calc-daybreak { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--border); }
+.calc-daybreak-label { color: var(--muted); font-size: 0.8rem; margin: 0 0 10px; }
+.calc-day-block { margin-bottom: 14px; }
+.calc-day-block:last-child { margin-bottom: 0; }
+.calc-day-block h5 {
+  margin: 0 0 6px; font-size: 0.85rem; font-weight: 600; color: var(--text);
+}
+.calc-day-block h5 strong { color: var(--accent-dark); font-size: 0.95rem; }
+.calc-day-block .calc-cuts-table { font-size: 0.82rem; }
+
+.calc-cuts-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.calc-cuts-table th {
+  text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--muted); padding: 4px 8px; border-bottom: 1px solid var(--border);
+}
+.calc-cuts-table td { padding: 5px 8px; border-bottom: 1px dashed #eceff3; }
+.calc-cuts-table td.num { text-align: right; font-weight: 600; }
+.calc-cuts-table tr.calc-bottleneck { background: #fdf6ea; }
+.calc-cuts-table tr.calc-bottleneck td:first-child { font-weight: 600; }
+
+.calc-cuts-table tr.calc-cut-row { cursor: pointer; }
+.calc-cuts-table tr.calc-cut-row:hover { background: #f7f8fa; }
+.calc-cuts-table tr.calc-cut-row:focus-visible { outline: 2px solid var(--accent-dark); outline-offset: -2px; }
+.calc-chevron-sm {
+  display: inline-block; color: var(--muted); font-size: 0.75rem; transition: transform 0.15s ease;
+}
+.calc-cut-row.is-open .calc-chevron-sm { transform: rotate(90deg); }
+.calc-cuts-table tr.calc-cut-detail td { padding: 0 8px 10px 24px; border-bottom: 1px dashed #eceff3; }
+
+.calc-clients-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; background: #fafbfc; }
+.calc-clients-table th {
+  text-align: left; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--muted); padding: 4px 8px; border-bottom: 1px solid var(--border);
+}
+.calc-clients-table td { padding: 4px 8px; border-bottom: 1px dashed #eceff3; }
+.calc-clients-table td.num { text-align: right; }
+
+.calc-note { color: var(--muted); font-size: 0.8rem; margin: 10px 0 0; }
+
+.calc-flag {
+  background: #fdf1d6; border: 1px solid #e8c98a; border-radius: var(--radius);
+  padding: 10px 14px; font-size: 0.85rem; margin-bottom: 10px; color: #6b4c00;
+}
+.calc-flag strong { color: #4a3400; }
+
+.calc-summary-table {
+  width: 100%; border-collapse: collapse; font-size: 0.88rem;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  margin-bottom: 16px; overflow: hidden;
+}
+.calc-summary-table th {
+  text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--muted); padding: 8px 12px; border-bottom: 1px solid var(--border); background: #f7f8fa;
+}
+.calc-summary-table td { padding: 8px 12px; border-bottom: 1px dashed #eceff3; }
+.calc-summary-table td.num { text-align: right; font-weight: 600; }
+.calc-summary-table tr:last-child td { border-bottom: none; }
+.calc-summary-table tr.calc-summary-unmapped td { color: var(--muted); font-style: italic; }
+.calc-summary-table tr.calc-summary-unmapped td.num { font-weight: 400; }
+
+.calc-validate-panel {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 18px; margin-bottom: 16px;
+}
+.calc-validate-locked { background: #fbfaf5; border-color: #e8c98a; }
+.calc-validate-approved { background: #f2faf4; border-color: #a8d9b4; }
+.calc-validate-heading { margin: 0 0 8px; font-weight: 600; }
+.calc-validate-approved .calc-validate-heading { color: #1f6b34; }
+.calc-validate-lines { margin: 0 0 10px; padding-left: 20px; font-size: 0.9rem; }
+.calc-validate-lines li { margin-bottom: 2px; }
+.calc-validate-addon { margin: 0 0 10px; font-size: 0.9rem; }
+.calc-validate-note { color: var(--muted); font-size: 0.8rem; margin: 8px 0 0; }
+.calc-addon-form { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.calc-addon-form label {
+  display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; color: var(--muted);
+}
+.calc-addon-input { width: 100px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; }
+
+.calc-validated-mark { color: #1f6b34; font-size: 0.9em; font-weight: 700; }

@@ -30,3 +30,22 @@ const SUPABASE_ANON_KEY = "sb_publishable_33qrEl7S8QAfFi5w2H0mXQ_a2TckrZk";
 const EMAILJS_PUBLIC_KEY = "";
 const EMAILJS_SERVICE_ID = "";
 const EMAILJS_TEMPLATE_ID = "";
+
+// ----------------------------------------------------------------------------
+// A second EmailJS template, for the poultry purchase validation workflow
+// (Migration 012, 6 Sep 2026) — emails clement@klongphaifarm.com when
+// purchasing sets the add-on quantity for a calculation cycle, so he can
+// give final approval. Reuses the same EmailJS account/Service ID above —
+// only the template differs, since the fields don't match the quotation one.
+//
+// One-time setup, same place as above:
+//   1. Email Templates > Create New Template. Use these variable names:
+//        {{to_email}} {{calc_day}} {{validated_lines}} {{addon_birds}} {{set_by}}
+//      Set the "To email" field to clement@klongphaifarm.com (or reference
+//      {{to_email}} directly if the template editor lets you).
+//   2. Copy that template's Template ID into the value below.
+// Leave this blank and everything else still works — validating and setting
+// the add-on still save correctly, you just won't get the notification email
+// until this is filled in.
+// ----------------------------------------------------------------------------
+const EMAILJS_PURCHASE_TEMPLATE_ID = "";
