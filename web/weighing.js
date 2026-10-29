@@ -49,6 +49,13 @@ const WEIGH_STATUS = {
   confirmed: { get label() { return T("ยืนยันแล้ว", "Confirmed"); }, cls: "w-pill-green" },
 };
 const WEIGH_IN_PROGRESS = ["uploading", "queued", "reading"];
+// A confirmed paper reopened for correction (Migration 021) shows as such
+// until it is confirmed again.
+const WEIGH_REOPENED = { get label() { return T("เปิดแก้ไข", "Reopened"); }, cls: "w-pill-amber" };
+function weighStatusOf(p) {
+  if (p.reopened_snapshot && (p.status === "read" || p.status === "failed")) return WEIGH_REOPENED;
+  return WEIGH_STATUS[p.status] || WEIGH_STATUS.read;
+}
 const WEIGH_UNIT_TH = { kg: "kg", g: "g", pcs: "ตัว", pack: "แพค", jar: "ขวด", other: "หน่วย" };
 const WEIGH_UNIT_EN = { kg: "kg", g: "g", pcs: "pc", pack: "pack", jar: "jar", other: "unit" };
 function weighUnit(u) { return (WEIGH_LANG === "en" ? WEIGH_UNIT_EN : WEIGH_UNIT_TH)[u] || ""; }
@@ -92,6 +99,14 @@ function weighDiff(line) {
 
 function weighNeedsLook(line) { return !!line.flag_reason && !line.checked; }
 
+// A wrong, blurred or duplicate photo can be deleted until it is confirmed.
+// A confirmed paper may already be used for invoicing: the factory first sets
+// it back with "แก้ไข / Edit" (logged), then deletes; admin can delete directly.
+// The database enforces the same rule (Migration 018 RLS).
+function weighCanDelete(p) {
+  return !!p && (p.status !== "confirmed" || myProfile.role === "admin");
+}
+
 function weighLangHtml() {
   return `<div class="w-lang" role="group" aria-label="Language / ภาษา">
     <button type="button" data-act="lang" data-lang="th" class="${WEIGH_LANG === "en" ? "" : "on"}" aria-pressed="${WEIGH_LANG !== "en"}">ไทย</button>
@@ -133,11 +148,15 @@ async function openWeighing() {
     document.getElementById("who-role").textContent = T("ผู้ดูแลโรงงาน", "Factory admin");
   }
   weighSection.classList.remove("hidden");
-  W.date = weighBangkokToday();
+  // From a notification (notifications.js): that paper's day, opened on it.
+  const pend = W.pendingOpen;
+  W.pendingOpen = null;
+  W.date = (pend && pend.date) || weighBangkokToday();
   W.view = "day";
   W.openId = null;
   weighSection.innerHTML = `<p class="w-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
   await weighLoad();
+  if (pend && pend.id && weighPaper(pend.id)) { W.view = "check"; W.openId = pend.id; weighRender(); }
   weighStartRealtime();
   weighCleanupOnce();
 }
@@ -368,7 +387,7 @@ function weighUploadsHtml() {
 }
 
 function weighPaperCardHtml(p) {
-  const st = WEIGH_STATUS[p.status] || WEIGH_STATUS.read;
+  const st = weighStatusOf(p);
   const n = weighLines(p).length;
   const img = weighPhoto(p);
   return `<button type="button" class="w-card" data-act="open" data-id="${p.id}">
@@ -386,7 +405,7 @@ function weighTableRows() {
   const rows = [];
   W.papers.forEach((p) => {
     const lines = weighLines(p);
-    const st = WEIGH_STATUS[p.status] || WEIGH_STATUS.read;
+    const st = weighStatusOf(p);
     const by = p.confirmed_by ? `${W.names[p.confirmed_by] || "—"} ${weighTime(p.confirmed_at)}` : "—";
     if (!lines.length) {
       rows.push({ p, l: null, first: true, st, by });
@@ -491,7 +510,8 @@ function weighRenderDay() {
             <td class="w-num ${d.warn ? "w-warn" : ""}">${escapeHtml(d.text)}</td>
             <td>${r.first ? `<span class="w-pill ${r.st.cls}">${r.st.label}</span>` : ""}</td>
             <td>${r.first ? escapeHtml(r.by) : ""}</td>
-            <td>${r.first ? `<button type="button" class="btn-link" data-act="open" data-id="${r.p.id}">${T("ดูรูป", "View")}</button>` : ""}</td>
+            <td>${r.first ? `<span class="w-row-acts"><button type="button" class="btn-link" data-act="open" data-id="${r.p.id}">${T("ดูรูป", "View")}</button>${
+              weighCanDelete(r.p) ? `<button type="button" class="w-del" data-act="delete-paper" data-id="${r.p.id}" title="${T("ลบใบงานนี้", "Delete this paper")}" aria-label="${T("ลบใบงาน", "Delete paper")} ${escapeAttr(r.p.po_number || "")}">${T("ลบ", "Delete")}</button>` : ""}</span>` : ""}</td>
           </tr>`;
         }).join("") : `<tr><td colspan="11" class="w-empty">${T("ไม่มีรายการ", "No lines")}</td></tr>`}</tbody>
       </table>
@@ -507,7 +527,7 @@ function weighRenderCheck() {
   const locked = p.status === "confirmed";
   const busy = WEIGH_IN_PROGRESS.includes(p.status);
   const editable = !locked && !busy;
-  const st = WEIGH_STATUS[p.status] || WEIGH_STATUS.read;
+  const st = weighStatusOf(p);
   const rot = W.rotation[p.id] || 0;
   const img = weighPhoto(p);
   const ro = editable ? "" : " disabled";
@@ -516,6 +536,13 @@ function weighRenderCheck() {
   if (busy) notes.push(`<div class="w-note w-note-blue">${T("กำลังอ่านรูปนี้ — ตัวเลขจะขึ้นเองในไม่กี่วินาที", "Reading this photo — the numbers appear by themselves in a few seconds")}</div>`);
   if (p.status === "failed") notes.push(`<div class="w-note w-note-red">${T("อ่านรูปนี้ไม่ได้", "This photo could not be read")}${p.read_error ? ": " + escapeHtml(p.read_error) : ""} — ${T("กด “อ่านใหม่” หรือถ่ายใหม่", "press “Read again” or take a new photo")}</div>`);
   if (p.note) notes.push(`<div class="w-note w-note-amber">${escapeHtml(weighServerText(p.note))}</div>`);
+  if (p.reopened_snapshot && !locked) {
+    const s = p.reopened_snapshot;
+    const by = [s.confirmed_by_name, s.confirmed_at ? weighTime(s.confirmed_at) : ""].filter(Boolean).join(" ");
+    notes.push(`<div class="w-note w-note-amber">${T(
+      `ใบนี้เคยยืนยันแล้ว${by ? " (" + escapeHtml(by) + ")" : ""} และเปิดแก้ไข — ออกจากตารางของบัญชีจนกว่าจะยืนยันอีกครั้ง เมื่อยืนยัน ผู้บริหารจะได้รับแจ้งว่าน้ำหนักเปลี่ยนจากเท่าไรเป็นเท่าไร`,
+      `This paper was confirmed${by ? " (" + escapeHtml(by) + ")" : ""} and reopened for correction — it is out of the accounting table until confirmed again. When it is confirmed, management is notified of every weight before → after.`)}</div>`);
+  }
   const dup = p.po_number && W.papers.filter((o) => o.id !== p.id && o.po_number === p.po_number && o.company === p.company).length;
   if (dup) notes.push(`<div class="w-note w-note-amber">PO ${escapeHtml(p.po_number)} ${T("มีอีกรูปในวันนี้ — ถ่ายซ้ำหรือเปล่า?", "appears on another photo today — photographed twice?")}</div>`);
 
@@ -586,6 +613,7 @@ function weighRenderCheck() {
       <div class="w-panel w-confirmed">
         <strong>✓ ${T("ยืนยันแล้ว", "Confirmed")} · ${escapeHtml(W.names[p.confirmed_by] || "")} ${escapeHtml(weighTime(p.confirmed_at))}</strong>
         <span class="w-actions">
+          ${myProfile.role === "admin" ? `<button type="button" class="w-btn w-btn-danger-outline" data-act="delete">${T("ลบใบงาน", "Delete paper")}</button>` : ""}
           <button type="button" class="w-btn w-btn-outline" data-act="unconfirm">${T("แก้ไข", "Edit")}</button>
           ${idx < W.papers.length - 1 ? `<button type="button" class="w-btn" data-act="step" data-delta="1">${T("ใบถัดไป", "Next paper")} ›</button>` : `<button type="button" class="w-btn" data-act="back">${T("กลับไปตาราง", "Back to the table")}</button>`}
         </span>
@@ -700,9 +728,15 @@ weighSection.addEventListener("click", async (e) => {
   }
   if (act === "export") { weighExport(); return; }
   if (act === "confirm") { await weighSetStatus("confirmed"); return; }
-  if (act === "unconfirm") { await weighSetStatus("read"); return; }
+  if (act === "unconfirm") {
+    if (!confirm(T("เปิดใบงานที่ยืนยันแล้วเพื่อแก้ไข? ใบนี้จะออกจากตารางของบัญชีจนกว่าจะยืนยันอีกครั้ง และผู้บริหารจะได้รับแจ้ง",
+                   "Reopen this confirmed paper for correction? It leaves the accounting table until it is confirmed again, and management is notified."))) return;
+    await weighSetStatus("read");
+    return;
+  }
   if (act === "reread") { await weighReread(); return; }
-  if (act === "delete") { await weighDeletePaper(); return; }
+  if (act === "delete") { await weighDeletePaper(W.openId); return; }
+  if (act === "delete-paper") { await weighDeletePaper(el.dataset.id); return; }
   if (act === "add-line") { await weighAddLine(); return; }
   if (act === "remove-line") {
     const id = el.closest("tr").dataset.lineId;
@@ -807,15 +841,31 @@ async function weighReread() {
   weighSchedulePoll();
 }
 
-async function weighDeletePaper() {
-  const p = weighPaper(W.openId);
-  if (!confirm(T("ลบรูปใบงานนี้และตัวเลขที่อ่านได้?", "Delete this photo and the numbers read from it?"))) return;
-  const { error } = await sb.from("weighing_papers").delete().eq("id", p.id);
-  if (error) { W.message = { kind: "error", text: T("ลบไม่สำเร็จ: ", "Could not delete: ") + error.message }; weighRender(); return; }
+async function weighDeletePaper(id) {
+  const p = weighPaper(id);
+  if (!weighCanDelete(p)) return;
+  const label = [p.po_number, p.customer_name].filter(Boolean).join(" · ");
+  const question = p.status === "confirmed"
+    ? T(`ใบงานนี้ยืนยันแล้ว${label ? " (" + label + ")" : ""} — ลบรูปและน้ำหนักทั้งหมด? บัญชีจะไม่เห็นใบนี้อีก และผู้บริหารจะได้รับแจ้ง`,
+        `This paper is confirmed${label ? " (" + label + ")" : ""} — delete the photo and all its weights? Accounting will no longer see it; management is notified.`)
+    : T(`ลบรูปใบงานนี้${label ? " (" + label + ")" : ""} และตัวเลขที่อ่านได้? ผู้บริหารจะได้รับแจ้ง`,
+        `Delete this photo${label ? " (" + label + ")" : ""} and the numbers read from it? Management is notified.`);
+  if (!confirm(question)) return;
+  // .select() returns what was really deleted: the database refuses silently
+  // (zero rows) if the paper was confirmed meanwhile on another screen — then
+  // the photo must stay too.
+  const { data, error } = await sb.from("weighing_papers").delete().eq("id", p.id).select("id");
+  if (error || !data || !data.length) {
+    W.message = { kind: "error", text: error
+      ? T("ลบไม่สำเร็จ: ", "Could not delete: ") + error.message
+      : T("ลบไม่ได้ — ใบงานนี้อาจถูกยืนยันไปแล้ว กด “แก้ไข” ก่อน", "Could not delete — this paper may have been confirmed meanwhile; press “Edit” first") };
+    await weighLoad();
+    return;
+  }
   await sb.storage.from(WEIGH_BUCKET).remove([p.photo_path]);
   W.papers = W.papers.filter((x) => x.id !== p.id);
-  W.view = "day"; W.openId = null;
-  W.message = { kind: "info", text: T("ลบรูปแล้ว", "Photo deleted") };
+  if (W.openId === p.id) { W.view = "day"; W.openId = null; }
+  W.message = { kind: "info", text: T("ลบใบงานแล้ว", "Paper deleted") };
   weighRender();
 }
 
@@ -879,7 +929,7 @@ function weighExport() {
   const rows = [header];
   W.papers.forEach((p) => {
     const lines = weighLines(p);
-    const st = (WEIGH_STATUS[p.status] || WEIGH_STATUS.read).label;
+    const st = (weighStatusOf(p)).label;
     const base = [p.work_date, p.delivery_date || "", p.company || "", p.po_number || "", p.customer_name || ""];
     const tail = [st, p.confirmed_by ? (W.names[p.confirmed_by] || "") : "", p.confirmed_at ? weighTime(p.confirmed_at) : "", weighServerText(p.note || "")];
     if (!lines.length) { rows.push([...base, "", "", "", "", "", "", "", "", "", ...tail]); return; }

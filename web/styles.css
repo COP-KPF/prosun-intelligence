@@ -1343,3 +1343,70 @@ th { color: var(--accent); background: #edf1ea; }
   .ws-fields > label:not(.ws-search) { flex: 1 1 140px; }
   .ws-fields input[type=date], .ws-fields select { width: 100%; }
 }
+
+/* Delete button per paper in the weighing day table (29 Oct 2026) */
+.w-row-acts { display: inline-flex; align-items: center; gap: 12px; }
+.w-del { background: none; border: 1px solid #e3b8b5; color: var(--danger); border-radius: 6px;
+  min-height: 30px; padding: 2px 10px; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+.w-del:hover { background: #fbefee; }
+.w-del:focus-visible { outline: 3px solid #d9c8a6; outline-offset: 2px; }
+
+/* ---------------------------------------------------------------------------
+   Notifications bell (notifications.js, Migration 021) — admin only
+   --------------------------------------------------------------------------- */
+header.app-header { position: relative; }
+.notif-btn { position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; margin-right: 10px; vertical-align: middle; border-radius: 50%;
+  border: 1px solid rgba(244, 239, 227, 0.35); background: transparent; color: #f4efe3; cursor: pointer; }
+.notif-btn:hover { background: rgba(244, 239, 227, 0.12); }
+.notif-btn:focus-visible { outline: 3px solid #d9c8a6; outline-offset: 2px; }
+.notif-btn.notif-has { border-color: var(--gold); }
+.notif-count { position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; padding: 0 5px;
+  border-radius: 999px; background: #c0392b; color: #fff; font-size: 0.72rem; font-weight: 700; line-height: 20px;
+  text-align: center; box-shadow: 0 0 0 2px var(--accent); }
+.notif-panel { position: absolute; right: 16px; top: calc(100% + 6px); z-index: 60; width: min(460px, calc(100vw - 32px));
+  max-height: min(72vh, 680px); overflow: auto; background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 14px 40px rgba(36, 25, 5, 0.22); text-align: left; }
+.n-head { position: sticky; top: 0; background: var(--panel); display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 14px 8px; border-bottom: 1px solid var(--border); z-index: 1; }
+.n-head strong { font-size: 1rem; color: var(--accent); }
+.n-head-acts { display: inline-flex; align-items: center; gap: 10px; font-size: 0.85rem; }
+.n-close { background: none; border: 0; font-size: 1.4rem; line-height: 1; color: var(--muted); min-width: 34px; min-height: 34px; cursor: pointer; }
+.n-intro { margin: 0; padding: 8px 14px 0; font-size: 0.8rem; color: var(--muted); }
+.n-list { list-style: none; margin: 0; padding: 6px 0; }
+.n-item { padding: 10px 14px 12px 18px; border-bottom: 1px solid #eee6d6; position: relative; }
+.n-item:last-child { border-bottom: 0; }
+.n-unread { background: #fbf8f0; }
+.n-unread::before { content: ""; position: absolute; left: 6px; top: 16px; width: 7px; height: 7px; border-radius: 50%; background: #c0392b; }
+.n-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+.n-tag { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; }
+.n-tag-amber { background: #fcebd3; color: #7a4300; }
+.n-tag-red { background: #fbe4e2; color: #9b2c25; }
+.n-tag-green { background: #e3f1e7; color: #1e6b3a; }
+.n-when { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+.n-title { font-weight: 600; font-size: 0.92rem; line-height: 1.35; }
+.n-body { font-size: 0.86rem; line-height: 1.45; margin-top: 3px; }
+.n-meta { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+.n-acts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin-top: 6px; font-size: 0.84rem; }
+.n-acts details { flex-basis: 100%; order: 2; }
+.n-acts summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+.n-table { width: 100%; margin-top: 6px; font-size: 0.8rem; border-collapse: collapse; }
+.n-table th, .n-table td { padding: 4px 6px; border-bottom: 1px solid #eee6d6; text-align: left; }
+.n-table th { background: #f3efe5; color: var(--accent); font-weight: 600; }
+.n-num { text-align: right !important; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.n-strong { font-weight: 700; }
+.n-removed td { color: #9b2c25; text-decoration: line-through; }
+.n-added td { color: #1e6b3a; }
+.n-fields { margin: 6px 0 0; padding-left: 18px; font-size: 0.82rem; }
+.n-muted { color: var(--muted); }
+.n-small { font-size: 0.76rem; margin: 6px 0 0; }
+.n-empty { padding: 18px 14px; color: var(--muted); font-size: 0.88rem; margin: 0; }
+.notif-toast { position: fixed; right: 20px; bottom: 20px; z-index: 70; max-width: min(420px, calc(100vw - 40px));
+  display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 12px 16px; border-radius: 10px;
+  border: 1px solid var(--gold); background: var(--accent); color: #f4efe3; font-size: 0.88rem;
+  box-shadow: 0 10px 30px rgba(36, 25, 5, 0.3); cursor: pointer; }
+.notif-toast-k { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #d6cbb0; }
+@media (max-width: 700px) { .notif-panel { right: 8px; width: calc(100vw - 16px); } }
+/* links inside the panel: the header's cream link colour would vanish on white */
+header.app-header .notif-panel .btn-link { color: var(--accent); font-weight: 600; }
+header.app-header .notif-panel .n-mark { color: var(--muted); font-weight: 400; }

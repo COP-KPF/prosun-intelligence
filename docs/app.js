@@ -151,6 +151,7 @@ async function onSignedIn() {
   appScreen.classList.remove("hidden");
   document.getElementById("who-name").textContent = myProfile.full_name;
   document.getElementById("who-role").textContent = myProfile.role;
+  notifStart();   // notifications.js — the bell, admin only (Migration 021)
 
   // Factory admin (Migration 018) works in PROSUN PACE with one tab only:
   // the weighing photos. No CRM, no order book — and the database refuses

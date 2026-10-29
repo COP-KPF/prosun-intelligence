@@ -4,14 +4,14 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Klong Phai Farm CRM</title>
-<link rel="stylesheet" href="styles.css?v=20261028-7" />
+<link rel="stylesheet" href="styles.css?v=20261029-2" />
 </head>
 <body>
 
   <!-- ============ LOGIN SCREEN ============ -->
   <div id="login-screen">
     <form class="login-card" id="login-form">
-      <img src="logo.png?v=20261028-7" class="login-logo" alt="Klong Phai Farm" width="160" height="120" />
+      <img src="logo.png?v=20261029-2" class="login-logo" alt="Klong Phai Farm" width="160" height="120" />
       <h1>Klong Phai Farm CRM</h1>
       <p class="subtitle">Sign in with the account your admin created for you.</p>
 
@@ -36,7 +36,7 @@
   <div id="app-screen" class="hidden">
     <header class="app-header">
       <div class="brand-wrap">
-      <img src="logo.png?v=20261028-7" class="brand-logo" alt="Klong Phai Farm" width="64" height="48" />
+      <img src="logo.png?v=20261029-2" class="brand-logo" alt="Klong Phai Farm" width="64" height="48" />
       <div class="brand">
         <strong id="app-title">Klong Phai Farm CRM</strong>
         <span class="brand-sub" id="app-subtitle"></span>
@@ -45,10 +45,17 @@
       <div class="who">
         <button class="btn-link hidden" id="switch-system-btn">Switch system</button>
         <span id="who-sep" class="hidden">&nbsp;·&nbsp;</span>
+        <!-- Notifications for admin (Migration 021): weighing changes after
+             confirmation and deleted papers. Shown by notifications.js. -->
+        <button type="button" class="notif-btn hidden" id="notif-btn" aria-label="Notifications" aria-expanded="false" aria-controls="notif-panel">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+          <span class="notif-count hidden" id="notif-count">0</span>
+        </button>
         <span id="who-name"></span> — <span id="who-role"></span>
         &nbsp;·&nbsp;
         <button class="btn-link" id="sign-out-btn">Sign out</button>
       </div>
+      <div id="notif-panel" class="notif-panel hidden" role="dialog" aria-label="Notifications"></div>
     </header>
 
     <main>
@@ -609,12 +616,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
   <!-- QR code on the weighing screen, so the phone opens the camera page -->
   <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
-  <script src="config.js?v=20261028-7"></script>
-  <script src="weighing-common.js?v=20261028-7"></script>
+  <script src="config.js?v=20261029-2"></script>
+  <script src="weighing-common.js?v=20261029-2"></script>
   <!-- weighing.js before app.js: app.js starts the app as soon as it loads,
        and a signed-in factory admin goes straight to openWeighing(). -->
-  <script src="weighing.js?v=20261028-7"></script>
-  <script src="weights-summary.js?v=20261028-7"></script>
-  <script src="app.js?v=20261028-7"></script>
+  <script src="weighing.js?v=20261029-2"></script>
+  <script src="weights-summary.js?v=20261029-2"></script>
+  <script src="notifications.js?v=20261029-2"></script>
+  <script src="app.js?v=20261029-2"></script>
 </body>
 </html>

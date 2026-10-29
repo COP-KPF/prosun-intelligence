@@ -6,6 +6,12 @@
 // purchasing. Shown in PROSUN PACE › Accounting (and Purchasing) ›
 // Confirmed weights.
 //
+// Keeps itself up to date: readers have no access to the weighing tables, so
+// they cannot receive the database's live events. Instead the summary is
+// fetched again every 20 seconds while the screen is open and the browser tab
+// is in front, and at once when the tab comes back — filters, search and
+// scroll position are kept.
+//
 // Read-only by design: a wrong number is corrected at the factory, where the
 // photo is checked ("แก้ไข" on the weighing screen), so there is one source of
 // truth. The data comes from the database function weighing_confirmed_lines,
@@ -30,7 +36,12 @@ const WS = {
   pending: 0,          // papers in the period not yet confirmed
   loading: false,
   message: null,       // { kind, text }
+  timer: null,
+  sig: "",             // fingerprint of the last data shown — redraw only on change
+  updatedAt: null,     // last successful load
 };
+
+const WS_REFRESH_MS = window.__wsRefreshMs || 20000;
 
 function wsAddDays(iso, n) {
   const d = new Date(iso + "T00:00:00Z");
@@ -82,10 +93,27 @@ async function openWeights() {
 }
 
 function closeWeights() {
+  clearTimeout(WS.timer);
   if (wsSection.classList.contains("hidden")) return;
   wsSection.classList.add("hidden");
   wsSection.innerHTML = "";
 }
+
+function wsOpen() { return !wsSection.classList.contains("hidden"); }
+
+function wsSchedule() {
+  clearTimeout(WS.timer);
+  if (!wsOpen()) return;
+  WS.timer = setTimeout(async () => {
+    if (!wsOpen()) return;
+    if (document.hidden || WS.loading) { wsSchedule(); return; }
+    await wsLoad({ silent: true });
+  }, WS_REFRESH_MS);
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && wsOpen() && !WS.loading) wsLoad({ silent: true });
+});
 
 document.getElementById("switch-system-btn").addEventListener("click", closeWeights);
 document.getElementById("sign-out-btn").addEventListener("click", () => {
@@ -95,22 +123,51 @@ document.getElementById("sign-out-btn").addEventListener("click", () => {
 
 
 // ------------------------------------------------------------------ data
-async function wsLoad() {
+// silent = the automatic refresh: no "Loading…", the filters stay as they
+// are, and the table is redrawn only if something actually changed. A failed
+// silent refresh (e.g. a short network drop) keeps the last data on screen.
+async function wsLoad(opts = {}) {
+  const silent = !!opts.silent;
+  const from = WS.from, to = WS.to;
   WS.loading = true;
-  WS.message = null;
+  if (!silent) WS.message = null;
   const [lines, pending] = await Promise.all([
-    sb.rpc("weighing_confirmed_lines", { p_from: WS.from, p_to: WS.to }),
-    sb.rpc("weighing_unconfirmed_count", { p_from: WS.from, p_to: WS.to }),
+    sb.rpc("weighing_confirmed_lines", { p_from: from, p_to: to }),
+    sb.rpc("weighing_unconfirmed_count", { p_from: from, p_to: to }),
   ]);
   WS.loading = false;
+  if (!wsOpen()) return;
+  if (from !== WS.from || to !== WS.to) return;   // the period changed meanwhile; that load wins
   if (lines.error) {
-    WS.rows = [];
-    WS.message = { kind: "error", text: T("โหลดข้อมูลไม่ได้: ", "Could not load: ") + lines.error.message };
-  } else {
-    WS.rows = lines.data || [];
+    if (!silent) {
+      WS.rows = [];
+      WS.sig = "";
+      WS.message = { kind: "error", text: T("โหลดข้อมูลไม่ได้: ", "Could not load: ") + lines.error.message };
+      wsRender();
+    }
+    wsSchedule();
+    return;
   }
-  WS.pending = pending.error ? 0 : Number(pending.data) || 0;
-  wsRender();
+  const rows = lines.data || [];
+  const count = pending.error ? WS.pending : Number(pending.data) || 0;
+  const sig = JSON.stringify([rows, count]);
+  WS.updatedAt = new Date();
+  if (silent && sig === WS.sig) {
+    const st = document.getElementById("ws-updated");
+    if (st) st.textContent = wsUpdatedText();
+  } else {
+    WS.rows = rows;
+    WS.pending = count;
+    WS.sig = sig;
+    if (silent) wsRenderResults(); else wsRender();
+  }
+  wsSchedule();
+}
+
+function wsUpdatedText() {
+  return WS.updatedAt
+    ? T(`อัปเดต ${weighTime(WS.updatedAt.toISOString())} · รีเฟรชเองทุก 20 วินาที`, `Updated ${weighTime(WS.updatedAt.toISOString())} · refreshes by itself every 20 s`)
+    : "";
 }
 
 function wsFiltered() {
@@ -190,7 +247,8 @@ function wsResultsHtml() {
     <div class="w-panel-head">
       <div>
         <h3>${T("ตารางน้ำหนักที่ยืนยันแล้ว", "Confirmed weights")}</h3>
-        <div class="w-small w-muted">${T(`${rows.length} รายการจาก ${papers} ใบงาน`, `${rows.length} line${rows.length === 1 ? "" : "s"} from ${papers} paper${papers === 1 ? "" : "s"}`)}</div>
+        <div class="w-small w-muted">${T(`${rows.length} รายการจาก ${papers} ใบงาน`, `${rows.length} line${rows.length === 1 ? "" : "s"} from ${papers} paper${papers === 1 ? "" : "s"}`)}
+          · <span id="ws-updated">${escapeHtml(wsUpdatedText())}</span></div>
       </div>
       <button type="button" class="w-btn" data-ws="export"${rows.length ? "" : " disabled"}>${T("ส่งออก Excel", "Export to Excel")}</button>
     </div>
@@ -230,7 +288,12 @@ function wsResultsHtml() {
 
 function wsRenderResults() {
   const el = document.getElementById("ws-results");
-  if (el) el.innerHTML = wsResultsHtml();
+  if (!el) return;
+  const sc = el.querySelector(".w-scroll");
+  const left = sc ? sc.scrollLeft : 0;
+  el.innerHTML = wsResultsHtml();
+  const sc2 = el.querySelector(".w-scroll");
+  if (sc2 && left) sc2.scrollLeft = left;
 }
 
 
