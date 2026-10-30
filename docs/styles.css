@@ -1448,3 +1448,19 @@ header.app-header .notif-panel .n-mark { color: var(--muted); font-weight: 400; 
   .pace-nav-head + .pace-nav-item { border-left: 0; }
   .pace-nav-item.active { box-shadow: inset 0 -3px 0 var(--gold); }
 }
+
+/* Confirmed weights — "checked" marks per department (Migration 022, 30 Oct 2026) */
+#weights-section .ws-howto { margin-top: 4px; color: var(--accent); font-weight: 600; }
+#weights-table tr.ws-row { cursor: pointer; }
+#weights-table tr.ws-row:hover td { background: #f8f4ea; }
+#weights-table tr.ws-st-checked td { background: #e4efe6; color: #2c4a35; }
+#weights-table tr.ws-st-checked:hover td { background: #d9e9dc; }
+#weights-table tr.ws-st-checked td:first-child { box-shadow: inset 4px 0 0 #2e7d4f; }
+#weights-table tr.ws-st-changed td { background: #fcebd3; }
+#weights-table tr.ws-st-changed td:first-child { box-shadow: inset 4px 0 0 #c77700; }
+#weights-table .ws-cb-col { width: 44px; text-align: center; }
+#weights-table .ws-cb { width: 20px; height: 20px; min-height: 0; accent-color: #2e7d4f; cursor: pointer; }
+#weights-table .ws-check-who { color: #1e6b3a; font-weight: 600; white-space: nowrap; }
+.ws-changed-tag { display: inline-block; font-size: 0.76rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #f6d6a8; color: #7a4300; }
+.ws-c-checked { background: #e4efe6 !important; border-color: #bfddc8 !important; color: #1e6b3a !important; }
+.ws-c-checked strong { color: #1e6b3a !important; }

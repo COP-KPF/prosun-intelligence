@@ -1212,9 +1212,11 @@ const tabWeighingBtn     = document.getElementById("tab-weighing");
 const tabConfirmBirdsBtn = document.getElementById("tab-confirm-birds");
 const tabWeightsBtn      = document.getElementById("tab-weights");             // Accounting (Migration 020)
 const tabWeightsBuyBtn   = document.getElementById("tab-weights-purchasing");  // same screen, Purchasing's menu
-// Admin reaches Confirmed weights from both Accounting and Purchasing (30 Oct
-// 2026, Clément); this remembers which entry was used, for the highlight and
-// the department label above the title.
+const tabWeightsMidBtn   = document.getElementById("tab-weights-middle");      // same screen, Middle office's menu (Migration 022)
+// Admin reaches Confirmed weights from Accounting, Purchasing and the Middle
+// office (30 Oct 2026, Clément); this remembers which entry was used, for the
+// highlight, the department label above the title, and whose "checked" marks
+// are shown (weights-summary.js).
 let paceWeightsDept = "Accounting";
 const ordersSection      = document.getElementById("orders-section");
 const orderEntrySection  = document.getElementById("order-entry-section");
@@ -1917,7 +1919,7 @@ function setupPaceRole() {
 // can read (purchasing reads orders because the calculator is built on them).
 const PACE_MENU = {
   admin:         ["orders", "calculator", "weighing", "weights"],
-  sale_support:  ["orders", "confirm-birds"],
+  sale_support:  ["orders", "confirm-birds", "weights"],
   purchasing:    ["calculator", "weights"],
   production:    ["weighing"],
   factory_admin: ["weighing"],
@@ -1932,13 +1934,15 @@ function setPaceTabsForRole() {
   tabConfirmBirdsBtn.classList.toggle("hidden", !items.includes("confirm-birds"));
   tabCalculatorBtn.classList.toggle("hidden", !items.includes("calculator"));
   tabWeighingBtn.classList.toggle("hidden", !items.includes("weighing"));
-  const buyer = myProfile && myProfile.role === "purchasing";
-  tabWeightsBtn.classList.toggle("hidden", !items.includes("weights") || buyer);
-  tabWeightsBuyBtn.classList.toggle("hidden", !items.includes("weights") || !(buyer || myProfile.role === "admin"));
-  document.getElementById("pace-group-middle").classList.toggle("hidden", !items.includes("orders") && !items.includes("confirm-birds"));
+  const role = myProfile && myProfile.role;
+  const w = items.includes("weights");
+  tabWeightsBtn.classList.toggle("hidden", !w || !["accounting", "admin"].includes(role));
+  tabWeightsBuyBtn.classList.toggle("hidden", !w || !["purchasing", "admin"].includes(role));
+  tabWeightsMidBtn.classList.toggle("hidden", !w || !["sale_support", "admin"].includes(role));
+  document.getElementById("pace-group-middle").classList.toggle("hidden", !items.includes("orders") && !items.includes("confirm-birds") && !(w && ["sale_support", "admin"].includes(role)));
   document.getElementById("pace-group-purchasing").classList.toggle("hidden", !items.includes("calculator"));
   document.getElementById("pace-group-production").classList.toggle("hidden", !items.includes("weighing"));
-  document.getElementById("pace-group-accounting").classList.toggle("hidden", !items.includes("weights") || buyer);
+  document.getElementById("pace-group-accounting").classList.toggle("hidden", !w || !["accounting", "admin"].includes(role));
 }
 
 async function switchPaceView(view) {
@@ -1959,9 +1963,11 @@ async function switchPaceView(view) {
   tabConfirmBirdsBtn.classList.toggle("active", view === "calculator");
   tabWeighingBtn.classList.toggle("active", view === "weighing");
   if (myProfile.role === "purchasing") paceWeightsDept = "Purchasing";
+  else if (myProfile.role === "sale_support") paceWeightsDept = "Middle office";
   else if (myProfile.role !== "admin") paceWeightsDept = "Accounting";
   tabWeightsBtn.classList.toggle("active", view === "weights" && paceWeightsDept === "Accounting");
   tabWeightsBuyBtn.classList.toggle("active", view === "weights" && paceWeightsDept === "Purchasing");
+  tabWeightsMidBtn.classList.toggle("active", view === "weights" && paceWeightsDept === "Middle office");
   const crumb = document.getElementById("pace-crumb");
   const dept = view === "calculator" && myProfile.role === "sale_support" ? "Middle office"
     : view === "weights" ? paceWeightsDept
@@ -2000,6 +2006,7 @@ tabWeighingBtn.addEventListener("click", () => switchPaceView("weighing"));
 tabConfirmBirdsBtn.addEventListener("click", () => switchPaceView("calculator"));
 tabWeightsBtn.addEventListener("click", () => { paceWeightsDept = "Accounting"; switchPaceView("weights"); });
 tabWeightsBuyBtn.addEventListener("click", () => { paceWeightsDept = "Purchasing"; switchPaceView("weights"); });
+tabWeightsMidBtn.addEventListener("click", () => { paceWeightsDept = "Middle office"; switchPaceView("weights"); });
 
 document.getElementById("new-order-btn").addEventListener("click", openOrderEntry);
 
