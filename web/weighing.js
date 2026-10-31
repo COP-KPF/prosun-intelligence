@@ -606,7 +606,9 @@ function weighRenderCheck() {
           </tbody>
         </table>
         ${editable ? `<button type="button" class="btn-link w-add" data-act="add-line">+ ${T("เพิ่มรายการ", "Add a line")}</button>` : ""}
-        <p class="w-small w-muted w-pad">${T("แก้ตัวเลขได้ทุกช่อง บันทึกให้อัตโนมัติ · สีส้มในช่อง “ต่าง” = ต่างจากที่สั่งเกิน ±5%", "Every number can be corrected and saves automatically · orange under “Difference” = more than ±5% off the order")}</p>
+        <p class="w-small w-muted w-pad">${locked
+          ? T("ใบงานนี้ยืนยันแล้ว จึงล็อกไว้ — กด “แก้ไข” ด้านล่างเพื่อแก้ (ผู้บริหารจะได้รับแจ้ง)", "This paper is confirmed, so it is locked — press “Edit” below to change it (management is notified)")
+          : T("แก้ได้ทุกช่อง: สินค้า จำนวนสั่ง ค่าที่เขียน และน้ำหนักจริง บันทึกให้อัตโนมัติ · สีส้มในช่อง “ต่าง” = ต่างจากที่สั่งเกิน ±5%", "Every part can be corrected — product, ordered, written and actual kg — and saves automatically · orange under “Difference” = more than ±5% off the order")}</p>
       </div>
 
       ${locked ? `
@@ -630,17 +632,41 @@ function weighRenderCheck() {
   weighRefreshCheckDerived();
 }
 
+// Ordered quantity as typed ("15 กก", "12 ตัว", "3 Kg", "2 แพค") → qty + unit,
+// so the Difference column keeps working after a correction (31 Oct 2026).
+const WEIGH_UNIT_WORDS = [
+  ["kg", /^(kg|kgs|kilo|kilos|กก\.?|กิโล(กรัม)?)$/i],
+  ["g", /^(g|gr|gram|grams|กรัม)$/i],
+  ["pcs", /^(pc|pcs|piece|pieces|ตัว|ชิ้น)$/i],
+  ["pack", /^(pack|packs|pk|แพค|แพ็ค|ถุง)$/i],
+  ["jar", /^(jar|jars|ขวด|กระปุก)$/i],
+];
+function weighParseOrdered(text) {
+  const m = String(text || "").trim().replace(",", ".").match(/^(\d+(?:\.\d+)?)\s*(.*)$/);
+  if (!m) return { ordered_qty: null, ordered_unit: null };
+  const word = m[2].trim();
+  const hit = WEIGH_UNIT_WORDS.find(([, re]) => re.test(word));
+  return { ordered_qty: Number(m[1]), ordered_unit: hit ? hit[0] : (word ? "other" : null) };
+}
+
+// Every part of a line can be corrected while the paper is not confirmed
+// (Clément, 31 Oct 2026): product, ordered, what was written, actual kg. A
+// confirmed paper is locked — "แก้ไข / Edit" reopens it (management is told).
 function weighLineRowHtml(l, editable) {
   const d = weighDiff(l);
   const look = weighNeedsLook(l);
   const ro = editable ? "" : " disabled";
-  const manual = !l.ordered_text && l.edited && !(l.weights && l.weights.length);
+  const name = escapeAttr(l.description || "");
   return `<tr class="w-line ${look ? "w-look" : ""}" data-line-id="${l.id}">
-    <td>${manual && editable
-      ? `<input type="text" class="w-desc" data-line-field="description" value="${escapeAttr(l.description)}" placeholder="${T("ชื่อสินค้า", "Product name")}" aria-label="${T("ชื่อสินค้า", "Product name")}">`
+    <td>${editable
+      ? `<input type="text" class="w-desc" data-line-field="description" value="${name}" placeholder="${T("ชื่อสินค้า", "Product name")}" aria-label="${T("ชื่อสินค้า", "Product name")}">`
       : escapeHtml(l.description || "—")}</td>
-    <td class="w-num">${escapeHtml(l.ordered_text || "")}</td>
-    <td class="w-num w-hand">${escapeHtml(l.handwritten_text || "")}</td>
+    <td class="w-num">${editable
+      ? `<input type="text" class="w-ord" data-line-field="ordered_text" value="${escapeAttr(l.ordered_text || "")}" placeholder="${T("เช่น 15 กก", "e.g. 15 kg")}" aria-label="${T("จำนวนสั่ง", "Ordered")} ${name}">`
+      : escapeHtml(l.ordered_text || "")}</td>
+    <td class="w-num w-hand">${editable
+      ? `<input type="text" class="w-hand-in" data-line-field="handwritten_text" value="${escapeAttr(l.handwritten_text || "")}" aria-label="${T("ค่าที่เขียน", "Written")} ${name}">`
+      : escapeHtml(l.handwritten_text || "")}</td>
     <td class="w-num"><input type="text" inputmode="decimal" class="w-kg" data-line-field="actual_kg"
         value="${escapeAttr(l.actual_kg === null || l.actual_kg === undefined ? "" : String(Number(l.actual_kg)))}"
         aria-label="${T("น้ำหนักจริง", "Actual weight")} ${escapeAttr(l.description)}"${ro}></td>
@@ -767,8 +793,13 @@ weighSection.addEventListener("change", async (e) => {
       // Typing the number yourself is looking at it: it counts as checked.
       if (line.flag_reason) payload.checked = true;
       await weighSaveLine(id, payload);
+    } else if (t.dataset.lineField === "ordered_text") {
+      const text = t.value.trim();
+      await weighSaveLine(id, Object.assign({ ordered_text: text || null, edited: true }, weighParseOrdered(text)));
+    } else if (t.dataset.lineField === "handwritten_text") {
+      await weighSaveLine(id, { handwritten_text: t.value.trim() || null, edited: true });
     } else {
-      await weighSaveLine(id, { description: t.value.trim() });
+      await weighSaveLine(id, { description: t.value.trim(), edited: true });
     }
   }
 });

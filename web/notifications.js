@@ -129,6 +129,7 @@ function notifDetailsHtml(n) {
     parts.push(`<table class="n-table"><thead><tr><th>Line</th><th class="n-num">Before (kg)</th><th class="n-num">After (kg)</th></tr></thead><tbody>${
       lines.map((l) => `<tr class="n-${escapeAttr(l.change)}"><td>${escapeHtml(l.description || "line " + l.line_no)}${
         l.description_before ? ` <span class="n-muted">(was “${escapeHtml(l.description_before)}”)</span>` : ""}${
+        l.ordered_before ? `<br><span class="n-muted">ordered ${escapeHtml(l.ordered_before)} → </span><strong>${escapeHtml(l.ordered_after)}</strong>` : ""}${
         l.change === "added" ? ' <span class="n-muted">added</span>' : l.change === "removed" ? ' <span class="n-muted">removed</span>' : ""}</td>
         <td class="n-num">${notifKg(l.before_kg)}</td><td class="n-num n-strong">${notifKg(l.after_kg)}</td></tr>`).join("")}</tbody></table>`);
   }

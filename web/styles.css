@@ -1464,3 +1464,10 @@ header.app-header .notif-panel .n-mark { color: var(--muted); font-weight: 400; 
 .ws-changed-tag { display: inline-block; font-size: 0.76rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #f6d6a8; color: #7a4300; }
 .ws-c-checked { background: #e4efe6 !important; border-color: #bfddc8 !important; color: #1e6b3a !important; }
 .ws-c-checked strong { color: #1e6b3a !important; }
+
+/* Weighing check screen: every part of a line editable (31 Oct 2026) */
+.w-lines input.w-desc { width: 100%; min-width: 170px; }
+.w-lines input.w-ord { width: 96px; text-align: right; }
+.w-lines input.w-hand-in { width: 110px; text-align: right; color: #2346a0; font-style: italic; }
+.w-lines input.w-desc, .w-lines input.w-ord, .w-lines input.w-hand-in { min-height: 40px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.w-lines input.w-desc:focus, .w-lines input.w-ord:focus, .w-lines input.w-hand-in:focus { outline: 3px solid #d9c8a6; border-color: var(--accent); }
