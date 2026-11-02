@@ -1429,6 +1429,7 @@ header.app-header .notif-panel .n-mark { color: var(--muted); font-weight: 400; 
 .pace-nav-head::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--dept, var(--gold)); }
 .pace-nav-head .pace-dot { display: none; }
 .pace-nav-head small { padding-left: 0; margin-top: 1px; color: var(--muted); font-size: 0.74rem; }
+#pace-group-management { --dept: #a8262c; }
 #pace-group-middle     { --dept: #1f3d2a; }
 #pace-group-purchasing { --dept: #b59767; }
 #pace-group-production { --dept: #241905; }
@@ -1471,3 +1472,74 @@ header.app-header .notif-panel .n-mark { color: var(--muted); font-weight: 400; 
 .w-lines input.w-hand-in { width: 110px; text-align: right; color: #2346a0; font-style: italic; }
 .w-lines input.w-desc, .w-lines input.w-ord, .w-lines input.w-hand-in { min-height: 40px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
 .w-lines input.w-desc:focus, .w-lines input.w-ord:focus, .w-lines input.w-hand-in:focus { outline: 3px solid #d9c8a6; border-color: var(--accent); }
+
+/* ---------------------------------------------------------------------------
+   Management dashboard (Migration 024, 2 Nov 2026). Chart colours were checked
+   with the data-visualisation palette validator; the brand's forest green and
+   tan fail its lightness and contrast checks as chart fills.
+   --------------------------------------------------------------------------- */
+#management-section {
+  --mg-done: #2e7d4f; --mg-open: #c9892b; --mg-alert: #a8262c; --mg-good: #1e6b3a;
+  display: flex; flex-direction: column; gap: 16px;
+  font-family: -apple-system, "Segoe UI", "Noto Sans Thai", "Leelawadee UI", Tahoma, sans-serif;
+}
+#management-section h3 { margin: 0; font-size: 1.02rem; }
+#management-section p { margin: 0; }
+.mg-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; min-width: 0; }
+.mg-muted { color: var(--muted); }
+.mg-small { font-size: 0.84rem; line-height: 1.5; }
+.mg-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.mg-bar-right { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+#management-section select, #management-section input { min-height: 38px; width: auto; }
+.mg-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.mg-tile { display: flex; flex-direction: column; gap: 4px; }
+.mg-tile-k { font-size: 0.82rem; font-weight: 600; color: var(--muted); }
+.mg-tile-v { font-size: 2rem; font-weight: 700; line-height: 1.15; color: var(--text); font-variant-numeric: tabular-nums; }
+.mg-tile-v small { font-size: 0.95rem; font-weight: 600; color: var(--muted); margin-left: 3px; }
+.mg-tile-s { font-size: 0.82rem; color: var(--muted); line-height: 1.4; }
+.mg-tile.mg-alert { box-shadow: inset 4px 0 0 var(--mg-alert); }
+.mg-tile.mg-good { box-shadow: inset 4px 0 0 var(--mg-good); }
+.mg-state { font-size: 0.8rem; font-weight: 700; }
+.mg-alert .mg-state { color: var(--mg-alert); }
+.mg-good .mg-state { color: var(--mg-good); }
+.mg-go { align-self: flex-start; margin-top: 2px; padding: 0; min-height: 0; border: 0; background: none; color: var(--accent); font-size: 0.82rem; font-weight: 600; cursor: pointer; text-decoration: underline; }
+.mg-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
+.mg-card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px 14px; margin-bottom: 10px; }
+.mg-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.8rem; color: var(--muted); }
+.mg-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
+.mg-plot { position: relative; height: 170px; margin: 16px 0 24px; }
+.mg-grid { position: absolute; left: 34px; right: 0; border-top: 1px solid #efe8d9; }
+.mg-grid span { position: absolute; left: -34px; top: -8px; width: 28px; text-align: right; font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mg-cols { position: absolute; left: 34px; right: 0; top: 0; bottom: 0; display: flex; align-items: stretch; }
+.mg-col { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; outline: none; }
+.mg-col:hover, .mg-col:focus-visible { background: rgba(181, 151, 103, 0.14); }
+.mg-seg { width: min(26px, 68%); }
+.mg-seg + .mg-seg { margin-top: 2px; }
+.mg-seg:first-of-type { border-radius: 4px 4px 0 0; }
+.mg-seg-done { background: var(--mg-done); }
+.mg-seg-open { background: var(--mg-open); }
+.mg-val { font-size: 0.74rem; font-weight: 600; color: var(--text); margin-bottom: 2px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mg-x { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 5px; font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
+.mg-tip { display: none; position: absolute; top: 0; z-index: 5; padding: 7px 10px; border-radius: 6px; background: var(--text); color: #f4efe3; font-size: 0.78rem; line-height: 1.45; white-space: nowrap; pointer-events: none; }
+.mg-col:nth-child(-n+4) .mg-tip { left: 0; }
+.mg-col:nth-last-child(-n+4) .mg-tip { right: 0; left: auto; }
+.mg-col:hover .mg-tip, .mg-col:focus-visible .mg-tip { display: block; }
+.mg-details { font-size: 0.84rem; color: var(--muted); }
+.mg-details summary { cursor: pointer; }
+.mg-table-wrap { overflow-x: auto; margin-top: 8px; }
+.mg-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.mg-table th { text-align: left; padding: 8px 10px; background: var(--accent); color: #fff; font-weight: 600; white-space: nowrap; }
+.mg-table td { padding: 8px 10px; border-bottom: 1px solid #efe8d9; }
+.mg-table .mg-n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mg-table tr.mg-total td { font-weight: 700; border-top: 2px solid var(--border); }
+.mg-table tr.mg-flag td { background: #f8f1e3; font-weight: 600; }
+.mg-strong { font-weight: 700; }
+.mg-more { margin-top: 10px; }
+.mg-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.mg-msg { padding: 10px 14px; border-radius: 8px; background: #fbe9e9; color: var(--mg-alert); font-size: 0.88rem; }
+@media (max-width: 700px) {
+  .mg-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mg-tile-v { font-size: 1.6rem; }
+  .mg-charts { grid-template-columns: minmax(0, 1fr); }
+  .mg-col:not(:nth-last-child(3n+1)) .mg-x { display: none; }
+}
