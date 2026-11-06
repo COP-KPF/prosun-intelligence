@@ -4,14 +4,14 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Klong Phai Farm CRM</title>
-<link rel="stylesheet" href="styles.css?v=20261106-1" />
+<link rel="stylesheet" href="styles.css?v=20261106-2" />
 </head>
 <body>
 
   <!-- ============ LOGIN SCREEN ============ -->
   <div id="login-screen">
     <form class="login-card" id="login-form">
-      <img src="logo.png?v=20261106-1" class="login-logo" alt="Klong Phai Farm" width="160" height="120" />
+      <img src="logo.png?v=20261106-2" class="login-logo" alt="Klong Phai Farm" width="160" height="120" />
       <h1>Klong Phai Farm CRM</h1>
       <p class="subtitle">Sign in with the account your admin created for you.</p>
 
@@ -36,7 +36,7 @@
   <div id="app-screen" class="hidden">
     <header class="app-header">
       <div class="brand-wrap">
-      <img src="logo.png?v=20261106-1" class="brand-logo" alt="Klong Phai Farm" width="64" height="48" />
+      <img src="logo.png?v=20261106-2" class="brand-logo" alt="Klong Phai Farm" width="64" height="48" />
       <div class="brand">
         <strong id="app-title">Klong Phai Farm CRM</strong>
         <span class="brand-sub" id="app-subtitle"></span>
@@ -104,6 +104,8 @@
         </div>
         <div class="pace-nav-group" id="pace-group-accounting">
           <div class="pace-nav-head"><span class="pace-dot pace-dot-accounting" aria-hidden="true"></span>Accounting<small>บัญชี</small></div>
+          <!-- Supplier bills: scan, review, select, approve, pay (Migration 025) -->
+          <button type="button" class="pace-nav-item" id="tab-payables" data-view="payables">Payables<small class="pace-nav-sub">เจ้าหนี้</small></button>
           <!-- Read-only confirmed weights for invoicing in Odoo (Migration 020) -->
           <button type="button" class="pace-nav-item" id="tab-weights" data-view="weights">Confirmed weights<small class="pace-nav-sub">น้ำหนักที่ยืนยันแล้ว</small></button>
         </div>
@@ -434,6 +436,7 @@
       <div id="weighing-section" class="hidden" lang="th"></div>
       <div id="weights-section" class="hidden"></div>
       <div id="management-section" class="hidden"></div>
+      <div id="payables-section" class="hidden"></div>
 
       </div><!-- #main-col -->
     </main>
@@ -636,14 +639,16 @@
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
   <!-- QR code on the weighing screen, so the phone opens the camera page -->
   <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
-  <script src="config.js?v=20261106-1"></script>
-  <script src="weighing-common.js?v=20261106-1"></script>
+  <script src="config.js?v=20261106-2"></script>
+  <script src="weighing-common.js?v=20261106-2"></script>
   <!-- weighing.js before app.js: app.js starts the app as soon as it loads,
        and a signed-in factory admin goes straight to openWeighing(). -->
-  <script src="weighing.js?v=20261106-1"></script>
-  <script src="weights-summary.js?v=20261106-1"></script>
-  <script src="management.js?v=20261106-1"></script>
-  <script src="notifications.js?v=20261106-1"></script>
-  <script src="app.js?v=20261106-1"></script>
+  <script src="weighing.js?v=20261106-2"></script>
+  <script src="weights-summary.js?v=20261106-2"></script>
+  <script src="management.js?v=20261106-2"></script>
+  <script src="payables-common.js?v=20261106-2"></script>
+  <script src="payables.js?v=20261106-2"></script>
+  <script src="notifications.js?v=20261106-2"></script>
+  <script src="app.js?v=20261106-2"></script>
 </body>
 </html>

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="robots" content="noindex" />
+<meta name="theme-color" content="#1f3d2a" />
+<title>สแกนบิล — PROSUN</title>
+<link rel="stylesheet" href="capture.css?v=20261106-2" />
+</head>
+<body>
+  <!-- Phone page for scanning supplier bills (Migration 025). Opened from the QR
+       code on the accounting screen; no login on the phone. The token only lets
+       this page ADD scans: it cannot read anything back. -->
+  <header class="c-head">
+    <img src="logo.png?v=20261106-2" class="c-logo" alt="Klong Phai Farm" width="69" height="52" />
+    <div class="c-brand">PROSUN PACE · ACCOUNTING</div>
+    <h1 data-en="Scan bills">สแกนบิล</h1>
+    <div class="c-day" id="c-day">กำลังตรวจ QR…</div>
+    <div class="c-lang" role="group" aria-label="Language / ภาษา"><button type="button" data-lang="th">ไทย</button><button type="button" data-lang="en">EN</button></div>
+    <div class="c-link" id="c-link"></div>
+  </header>
+
+  <main class="c-main">
+    <div id="c-ready" class="hidden">
+      <label class="c-shoot" for="c-camera">
+        <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+        <span class="c-shoot-title" data-en="Photograph a bill">ถ่ายรูปบิล</span>
+        <span class="c-shoot-sub" data-en="Tap to open the camera · 1 photo per bill">แตะเพื่อเปิดกล้อง · 1 รูปต่อ 1 บิล</span>
+      </label>
+      <input type="file" id="c-camera" accept="image/*" capture="environment" class="c-file" />
+      <div class="c-tip" data-en="Lay the bill flat so the whole page and the amounts are sharp. Each scan is checked on the PC before it goes further.">วางบิลบนโต๊ะ ให้เห็นทั้งแผ่นและตัวเลขชัด ๆ แต่ละใบจะถูกตรวจที่คอมพิวเตอร์ก่อนส่งต่อ</div>
+      <div class="c-row">
+        <h2 data-en="Sent with this QR code">ส่งแล้วด้วย QR นี้</h2>
+        <div class="c-count"><strong id="c-count">0</strong> <span data-en="bills">บิล</span></div>
+      </div>
+      <ul class="c-list" id="c-list"></ul>
+      <label class="c-secondary" for="c-gallery" data-en="Choose from the album or files">เลือกจากอัลบั้มหรือไฟล์</label>
+      <input type="file" id="c-gallery" accept="image/*,application/pdf" multiple class="c-file" />
+      <p class="c-foot" data-en="You can close this page once every bill shows “Sent”.">ปิดหน้านี้ได้เมื่อทุกบิลขึ้นว่า “ส่งแล้ว”</p>
+    </div>
+    <div id="c-expired" class="hidden c-expired">
+      <h2 data-en="This QR code no longer works">QR นี้ใช้ไม่ได้แล้ว</h2>
+      <p data-en="The QR code expired or was replaced. Scan the new one on the PC (Accounting › Payables).">QR หมดอายุหรือถูกสร้างใหม่ สแกน QR ใหม่จากหน้าจอคอมพิวเตอร์ (บัญชี › เจ้าหนี้)</p>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
+  <script src="config.js?v=20261106-2"></script>
+  <script src="weighing-common.js?v=20261106-2"></script>
+  <script src="payables-common.js?v=20261106-2"></script>
+  <script src="ap-capture.js?v=20261106-2"></script>
+</body>
+</html>

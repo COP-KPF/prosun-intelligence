@@ -26,13 +26,19 @@ const N = {
   seen: new Set(),     // ids already shown, so only really new ones raise a toast
 };
 const NOTIF_POLL_MS = window.__notifPollMs || 60000;
-const NOTIF_ROLES = ["admin"];
+const NOTIF_ROLES = ["admin", "accounting"];
 
 const NOTIF_KIND = {
   weighing_reopened:    { label: "Reopened",     cls: "n-tag-amber" },
   weighing_changed:     { label: "Changed",      cls: "n-tag-red" },
   weighing_reconfirmed: { label: "Re-confirmed", cls: "n-tag-green" },
   weighing_deleted:     { label: "Deleted",      cls: "n-tag-red" },
+  payable_proposed:     { label: "To approve",   cls: "n-tag-amber" },
+  payable_approved:     { label: "Approved",     cls: "n-tag-green" },
+  payable_held:         { label: "Held",         cls: "n-tag-amber" },
+  payable_returned:     { label: "Returned",     cls: "n-tag-red" },
+  payable_undo:         { label: "Payment cancelled", cls: "n-tag-red" },
+  payable_voided:       { label: "Voided",       cls: "n-tag-red" },
 };
 
 function notifEnabled() { return !!myProfile && NOTIF_ROLES.includes(myProfile.role); }
@@ -158,7 +164,7 @@ function notifRender() {
         <button type="button" class="n-close" data-n="close" aria-label="Close">×</button>
       </span>
     </div>
-    <p class="n-intro">Weighing changes after confirmation, and deleted papers.</p>
+    <p class="n-intro">Payables, weighing changes after confirmation, and deleted papers.</p>
     ${N.items.length ? `<ul class="n-list">${N.items.map((n) => {
       const k = NOTIF_KIND[n.kind] || { label: "Notice", cls: "n-tag-amber" };
       const detail = notifDetailsHtml(n);
@@ -170,11 +176,12 @@ function notifRender() {
         <div class="n-acts">
           ${detail ? `<details><summary>Details</summary>${detail}</details>` : ""}
           ${n.paper_id && n.kind !== "weighing_deleted" ? `<button type="button" class="btn-link" data-n="open" data-id="${escapeAttr(n.id)}">Open paper ›</button>` : ""}
+          ${String(n.kind).startsWith("payable_") ? `<button type="button" class="btn-link" data-n="open-payables" data-id="${escapeAttr(n.id)}">Open payables ›</button>` : ""}
           ${n.read_at ? "" : `<button type="button" class="btn-link n-mark" data-n="read" data-id="${escapeAttr(n.id)}">Mark as read</button>`}
         </div>
       </li>`;
     }).join("")}</ul>`
-    : `<p class="n-empty">Nothing yet. You are told here when a confirmed weight is reopened, changed or deleted.</p>`}`;
+    : `<p class="n-empty">Nothing yet. You are told here about payables to act on, and when a confirmed weight is reopened, changed or deleted.</p>`}`;
 }
 
 function notifOpenPanel() {
@@ -209,6 +216,18 @@ notifPanel.addEventListener("click", async (e) => {
   if (act === "close") { notifClose(); return; }
   if (act === "read-all") { await notifMarkRead(N.items.filter((n) => !n.read_at).map((n) => n.id)); return; }
   if (act === "read") { await notifMarkRead([el.dataset.id]); return; }
+  if (act === "open-payables") {
+    await notifMarkRead([el.dataset.id]);
+    notifClose();
+    const chooser = document.getElementById("system-chooser");
+    if (chooser && !chooser.classList.contains("hidden")) {
+      chooser.classList.add("hidden");
+      document.querySelector(".toolbar").classList.remove("hidden");
+      document.querySelector(".page-footer").classList.remove("hidden");
+    }
+    await switchPaceView("payables");
+    return;
+  }
   if (act === "open") {
     const n = N.items.find((x) => x.id === el.dataset.id);
     if (!n) return;

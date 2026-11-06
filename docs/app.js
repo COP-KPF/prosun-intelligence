@@ -1213,6 +1213,7 @@ const tabConfirmBirdsBtn = document.getElementById("tab-confirm-birds");
 const tabWeightsBtn      = document.getElementById("tab-weights");             // Accounting (Migration 020)
 const tabWeightsBuyBtn   = document.getElementById("tab-weights-purchasing");  // same screen, Purchasing's menu
 const tabWeightsMidBtn   = document.getElementById("tab-weights-middle");      // same screen, Middle office's menu (Migration 022)
+const tabPayablesBtn     = document.getElementById("tab-payables");            // Accounting › Payables (Migration 025)
 const tabManagementBtn   = document.getElementById("tab-management");          // Management dashboard, admin only (Migration 024)
 // Admin reaches Confirmed weights from Accounting, Purchasing and the Middle
 // office (30 Oct 2026, Clément); this remembers which entry was used, for the
@@ -1902,7 +1903,7 @@ function setupPaceRole() {
   } else if (myProfile.role === "purchasing") {
     note.textContent = "Read-only view of every order, so purchasing can see demand before buying. Entering and changing orders is sale support's job.";
   } else if (myProfile.role === "accounting") {
-    note.textContent = "Weights confirmed at the factory, for invoicing in Odoo. Read-only — a wrong number is corrected by the factory on the weighing screen.";
+    note.textContent = "Payables: scan each supplier bill and check it against the scan. Confirmed weights are read-only: a wrong number is corrected by the factory on the weighing screen.";
   } else {
     note.textContent = "Read-only view of orders for production.";
   }
@@ -1919,15 +1920,15 @@ function setupPaceRole() {
 // This is the screen only; the database's RLS still decides what each role
 // can read (purchasing reads orders because the calculator is built on them).
 const PACE_MENU = {
-  admin:         ["management", "orders", "calculator", "weighing", "weights"],
+  admin:         ["management", "orders", "calculator", "weighing", "payables", "weights"],
   sale_support:  ["orders", "confirm-birds", "weights"],
   purchasing:    ["calculator", "weights"],
   production:    ["weighing"],
   factory_admin: ["weighing"],
-  accounting:    ["weights"],
+  accounting:    ["payables", "weights"],
 };
 const PACE_HOME = { admin: "orders", sale_support: "orders", purchasing: "calculator", production: "weighing", factory_admin: "weighing", accounting: "weights" };
-const PACE_DEPT = { orders: "Middle office", calculator: "Purchasing", weighing: "Production", weights: "Accounting", management: "Management" };
+const PACE_DEPT = { orders: "Middle office", calculator: "Purchasing", weighing: "Production", weights: "Accounting", payables: "Accounting", management: "Management" };
 
 function setPaceTabsForRole() {
   const items = PACE_MENU[myProfile && myProfile.role] || [];
@@ -1940,6 +1941,7 @@ function setPaceTabsForRole() {
   tabWeightsBtn.classList.toggle("hidden", !w || !["accounting", "admin"].includes(role));
   tabWeightsBuyBtn.classList.toggle("hidden", !w || !["purchasing", "admin"].includes(role));
   tabWeightsMidBtn.classList.toggle("hidden", !w || !["sale_support", "admin"].includes(role));
+  tabPayablesBtn.classList.toggle("hidden", !items.includes("payables"));
   tabManagementBtn.classList.toggle("hidden", !items.includes("management"));
   document.getElementById("pace-group-management").classList.toggle("hidden", !items.includes("management"));
   document.getElementById("pace-group-middle").classList.toggle("hidden", !items.includes("orders") && !items.includes("confirm-birds") && !(w && ["sale_support", "admin"].includes(role)));
@@ -1999,6 +2001,7 @@ async function switchPaceView(view) {
   tabCalculatorBtn.classList.toggle("active", view === "calculator");
   tabConfirmBirdsBtn.classList.toggle("active", view === "calculator");
   tabWeighingBtn.classList.toggle("active", view === "weighing");
+  tabPayablesBtn.classList.toggle("active", view === "payables");
   tabManagementBtn.classList.toggle("active", view === "management");
   if (myProfile.role === "purchasing") paceWeightsDept = "Purchasing";
   else if (myProfile.role === "sale_support") paceWeightsDept = "Middle office";
@@ -2019,6 +2022,7 @@ async function switchPaceView(view) {
   if (view !== "weighing") closeWeighing();          // weighing.js
   if (view !== "weights") closeWeights();            // weights-summary.js
   if (view !== "management") closeManagement();      // management.js
+  if (view !== "payables") closePayables();          // payables.js
 
   // Purchasing and production read; only sale support and admin write. Entry
   // also needs one specific channel, since the product list is per channel.
@@ -2039,6 +2043,10 @@ async function switchPaceView(view) {
     document.getElementById("list-title").textContent = "น้ำหนักที่ยืนยันแล้ว — Confirmed weights";
     await openWeights();                              // weights-summary.js
   }
+  else if (view === "payables") {
+    document.getElementById("list-title").textContent = "เจ้าหนี้ — Payables";
+    await openPayables();                             // payables.js
+  }
   else if (view === "management") {
     document.getElementById("list-title").textContent = "Management dashboard";
     await openManagement();                           // management.js
@@ -2049,6 +2057,7 @@ tabCalculatorBtn.addEventListener("click", () => switchPaceView("calculator"));
 tabWeighingBtn.addEventListener("click", () => switchPaceView("weighing"));
 tabConfirmBirdsBtn.addEventListener("click", () => switchPaceView("calculator"));
 tabManagementBtn.addEventListener("click", () => switchPaceView("management"));
+tabPayablesBtn.addEventListener("click", () => switchPaceView("payables"));
 tabWeightsBtn.addEventListener("click", () => { paceWeightsDept = "Accounting"; switchPaceView("weights"); });
 tabWeightsBuyBtn.addEventListener("click", () => { paceWeightsDept = "Purchasing"; switchPaceView("weights"); });
 tabWeightsMidBtn.addEventListener("click", () => { paceWeightsDept = "Middle office"; switchPaceView("weights"); });
