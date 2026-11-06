@@ -104,3 +104,15 @@ function weighTime(isoTs) {
   if (!isoTs) return "";
   return new Date(isoTs).toLocaleTimeString(WEIGH_LANG === "en" ? "en-GB" : "th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" });
 }
+
+// Phone layout (6 Nov 2026): below 700px these tables are shown as cards (see
+// the end of styles.css), so each cell carries its own column name.
+function weighLabelCells(root) {
+  if (!root) return;
+  root.querySelectorAll("table.w-table, table.w-lines").forEach((table) => {
+    const heads = [...table.querySelectorAll("thead th")].map((th) => th.textContent.trim());
+    table.querySelectorAll("tbody tr").forEach((tr) => {
+      [...tr.children].forEach((td, i) => { if (heads[i] && td.colSpan === 1) td.dataset.label = heads[i]; });
+    });
+  });
+}

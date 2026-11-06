@@ -1543,3 +1543,276 @@ header.app-header .notif-panel .n-mark { color: var(--muted); font-weight: 400; 
   .mg-charts { grid-template-columns: minmax(0, 1fr); }
   .mg-col:not(:nth-last-child(3n+1)) .mg-x { display: none; }
 }
+
+/* ===========================================================================
+   Phone layout (6 Nov 2026) — everything below 700px wide.
+   One-line header with the account in a panel, the department menu behind one
+   button, and the order and weighing tables shown as cards: the same cells
+   and inputs as on a computer, so nothing about saving changes.
+   =========================================================================== */
+.who { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; column-gap: 4px; }
+.who-details { display: contents; }
+.who-switch { order: 1; }
+.notif-btn { order: 2; }
+.who-id { order: 3; }
+.acct-btn, .pace-menu-btn { display: none; }
+
+@media (max-width: 700px) {
+  html, body { overflow-x: clip; }
+  /* iOS zooms the page on any field under 16px */
+  input, select, textarea,
+  #orders-grid .cell-edit { font-size: 16px; }
+
+  /* ---- header ---- */
+  header.app-header { padding: 8px 12px; gap: 8px; flex-wrap: nowrap; }
+  .brand-wrap { gap: 10px; min-width: 0; }
+  .brand-logo { height: 40px; padding: 2px 4px; }
+  #app-title { font-size: 1.05rem; white-space: nowrap; }
+  .brand-sub { display: none; }
+  .who { flex: none; flex-wrap: nowrap; gap: 8px; }
+  .notif-btn { margin-right: 0; }
+  .acct-btn { display: inline-flex; align-items: center; justify-content: center; order: 3;
+    width: 40px; height: 40px; border-radius: 50%; padding: 0; margin: 0; cursor: pointer;
+    border: 1px solid rgba(244, 239, 227, 0.35); background: transparent; color: #f4efe3; }
+  .acct-btn[aria-expanded="true"] { background: rgba(244, 239, 227, 0.16); }
+  .who-details, .who-details.open { display: none; }
+  .who-details.open { display: flex; flex-direction: column; align-items: stretch; gap: 2px;
+    position: absolute; top: calc(100% + 6px); right: 8px; z-index: 60;
+    width: min(320px, calc(100vw - 16px)); padding: 12px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(36, 25, 5, 0.22); }
+  .who-switch { order: 2; }
+  .who-id { display: contents; }
+  .who-account { order: 1; display: block; padding: 2px 4px 10px; margin-bottom: 4px;
+    border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+  header.app-header .who-details .who-account,
+  header.app-header .who-details .who-account span { color: var(--text); }
+  .who-dot, #who-sep { display: none; }
+  header.app-header .who-details .btn-link { color: var(--accent); display: block; width: 100%;
+    min-height: 44px; padding: 8px 4px; text-align: left; font-size: 1rem; }
+  #sign-out-btn { order: 3; }
+
+  /* ---- department menu ---- */
+  body.pace-mode main { padding: 10px 12px 0; gap: 10px; }
+  body.pace-mode .pace-nav { display: block; width: 100%; box-sizing: border-box; align-self: stretch; margin: 0; padding: 0; min-height: 0;
+    overflow: hidden; border: 1px solid #ddd3bd; border-radius: 12px; background: var(--panel); }
+  body.pace-mode .pace-nav.hidden, body.pace-mode.pace-one-section .pace-nav { display: none; }
+  .pace-menu-btn { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; margin: 0;
+    padding: 8px 14px; border: 0; background: none; color: var(--text); text-align: left; cursor: pointer; }
+  .pace-menu-icon { display: inline-flex; flex-direction: column; gap: 4px; flex: none; }
+  .pace-menu-icon i { display: block; width: 18px; height: 2px; border-radius: 1px; background: var(--accent); }
+  .pace-menu-where { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; font-weight: 600; }
+  .pace-menu-where small { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .pace-menu-caret { color: var(--accent); transition: transform 0.15s; }
+  .pace-nav.menu-open .pace-menu-caret { transform: rotate(180deg); }
+  .pace-nav .pace-nav-group { display: none; }
+  .pace-nav.menu-open .pace-nav-group:not(.hidden) { display: flex; flex-direction: column; align-items: stretch;
+    border: 0; border-radius: 0; box-shadow: none; margin: 0; border-top: 1px solid #e6dcc7; }
+  .pace-nav.menu-open .pace-nav-head { border: 0; padding: 10px 14px 4px; background: none; }
+  .pace-nav.menu-open .pace-nav-item { display: block; border: 0; white-space: normal; min-height: 46px;
+    padding: 10px 14px 10px 32px; border-radius: 0; text-align: left; width: 100%; margin: 0; }
+  .pace-nav.menu-open .pace-nav-item.hidden { display: none; }
+  .pace-nav.menu-open .pace-nav-item.active { box-shadow: inset 4px 0 0 var(--gold); }
+  /* the menu button already says which department this is */
+  body.pace-mode:not(.pace-one-section) .pace-crumb { display: none; }
+
+  /* ---- orders: toolbar ---- */
+  #list-title { font-size: 1.05rem; }
+  .orders-sub, #type-hint { display: none; }
+  .channel-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 8px -12px 10px; padding: 0 12px; }
+  .channel-tabs::-webkit-scrollbar { display: none; }
+  .channel-tabs .tab-btn { flex: none; white-space: nowrap; min-height: 38px; }
+  .orders-toolbar { gap: 8px; }
+  .orders-toolbar input[type="search"] { width: 100%; flex: 1 1 100%; min-height: 44px; }
+  .week-nav { flex: 1 1 100%; justify-content: space-between; }
+  .week-nav button:not(.btn-link) { width: 44px; height: 44px; }
+  .week-nav #week-label { min-width: 0; flex: 1 1 auto; }
+  #week-this { min-height: 44px; padding: 0 4px; margin: 0; }
+  .orders-toolbar-right { margin: 0; width: 100%; }
+  .orders-toolbar-right button { flex: 1 1 0; min-height: 44px; padding: 8px; }
+  .orders-toolbar .live-status { order: 5; flex: 1 1 100%; }
+
+  /* ---- orders: one card per order ---- */
+  body.pace-mode .table-scroll:has(#orders-grid) { overflow: visible; }
+  #orders-grid, #orders-grid tbody { display: block; width: 100%; background: none; border: 0; }
+  #orders-grid thead { display: none; }
+  #orders-grid tr { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); column-gap: 8px;
+    padding: 0 12px; background: var(--panel); border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
+  #orders-grid tr.order-first { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); border-radius: 12px 12px 0 0; }
+  #orders-grid tr.order-line:not(.order-first) { border-top: 1px dashed #d8cfbb; margin-top: 0; }
+  #orders-grid tr.add-line-row { border-top: 0; border-bottom: 1px solid var(--border); border-radius: 0 0 12px 12px; padding-bottom: 6px; }
+  #orders-grid tr:has(> .empty-cell[colspan]):not(.order-line) { display: block; padding: 18px 14px; margin-top: 4px;
+    border: 1px solid var(--border); border-radius: 12px; }
+  #orders-grid td, #orders-grid td.hdr-col, #orders-grid td.line-col {
+    display: block; grid-column: span 6; padding: 6px 0; text-align: left; min-width: 0; max-width: none; }
+  #orders-grid tr td, #orders-grid tr.order-first td, #orders-grid tr.order-alt td { border: 0; background: none; }
+  /* the colour per delivery day moves from the cells to the whole card */
+  #orders-grid tr.day-band-a { background: #eef6f2; }
+  #orders-grid tr.day-band-b { background: #eef2fb; }
+  #orders-grid tr.day-band-c { background: #fbf3e6; }
+  #orders-grid tr.day-band-d { background: #f6eefb; }
+  #orders-grid tr.day-band-e { background: #eef8fa; }
+  #orders-grid tr.day-band-a td, #orders-grid tr.day-band-b td, #orders-grid tr.day-band-c td,
+  #orders-grid tr.day-band-d td, #orders-grid tr.day-band-e td { background: none; }
+  #orders-grid .cell-edit { background: #fff; }
+  /* empty optional fields stay out of the way; "Edit" opens the full form */
+  #orders-grid td[data-lc="description"]:has(.cell-edit[data-orig=""]),
+  #orders-grid td[data-lc="packaging"]:has(.cell-edit[data-orig=""]),
+  #orders-grid td[data-lc="spec"]:has(.cell-edit[data-orig=""]) { display: none; }
+  #orders-grid td[data-col]::before, #orders-grid td[data-lc]::before {
+    display: block; margin-bottom: 2px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--muted); }
+  #orders-grid td[data-col="order_date"]::before { content: "Order date"; }
+  #orders-grid td[data-col="ref"]::before { content: "PO / Order no."; }
+  #orders-grid td[data-col="contact"]::before { content: "Contact"; }
+  #orders-grid td[data-col="phone"]::before { content: "Phone"; }
+  #orders-grid td[data-col="address"]::before { content: "Delivery notes / area"; }
+  #orders-grid td[data-col="delivery"]::before { content: "Delivery"; }
+  #orders-grid td[data-col="entity"]::before { content: "Company"; }
+  #orders-grid td[data-col="worksheet"]::before { content: "Work sheet"; }
+  #orders-grid td[data-lc="product"]::before { content: "Product"; }
+  #orders-grid td[data-lc="spec"]::before { content: "Weight spec"; }
+  #orders-grid td[data-lc="qty"]::before { content: "Qty"; }
+  #orders-grid td[data-lc="unit"]::before { content: "Unit"; }
+  #orders-grid td[data-lc="description"]::before { content: "Description"; }
+  #orders-grid td[data-lc="packaging"]::before { content: "Packaging"; }
+  /* order inside the card: who, when, which PO, then the rest, then the lines */
+  #orders-grid td[data-col="channel"]   { order: 1; padding-bottom: 0; }
+  #orders-grid td[data-col="customer"]  { order: 2; font-size: 1rem; padding-top: 0; }
+  #orders-grid td[data-col="delivery"]  { order: 3; }
+  #orders-grid td[data-col="ref"]       { order: 4; grid-column: span 3; }
+  #orders-grid td[data-col="order_date"]{ order: 5; grid-column: span 3; }
+  #orders-grid td[data-col="contact"]   { order: 6; grid-column: span 3; }
+  #orders-grid td[data-col="phone"]     { order: 7; grid-column: span 3; }
+  #orders-grid td[data-col="address"]   { order: 8; }
+  #orders-grid td[data-col="entity"]    { order: 9; grid-column: span 3; }
+  #orders-grid td[data-col="worksheet"] { order: 10; grid-column: span 3; }
+  #orders-grid td[data-lc="type"]       { order: 11; padding-bottom: 0; }
+  #orders-grid tr.order-first td[data-lc="type"] { margin-top: 6px; padding-top: 12px; border-top: 2px solid #d8cfbb; }
+  #orders-grid tr.order-line:not(.order-first):not(.add-line-row) { padding-top: 8px; padding-bottom: 4px; }
+  #orders-grid td[data-lc="product"]    { order: 12; font-weight: 600; padding-top: 4px; }
+  #orders-grid td[data-lc="product"]::before { display: none; }
+  #orders-grid td[data-lc="qty"]        { order: 13; grid-column: span 2; }
+  #orders-grid td[data-lc="unit"]       { order: 14; grid-column: span 2; }
+  #orders-grid td[data-lc="spec"]       { order: 15; grid-column: span 2; }
+  #orders-grid td[data-lc="description"]{ order: 16; grid-column: span 3; }
+  #orders-grid td[data-lc="packaging"]  { order: 17; grid-column: span 3; }
+  #orders-grid td.empty-cell { order: 11; }
+  #orders-grid .cell-edit { width: 100%; min-width: 0; min-height: 40px; box-sizing: border-box;
+    background: #fff; border: 1px solid #e6dcc7; border-radius: 8px; padding: 6px 8px; text-align: left; }
+  #orders-grid select.cell-edit { min-width: 0; padding-right: 4px; }
+  #orders-grid td.desc-cell textarea.cell-edit, #orders-grid textarea.cell-edit { min-height: 40px; }
+  #orders-grid td[data-col="delivery"] { display: grid; grid-template-columns: 3fr 2fr; column-gap: 8px; }
+  #orders-grid td[data-col="delivery"]::before { grid-column: 1 / -1; }
+  #orders-grid .worksheet-btn { min-height: 40px; }
+  #orders-grid .edit-order-btn { display: block; width: 100%; min-height: 44px; margin: 0; font-weight: 600; text-align: center; }
+
+  /* ---- weighing / confirmed weights: counters and filters ---- */
+  .w-counters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .w-counter { min-width: 0; }
+  .w-counter:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .w-panel:not(.w-table-panel) { padding: 14px; }
+  .ws-filters .ws-presets { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -14px; padding: 0 14px; }
+  .ws-filters .ws-presets::-webkit-scrollbar { display: none; }
+  .ws-chip { flex: none; white-space: nowrap; }
+  .ws-filters { padding: 12px 14px; gap: 10px; }
+  .ws-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: end; }
+  .ws-fields > label, .ws-fields > label:not(.ws-search) { min-width: 0; }
+  .ws-fields input[type=date], .ws-fields select { width: 100%; min-width: 0; box-sizing: border-box; }
+  .ws-fields .ws-search, .ws-fields .w-btn { grid-column: 1 / -1; }
+  .ws-fields .w-btn { min-height: 44px; }
+
+  /* ---- weighing / confirmed weights: one card per paper ---- */
+  .w-table-panel .w-scroll { overflow: visible; }
+  .w-table, .w-table tbody { display: block; width: 100%; }
+  .w-table thead { display: none; }
+  .w-table tr { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); column-gap: 8px; padding: 2px 14px; }
+  .w-table tr.w-first { padding-top: 10px; border-top: 6px solid var(--bg); }
+  .w-table tr:not(.w-first) { border-top: 1px dashed #e0d7c3; }
+  .w-table tbody td { display: block; grid-column: span 3; padding: 4px 0; white-space: normal;
+    text-align: left; min-width: 0; overflow-wrap: anywhere; }
+  .w-table tbody tr td, .w-table tbody tr.w-first td { border: 0; }
+  .w-table tbody td:empty { display: none; }
+  .w-table tbody td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 1px;
+    font-size: 0.68rem; font-weight: 700; letter-spacing: 0.03em; color: var(--muted); }
+  .w-table td.w-empty { grid-column: 1 / -1; text-align: center; }
+  .w-table td.w-wrap { grid-column: 1 / -1; min-width: 0; font-weight: 600; order: 20; }
+  .w-table td.w-wrap::before { display: none !important; }
+  .w-table td.w-num { grid-column: span 2; order: 21; }
+
+  #weighing-table td:nth-child(4), #weights-table td:nth-child(5) { grid-column: 1 / -1; order: -2; font-size: 1rem; font-weight: 700; }
+  #weighing-table td:nth-child(4)::before, #weights-table td:nth-child(5)::before { display: none; }
+  /* status, who confirmed and the actions belong to the paper, so they stay above its lines */
+  #weighing-table td:nth-child(9), #weighing-table td:nth-child(10) { order: 2; }
+  #weighing-table td:nth-child(11) { order: 30; grid-column: 1 / -1; }
+  #weighing-table .w-row-acts { min-height: 40px; }
+  #weighing-table .w-row-acts .btn-link { min-height: 40px; }
+  #weighing-table td:nth-child(11)::before { display: none; }
+
+  /* confirmed weights: the checkbox sits beside the client name */
+  #weights-table tr { position: relative; }
+  #weights-table tr.w-first { padding-left: 52px; }
+  #weights-table tr:not(.w-first) { padding-left: 52px; }
+  #weights-table td.ws-cb-col { position: absolute; left: 14px; top: 10px; padding: 0; }
+  #weights-table td.ws-cb-col::before { display: none; }
+  #weights-table td.ws-cb-col .ws-cb { width: 26px; height: 26px; }
+  #weights-table td:nth-child(10), #weights-table td:nth-child(11), #weights-table td:nth-child(12) { order: 2; }
+  #weights-table tr.ws-st-checked { background: #e4efe6; }
+  #weights-table tr.ws-st-changed { background: #fcebd3; }
+  #weights-table tr.ws-st-checked td, #weights-table tr.ws-st-changed td,
+  #weights-table tr.ws-st-checked:hover td, #weights-table tr.ws-row:hover td,
+  #weights-table tr.ws-st-checked td:first-child, #weights-table tr.ws-st-changed td:first-child { background: none; box-shadow: none; }
+
+  /* ---- paper check screen: one block per product line ---- */
+  .w-lines, .w-lines tbody { display: block; width: 100%; border: 0; }
+  .w-lines thead { display: none; }
+  .w-lines tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); position: relative; }
+  .w-lines tr.w-flag-row { display: block; border-top: 0; padding-top: 0; }
+  .w-lines td { display: block; padding: 2px 0; border: 0; text-align: left; min-width: 0; }
+  .w-lines td[data-label]::before { content: attr(data-label); display: block; font-size: 0.68rem; font-weight: 700; color: var(--muted); }
+  .w-lines tr.w-line > td:first-child { grid-column: 1 / -1; padding-right: 44px; font-weight: 600; }
+  .w-lines tr.w-line > td:last-child { position: absolute; top: 8px; right: 10px; padding: 0; }
+  .w-lines input:not([type=checkbox]) { width: 100%; min-width: 0; box-sizing: border-box; min-height: 44px; }
+  .w-lines .w-x { min-width: 40px; min-height: 40px; }
+
+  /* ---- order form ---- */
+  .table-scroll:has(> .order-lines-table) { overflow: visible; }
+  .order-lines-table, .order-lines-table tbody { display: block; width: 100%; background: none; border: 0; }
+  .order-lines-table thead { display: none; }
+  .order-lines-table tr { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); column-gap: 8px; position: relative;
+    margin-bottom: 10px; padding: 8px 12px 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; }
+  .order-lines-table td { display: block; grid-column: span 3; padding: 4px 0; border: 0; min-width: 0; }
+  .order-lines-table td::before { display: block; margin-bottom: 2px; font-size: 0.68rem; font-weight: 700;
+    letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  .order-lines-table td:nth-child(1)::before { content: "Type"; }
+  .order-lines-table td:nth-child(2)::before { content: "Product"; }
+  .order-lines-table td:nth-child(3)::before { content: "Weight"; }
+  .order-lines-table td:nth-child(4)::before { content: "Quantity"; }
+  .order-lines-table td:nth-child(5)::before { content: "Unit"; }
+  .order-lines-table td:nth-child(6)::before { content: "Description"; }
+  .order-lines-table td:nth-child(7)::before { content: "Packaging"; }
+  .order-lines-table td:nth-child(1) { grid-column: 1 / -1; padding-right: 44px; }
+  .order-lines-table td:nth-child(2) { grid-column: 1 / -1; }
+  .order-lines-table td:nth-child(3), .order-lines-table td:nth-child(4), .order-lines-table td:nth-child(5) { grid-column: span 2; }
+  .order-lines-table td:last-child { position: absolute; top: 6px; right: 6px; padding: 0; }
+  .order-lines-table input, .order-lines-table select { width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box;
+    border: 1px solid #e6dcc7; border-radius: 8px; background: #fff; }
+  .order-lines-table .line-remove { min-width: 40px; min-height: 40px; font-size: 1.3rem; }
+  #add-order-line-btn { width: 100%; min-height: 44px; }
+  .order-entry-head { flex-wrap: wrap; gap: 8px; }
+  .order-entry-actions { width: 100%; flex-wrap: wrap; }
+  .order-entry-actions button { flex: 1 1 0; min-height: 44px; padding: 8px; }
+
+  /* ---- other ---- */
+  /* CRM side: tabs stay on one line, the add button gets its own row */
+  .toolbar { flex-wrap: wrap; gap: 8px; }
+  .toolbar .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; max-width: 100%; }
+  .toolbar .tabs::-webkit-scrollbar { display: none; }
+  .toolbar .tab-btn { flex: none; white-space: nowrap; min-height: 38px; }
+  #new-client-btn { width: 100%; min-height: 44px; margin-top: 0; }
+  body.pace-mode .page-footer { padding: 8px 12px 90px; }
+}
+@media (max-width: 340px) {
+  #app-title { font-size: 0.95rem; }
+  .brand-logo { height: 34px; }
+}

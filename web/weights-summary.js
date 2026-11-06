@@ -272,6 +272,7 @@ function wsRender() {
   </section>
 
   <div id="ws-results">${wsResultsHtml()}</div>`;
+  weighLabelCells(wsSection);
 }
 
 function wsResultsHtml() {
@@ -353,6 +354,7 @@ function wsRenderResults() {
   const sc = el.querySelector(".w-scroll");
   const left = sc ? sc.scrollLeft : 0;
   el.innerHTML = wsResultsHtml();
+  weighLabelCells(el);
   const sc2 = el.querySelector(".w-scroll");
   if (sc2 && left) sc2.scrollLeft = left;
 }

@@ -1948,6 +1948,40 @@ function setPaceTabsForRole() {
   document.getElementById("pace-group-accounting").classList.toggle("hidden", !w || !["accounting", "admin"].includes(role));
 }
 
+// Phone menu (6 Nov 2026): on a phone the department menu folds behind one
+// button that says where you are. With a single section there is nothing to
+// choose, so the whole menu goes away (body.pace-one-section, phone CSS only).
+function updatePaceMenuButton(dept) {
+  const active = [...paceTabs.querySelectorAll(".pace-nav-item.active")]
+    .find(b => !b.classList.contains("hidden"));
+  document.getElementById("pace-menu-dept").textContent = dept || "";
+  document.getElementById("pace-menu-page").textContent =
+    active && active.firstChild ? active.firstChild.textContent.trim() : "";
+  const count = paceTabs.querySelectorAll(".pace-nav-item:not(.hidden)").length;
+  document.body.classList.toggle("pace-one-section", count <= 1);
+  setPaceMenuOpen(false);
+}
+function setPaceMenuOpen(open) {
+  paceTabs.classList.toggle("menu-open", open);
+  document.getElementById("pace-menu-btn").setAttribute("aria-expanded", open ? "true" : "false");
+}
+document.getElementById("pace-menu-btn").addEventListener("click", () =>
+  setPaceMenuOpen(!paceTabs.classList.contains("menu-open")));
+
+// Phone header (6 Nov 2026): the account panel behind the person icon.
+(function () {
+  const btn = document.getElementById("acct-btn");
+  const panel = document.getElementById("who-details");
+  const setOpen = open => {
+    panel.classList.toggle("open", open);
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+  };
+  btn.addEventListener("click", e => { e.stopPropagation(); setOpen(!panel.classList.contains("open")); });
+  panel.addEventListener("click", e => { if (e.target.closest("button")) setOpen(false); });
+  document.addEventListener("click", e => { if (!panel.contains(e.target)) setOpen(false); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") setOpen(false); });
+})();
+
 async function switchPaceView(view) {
   paceView = view;
   setPaceTabsForRole();
@@ -1978,6 +2012,7 @@ async function switchPaceView(view) {
     : PACE_DEPT[view];
   crumb.textContent = dept || "";
   crumb.classList.toggle("hidden", !dept);
+  updatePaceMenuButton(dept);
   orderEntrySection.classList.add("hidden");
   ordersSection.classList.toggle("hidden", view !== "orders");
   calculatorSection.classList.toggle("hidden", view !== "calculator");
@@ -2752,18 +2787,18 @@ function renderOrdersGrid() {
     ].filter(visibleCols).map(({ key, html }) => `<td class="hdr-col" data-col="${key}" rowspan="${span}">${html}</td>`).join("");
 
     const lineRow = (l) => l ? `
-      <td class="line-col"><span class="type-pill">${escapeHtml(l.type)}</span></td>
-      <td class="line-col prod-cell">${
+      <td class="line-col" data-lc="type"><span class="type-pill">${escapeHtml(l.type)}</span></td>
+      <td class="line-col prod-cell" data-lc="product">${
         l.order_products
           ? escapeHtml(l.order_products.name)
           : l.product_name
             ? `${escapeHtml(l.product_name)} <span class="unlinked" title="Not on the product list — correct the name or add the product">•</span>`
             : "—"}</td>
-      <td class="line-col">${
+      <td class="line-col" data-lc="spec">${
         canEnter
           ? editCell("sale_order_lines", l.id, "weight_label", l.weight_label, { placeholder: "—" })
           : escapeHtml(l.weight_label || "—")}</td>
-      <td class="line-col num">${
+      <td class="line-col num" data-lc="qty">${
         canEnter
           ? (l.quantity_tbc
               // Left blank and untouched, this still reads and saves as
@@ -2776,15 +2811,15 @@ function renderOrdersGrid() {
           : (l.quantity_tbc
               ? `<span class="tbc-pill" title="Standing order — this week's quantity not confirmed yet">TBC</span>`
               : (l.quantity ?? "—"))}</td>
-      <td class="line-col">${
+      <td class="line-col" data-lc="unit">${
         canEnter
           ? editSelect("sale_order_lines", l.id, "unit", l.unit, ["Kg", "Pcs", "Grams", "Pack", "Jar"])
           : escapeHtml(l.unit || "—")}</td>
-      <td class="line-col desc-cell">${
+      <td class="line-col desc-cell" data-lc="description">${
         canEnter
           ? editCell("sale_order_lines", l.id, "description", l.description, { multiline: true, placeholder: "—" })
           : escapeHtml(l.description || "—")}</td>
-      <td class="line-col">${
+      <td class="line-col" data-lc="packaging">${
         canEnter
           ? editCell("sale_order_lines", l.id, "packaging", l.packaging, { placeholder: "—" })
           : escapeHtml(l.packaging || "—")}</td>`

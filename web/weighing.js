@@ -340,6 +340,7 @@ function weighSchedulePoll() {
 function weighRender() {
   if (W.view === "check" && weighPaper(W.openId)) weighRenderCheck();
   else weighRenderDay();
+  weighLabelCells(weighSection);
 }
 
 function weighCounts() {
