@@ -1887,3 +1887,51 @@ header.app-header .notif-panel .n-mark { color: var(--muted); font-weight: 400; 
   .py-grid { grid-template-columns: minmax(0, 1fr); }
   .py-batch .btn-primary, .py-batch .btn-secondary { flex: 1 1 auto; }
 }
+
+/* ---------------------------------------------------------------------------
+   Postponing production (Migration 027, 10 Nov 2026)
+   Violet marks a postponed order everywhere: weighing screen, middle office
+   list. Contrast checked: #4b2e83 on #ece6f5 = 8.5:1; white on #5b3a96 = 8.4:1.
+   --------------------------------------------------------------------------- */
+#weighing-section { --w-violet-bg: #ece6f5; --w-violet-bd: #d3c6ea; --w-violet-fg: #4b2e83; }
+.w-pill-violet { background: var(--w-violet-bg); color: var(--w-violet-fg); }
+.w-c-violet { background: var(--w-violet-bg); border-color: var(--w-violet-bd); color: var(--w-violet-fg); }
+.w-c-violet strong { color: var(--w-violet-fg); }
+.w-note-violet { background: var(--w-violet-bg); color: var(--w-violet-fg); border: 1px solid var(--w-violet-bd); }
+.w-moved { display: inline-block; margin-left: 4px; font-size: 0.74rem; font-weight: 600; color: var(--w-violet-fg); white-space: nowrap; }
+.w-btn-violet { background: #5b3a96; border-color: #5b3a96; color: #fff; }
+.w-btn-violet:hover { background: #4b2e83; }
+.w-btn-sm { min-height: 34px; padding: 4px 10px; font-size: 0.82rem; }
+.w-pp-list { margin: 6px 0; padding-left: 18px; }
+.w-pp-list li { margin: 2px 0; }
+.w-link-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 6px 0; }
+.w-pp-form { border: 2px solid var(--w-violet-bd); }
+.w-pp-form h3 { margin: 0 0 4px; font-size: 1rem; color: var(--w-violet-fg); }
+.w-pp-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin-top: 10px; }
+.w-pp-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 0.86rem; }
+.w-pp-fields input, .w-pp-fields select { min-height: 40px; }
+.w-pp-wide, .w-pp-full { grid-column: 1 / -1; }
+.w-pp-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.w-moved-out h3 { color: var(--w-violet-fg); }
+@media (max-width: 700px) { .w-pp-fields { grid-template-columns: 1fr; } }
+
+#postponed-section {
+  display: flex; flex-direction: column; gap: 14px;
+  font-family: -apple-system, "Segoe UI", "Noto Sans Thai", "Leelawadee UI", Tahoma, sans-serif;
+}
+#postponed-section h3 { margin: 0 0 6px; font-size: 1.02rem; }
+#postponed-section p { margin: 0; }
+.pp-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 14px; margin-top: 10px; }
+.pp-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 0.86rem; }
+.pp-fields input, .pp-fields select { min-height: 40px; }
+.pp-wide { grid-column: span 2; }
+.pp-full { grid-column: 1 / -1; }
+.pp-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 12px; }
+.pp-ok { padding: 10px 14px; border-radius: 8px; background: #e3f1e7; color: #1e6b3a; font-size: 0.88rem; }
+.pp-row-actions { white-space: nowrap; }
+.pp-row-actions .mg-go + .mg-go { margin-left: 10px; }
+.pp-src { display: inline-block; font-size: 0.74rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.pp-src-factory { background: #ece6f5; color: #4b2e83; }
+.pp-src-register { background: #efe8d8; color: #6b5f4a; }
+@media (max-width: 900px) { .pp-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .pp-fields { grid-template-columns: 1fr; } .pp-wide { grid-column: auto; } }

@@ -20,6 +20,7 @@ const MG = {
   preset: "today",
   company: "all",
   data: null,
+  postponed: null,     // management_postponements() — Migration 027
   error: null,
   saving: false,
   showAllClients: false,
@@ -82,8 +83,13 @@ async function mgLoad() {
   clearTimeout(MG.timer);
   const preset = MG.preset, company = MG.company;
   const [from, to] = mgRange();
-  const { data, error } = await sb.rpc("management_dashboard", { p_from: from, p_to: to, p_company: company });
+  const [res, pp] = await Promise.all([
+    sb.rpc("management_dashboard", { p_from: from, p_to: to, p_company: company }),
+    sb.rpc("management_postponements", { p_from: from, p_to: to, p_company: company }),
+  ]);
+  const { data, error } = res;
   if (!mgOpen() || preset !== MG.preset || company !== MG.company) return;   // closed, or a newer filter is loading
+  MG.postponed = pp.error ? null : pp.data;
   if (error) {
     const missing = /management_dashboard|schema cache|does not exist/i.test(error.message || "");
     MG.error = missing
@@ -96,7 +102,7 @@ async function mgLoad() {
     MG.error = null;
     MG.data = data;
     MG.updatedAt = new Date();
-    const sig = JSON.stringify(data);
+    const sig = JSON.stringify([data, MG.postponed]);
     const typing = mgSection.contains(document.activeElement) && document.activeElement.tagName === "INPUT";
     if (sig !== MG.sig && !typing) { MG.sig = sig; mgDraw(); }
     else mgDrawUpdated();
@@ -136,6 +142,7 @@ function mgAge(ts) {
 function mgStatusLabel(p) {
   if (p.status === "failed") return T("อ่านไม่สำเร็จ", "Reading failed");
   if (p.status === "read") return p.reopened_at ? T("เปิดแก้ไข", "Reopened") : T("รอตรวจ", "To check");
+  if (p.status === "postponed") return T("เลื่อนผลิต", "Postponed");
   return T("กำลังอ่าน", "Being read");
 }
 
@@ -196,7 +203,7 @@ function mgTile(o) {
 
 function mgTilesHtml(d) {
   const p = d.papers, l = d.lines, o = d.open, a = d.accounting;
-  const openInPeriod = Number(p.to_check) + Number(p.processing) + Number(p.failed);
+  const openInPeriod = Number(p.total) - Number(p.confirmed);   // to check, being read, failed or postponed
   const off = Number(l.under) + Number(l.over);
   return `<div class="mg-tiles" id="mg-tiles">
     ${mgTile({
@@ -288,6 +295,52 @@ function mgOpenHtml(d) {
   </div>`;
 }
 
+// Postponed orders (Migration 027): production's postponements on the
+// weighing screen and the middle office register, counted on the delivery
+// date that was missed.
+function mgPostponedHtml() {
+  const p = MG.postponed;
+  if (!p) {
+    return `<div class="mg-msg" id="mg-postponed-missing">${T("ส่วนออเดอร์ที่ถูกเลื่อนยังไม่พร้อม: กรุณารัน Migration 027 ใน Supabase", "Postponed orders are not available yet: run Migration 027 in Supabase.")}</div>`;
+  }
+  const reasons = p.by_reason.map(r => `<tr>
+      <td>${escapeHtml(ppReasonLabel(r.reason))}</td>
+      <td class="mg-n">${mgN(r.times)}</td><td class="mg-n">${mgKg(r.kg)}</td>
+      <td class="mg-n">${r.avg_delay === null ? "—" : mgN(r.avg_delay, 1)}</td></tr>`).join("");
+  const recent = p.recent.map(r => `<tr>
+      <td>${escapeHtml(ppDate(r.original_date))}</td>
+      <td>${r.new_date ? escapeHtml(ppDate(r.new_date)) : `<strong>${T("ยังไม่มีวันใหม่", "No new date yet")}</strong>`}</td>
+      <td>${escapeHtml(r.customer_name || "—")}</td><td>${escapeHtml(r.po_number || "—")}</td>
+      <td>${escapeHtml(ppReasonLabel(r.reason))}</td>
+      <td>${r.source === "production" ? T("ฝ่ายผลิต", "Production") : T("มิดเดิลออฟฟิศ", "Middle office")}</td></tr>`).join("");
+  const repeat = p.repeat_clients.length
+    ? `<p class="mg-small" id="mg-repeat"><span class="mg-strong">${T("ลูกค้าที่ถูกเลื่อนซ้ำ: ", "Clients postponed more than once: ")}</span>${p.repeat_clients.map(c => `${escapeHtml(c.client)} (${mgN(c.times)})`).join(", ")}</p>` : "";
+  const prod = Number(p.production);
+  const total = Number(p.total), ours = Number(p.our_side);
+  return `<div class="mg-card" id="mg-postponed">
+    <div class="mg-card-head"><h3>${T("ออเดอร์ที่ถูกเลื่อน", "Postponed orders")}</h3>
+      <button type="button" class="mg-go" data-act="go" data-view="postponed">${T("เปิดรายการ ›", "Open the list ›")}</button></div>
+    <div class="mg-tiles">
+      ${mgTile({ id: "mg-t-pp-total", label: T("ถูกเลื่อน", "Postponed"), value: mgN(total),
+        sub: T(`ฝ่ายผลิตเลื่อน ${mgN(p.by_factory)} · มิดเดิลออฟฟิศบันทึก ${mgN(total - Number(p.by_factory))}`,
+               `${mgN(p.by_factory)} by production · ${mgN(total - Number(p.by_factory))} recorded by the middle office`) })}
+      ${mgTile({ id: "mg-t-pp-prod", label: T("เพราะผลิตไม่ทัน", "Because production was late"), value: mgN(prod),
+        state: prod > 0 ? "alert" : "good",
+        stateText: prod > 0 ? T("⚠ ต้องติดตาม", "⚠ Needs follow-up") : T("✓ ไม่มี", "✓ None"),
+        sub: T(`ฝั่งเรา ${mgN(ours)} · ลูกค้าขอ ${mgN(total - ours)} · ${mgKg(p.kg)} กก.`, `${mgN(ours)} on our side · ${mgN(total - ours)} client request · ${mgKg(p.kg)} kg`) })}
+      ${mgTile({ id: "mg-t-pp-open", label: T("ยังไม่มีวันส่งใหม่", "No new date yet"), value: mgN(p.no_new_date),
+        state: Number(p.no_new_date) > 0 ? "alert" : "",
+        sub: p.avg_delay === null ? T("เลื่อนเฉลี่ย: —", "Average delay: —") : T(`เลื่อนเฉลี่ย ${mgN(p.avg_delay, 1)} วัน`, `Average delay: ${mgN(p.avg_delay, 1)} days`) })}
+    </div>
+    ${reasons ? `<div class="mg-table-wrap"><table class="mg-table" id="mg-pp-reasons"><thead><tr><th>${T("สาเหตุ", "Reason")}</th><th class="mg-n">${T("จำนวน", "Orders")}</th><th class="mg-n">${T("กก. ที่สั่ง", "Kg ordered")}</th><th class="mg-n">${T("เลื่อนเฉลี่ย (วัน)", "Average delay (days)")}</th></tr></thead><tbody>${reasons}</tbody></table></div>` : ""}
+    ${repeat}
+    ${recent ? `<details class="mg-details"><summary>${T("ดูรายการล่าสุด", "See the latest postponements")}</summary><div class="mg-table-wrap"><table class="mg-table"><thead><tr><th>${T("วันส่งเดิม", "Original delivery")}</th><th>${T("วันส่งใหม่", "New delivery")}</th><th>${T("ลูกค้า", "Client")}</th><th>PO</th><th>${T("สาเหตุ", "Reason")}</th><th>${T("ที่มา", "Source")}</th></tr></thead><tbody>${recent}</tbody></table></div></details>` : ""}
+    <p class="mg-small mg-muted">${T(
+      `นับตามวันส่งเดิมที่พลาด รวมที่ฝ่ายผลิตเลื่อนในหน้าชั่งน้ำหนัก และที่มิดเดิลออฟฟิศบันทึก ตรวจเทียบอัตโนมัติ: ใบงานที่ถ่ายรูปหลังวันส่งที่พิมพ์บนใบโดยไม่มีการเลื่อน ${mgN(p.late_papers)} ใบ (ควรตรวจสอบ ยังไม่ใช่หลักฐาน)`,
+      `Counted on the delivery date that was missed, from production's postponements on the weighing screen and the middle office register. Automatic cross-check: ${mgN(p.late_papers)} papers photographed after the delivery date printed on them with no postponement recorded (worth checking, not proof).`)}</p>
+  </div>`;
+}
+
 function mgSalesHtml(d) {
   const reps = d.sales.reps, un = d.sales.unassigned;
   const keys = ["clients", "active", "at_risk", "dormant", "pipeline", "lost"];
@@ -367,6 +420,7 @@ function mgDraw() {
     ${mgTilesHtml(d)}
     ${mgChartsHtml(d)}
     ${mgOpenHtml(d)}
+    ${mgPostponedHtml()}
     ${mgClientsHtml(d)}
     ${mgSalesHtml(d)}
     ${mgNoteHtml(d)}`;

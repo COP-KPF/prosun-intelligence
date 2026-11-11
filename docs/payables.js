@@ -114,7 +114,7 @@ function pyTabs() {
   if (p.approve) tabs.push({ key: "approve", label: T("อนุมัติ", "Approve"), n: c((r) => r.status === "proposed") });
   if (p.review)  tabs.push({ key: "review",  label: T("ตรวจ", "Review"), n: c((r) => r.status === "submitted") });
   if (p.select || p.approve) tabs.push({ key: "select", label: T("เลือกจ่าย", "Select"), n: c((r) => r.status === "reviewed") });
-  if (p.pay)     tabs.push({ key: "pay",     label: T("จ่าย", "Pay"), n: c((r) => r.status === "approved") });
+  if (p.pay)     tabs.push({ key: "pay",     label: T("จ่าย", "Pay"), n: c((r) => r.status === "approved" && !pyApprovedByMe(r)) });
   if (p.scan)    tabs.push({ key: "scan",    label: T("สแกนและตรวจ", "Scan and check"), n: c((r) => PY_DRAFT.includes(r.status)) });
   if (p.read)    tabs.push({ key: "summary", label: T("สรุป", "Summary"), n: 0 });
   if (p.read)    tabs.push({ key: "all",     label: T("บิลทั้งหมด", "All bills"), n: 0 });
@@ -319,8 +319,14 @@ function pyApproveHtml() {
   </div>`;
 }
 
+// Nobody records the payment of a bill they approved (Migration 025), so those
+// bills are listed apart for the approver.
+function pyApprovedByMe(r) { return !!PY.perms.me && r.approved_by === PY.perms.me; }
+
 function pyPayHtml() {
-  const rows = pyOrderDue(pyFiltered().filter((r) => r.status === "approved"));
+  const all = pyOrderDue(pyFiltered().filter((r) => r.status === "approved"));
+  const rows = all.filter((r) => !pyApprovedByMe(r));
+  const mine = all.filter(pyApprovedByMe);
   return `<div class="mg-card py-card">
     <h3>${T("อนุมัติแล้ว รอจ่าย", "Approved, to pay")}</h3>
     <p class="mg-muted mg-small">${T("จ่ายผ่านธนาคารตามปกติ แล้วบันทึกวันที่และเลขอ้างอิงที่นี่", "Pay through the bank as usual, then record the date and reference here.")}</p>
@@ -329,7 +335,12 @@ function pyPayHtml() {
       <label>${T("วันที่จ่าย", "Paid on")} <input type="date" data-field="paidDate" value="${escapeAttr(PY.paidDate)}" max="${weighBangkokToday()}"></label>
       <input type="text" class="py-grow" data-field="paidRef" placeholder="${T("เลขอ้างอิงธนาคาร", "Bank reference")}" value="${escapeAttr(PY.paidRef)}">
       <button type="button" class="btn-primary" data-act="paid" ${pyPicked(rows).length ? "" : "disabled"}>${T("บันทึกว่าจ่ายแล้ว", "Record as paid")}</button></div>` : ""}
-  </div>`;
+  </div>
+  ${mine.length ? `<div class="mg-card py-card">
+    <h3>${T("คุณเป็นผู้อนุมัติ", "Approved by you")} <span class="mg-muted">· ${pyMoney(pySum(mine))} THB</span></h3>
+    <p class="mg-muted mg-small">${T("ผู้อนุมัติบันทึกการจ่ายของบิลตัวเองไม่ได้ Khun Kirana เป็นผู้บันทึก", "The person who approved a bill cannot record its payment: Khun Kirana records these.")}</p>
+    ${pyTableHtml(mine, { planned: true })}
+  </div>` : ""}`;
 }
 
 function pyQrHtml() {
@@ -612,7 +623,9 @@ function pyActionsHtml() {
     needsComment = true;
   }
   let pay = "";
-  if (p.pay && b.status === "approved") {
+  if (p.pay && b.status === "approved" && pyApprovedByMe(b)) {
+    pay = `<p class="mg-muted mg-small">${T("คุณเป็นผู้อนุมัติบิลนี้ Khun Kirana เป็นผู้บันทึกการจ่าย", "You approved this bill, so Khun Kirana records its payment.")}</p>`;
+  } else if (p.pay && b.status === "approved") {
     pay = `<div class="py-batch">
       <label>${T("วันที่จ่าย", "Paid on")} <input type="date" data-field="paidDate" value="${escapeAttr(PY.paidDate)}" max="${weighBangkokToday()}"></label>
       <input type="text" class="py-grow" data-field="paidRef" placeholder="${T("เลขอ้างอิงธนาคาร", "Bank reference")}" value="${escapeAttr(PY.paidRef)}">

@@ -33,6 +33,9 @@ const NOTIF_KIND = {
   weighing_changed:     { label: "Changed",      cls: "n-tag-red" },
   weighing_reconfirmed: { label: "Re-confirmed", cls: "n-tag-green" },
   weighing_deleted:     { label: "Deleted",      cls: "n-tag-red" },
+  paper_postponed:      { label: "Postponed",    cls: "n-tag-amber" },
+  order_postponed:      { label: "Postponed",    cls: "n-tag-amber" },
+  order_postponed_changed: { label: "Postponement changed", cls: "n-tag-red" },
   payable_proposed:     { label: "To approve",   cls: "n-tag-amber" },
   payable_approved:     { label: "Approved",     cls: "n-tag-green" },
   payable_held:         { label: "Held",         cls: "n-tag-amber" },
@@ -164,7 +167,7 @@ function notifRender() {
         <button type="button" class="n-close" data-n="close" aria-label="Close">×</button>
       </span>
     </div>
-    <p class="n-intro">Payables, weighing changes after confirmation, and deleted papers.</p>
+    <p class="n-intro">Payables, postponed orders, weighing changes after confirmation, and deleted papers.</p>
     ${N.items.length ? `<ul class="n-list">${N.items.map((n) => {
       const k = NOTIF_KIND[n.kind] || { label: "Notice", cls: "n-tag-amber" };
       const detail = notifDetailsHtml(n);
@@ -176,6 +179,7 @@ function notifRender() {
         <div class="n-acts">
           ${detail ? `<details><summary>Details</summary>${detail}</details>` : ""}
           ${n.paper_id && n.kind !== "weighing_deleted" ? `<button type="button" class="btn-link" data-n="open" data-id="${escapeAttr(n.id)}">Open paper ›</button>` : ""}
+          ${String(n.kind).startsWith("order_postponed") ? `<button type="button" class="btn-link" data-n="open-postponed" data-id="${escapeAttr(n.id)}">Open postponed orders ›</button>` : ""}
           ${String(n.kind).startsWith("payable_") ? `<button type="button" class="btn-link" data-n="open-payables" data-id="${escapeAttr(n.id)}">Open payables ›</button>` : ""}
           ${n.read_at ? "" : `<button type="button" class="btn-link n-mark" data-n="read" data-id="${escapeAttr(n.id)}">Mark as read</button>`}
         </div>
@@ -216,6 +220,18 @@ notifPanel.addEventListener("click", async (e) => {
   if (act === "close") { notifClose(); return; }
   if (act === "read-all") { await notifMarkRead(N.items.filter((n) => !n.read_at).map((n) => n.id)); return; }
   if (act === "read") { await notifMarkRead([el.dataset.id]); return; }
+  if (act === "open-postponed") {
+    await notifMarkRead([el.dataset.id]);
+    notifClose();
+    const chooser = document.getElementById("system-chooser");
+    if (chooser && !chooser.classList.contains("hidden")) {
+      chooser.classList.add("hidden");
+      document.querySelector(".toolbar").classList.remove("hidden");
+      document.querySelector(".page-footer").classList.remove("hidden");
+    }
+    await switchPaceView("postponed");
+    return;
+  }
   if (act === "open-payables") {
     await notifMarkRead([el.dataset.id]);
     notifClose();
