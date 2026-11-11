@@ -25,6 +25,13 @@
 // which returns confirmed papers only — a paper still being checked never
 // appears here.
 //
+// Postponing a delivery (Migration 028, 11 Nov 2026): in the middle office's
+// view (sale support, or admin from the Middle office menu) each paper has a
+// "เลื่อนส่ง / Postpone" button. The weights stay as confirmed; only the
+// delivery date moves, with a reason that must be chosen (Other needs a
+// comment). The paper then appears under its new delivery date, the move is
+// listed in Middle office › Postponed orders, and admin is notified.
+//
 // Loaded after weighing.js (reuses weighDiff, weighFmt, weighUnit,
 // weighCompanyShort, weighShortDate, weighLangHtml's language, T) and before
 // app.js; uses app.js globals at run time (sb, myProfile, escapeHtml,
@@ -48,7 +55,15 @@ const WS = {
   updatedAt: null,     // last successful load
   dept: "accounting",  // whose "checked" marks: accounting | purchasing | middle_office
   show: "all",         // all | todo (not checked, or changed since) | done
+  hist: {},            // paper id → its postponement history (middle office and admin can read it)
+  ppForm: null,        // { paper, date, reason, note, error } — the open "postpone delivery" form
 };
+
+// Only the middle office postpones a delivery here (the database checks too).
+function wsCanPostpone() {
+  const r = myProfile && myProfile.role;
+  return WS.dept === "middle_office" && (r === "sale_support" || r === "admin");
+}
 
 const WS_DEPT_LABEL = {
   accounting:    () => T("บัญชี", "Accounting"),
@@ -140,19 +155,20 @@ function wsSchedule() {
   if (!wsOpen()) return;
   WS.timer = setTimeout(async () => {
     if (!wsOpen()) return;
-    if (document.hidden || WS.loading) { wsSchedule(); return; }
+    if (document.hidden || WS.loading || WS.ppForm) { wsSchedule(); return; }
     await wsLoad({ silent: true });
   }, WS_REFRESH_MS);
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && wsOpen() && !WS.loading) wsLoad({ silent: true });
+  if (!document.hidden && wsOpen() && !WS.loading && !WS.ppForm) wsLoad({ silent: true });
 });
 
 document.getElementById("switch-system-btn").addEventListener("click", closeWeights);
 document.getElementById("sign-out-btn").addEventListener("click", () => {
   closeWeights();
   WS.from = WS.to = null; WS.preset = "today"; WS.rows = []; WS.q = ""; WS.company = "all"; WS.show = "all"; WS.sig = "";
+  WS.hist = {}; WS.ppForm = null;
 });
 
 
@@ -164,7 +180,7 @@ async function wsLoad(opts = {}) {
   const silent = !!opts.silent;
   const from = WS.from, to = WS.to, dept = WS.dept;
   WS.loading = true;
-  if (!silent) WS.message = null;
+  if (!silent && !opts.keepMessage) WS.message = null;
   const [lines, pending] = await Promise.all([
     sb.rpc("weighing_confirmed_lines", { p_from: from, p_to: to, p_dept: dept }),
     sb.rpc("weighing_unconfirmed_count", { p_from: from, p_to: to }),
@@ -184,7 +200,8 @@ async function wsLoad(opts = {}) {
   }
   const rows = lines.data || [];
   const count = pending.error ? WS.pending : Number(pending.data) || 0;
-  const sig = JSON.stringify([rows, count]);
+  if (wsCanPostpone()) await wsLoadHist(rows);
+  const sig = JSON.stringify([rows, count, WS.hist]);
   WS.updatedAt = new Date();
   if (silent && sig === WS.sig) {
     const st = document.getElementById("ws-updated");
@@ -196,6 +213,19 @@ async function wsLoad(opts = {}) {
     if (silent) wsRenderResults(); else wsRender();
   }
   wsSchedule();
+}
+
+// Postponement history of the papers on screen (quietly empty if Migration
+// 027 has not run, or for readers who cannot see it).
+async function wsLoadHist(rows) {
+  const ids = [...new Set(rows.map((r) => r.paper_id))];
+  WS.hist = {};
+  if (!ids.length) return;
+  const { data, error } = await sb.from("weighing_postponements")
+    .select("paper_id, stage, from_work_date, from_delivery_date, to_delivery_date, reason, note, created_at")
+    .in("paper_id", ids).order("created_at", { ascending: true });
+  if (error) return;
+  (data || []).forEach((h) => { (WS.hist[h.paper_id] = WS.hist[h.paper_id] || []).push(h); });
 }
 
 function wsUpdatedText() {
@@ -243,6 +273,9 @@ function wsRender() {
       <div class="w-small ws-howto">${T(
         `คลิกที่ใบงานเพื่อทำเครื่องหมายว่าตรวจแล้ว — เพื่อนใน${WS_DEPT_LABEL[WS.dept]()}จะเห็นด้วย · เอาเครื่องหมายออกที่ช่อง ✓`,
         `Click a paper to mark it checked — your ${WS_DEPT_LABEL[WS.dept]()} colleagues see it too · untick the ✓ box to undo`)}</div>
+      ${wsCanPostpone() ? `<div class="w-small ws-howto">${T(
+        "ถ้าต้องเลื่อนวันส่ง กด “เลื่อนส่ง” ใต้วันส่ง — ต้องเลือกสาเหตุ น้ำหนักไม่เปลี่ยน ผู้บริหารจะได้รับแจ้ง",
+        "To postpone a delivery, press “Postpone” under the delivery date — a reason is required; the weights stay as confirmed, and management is notified.")}</div>` : ""}
     </div>
     <div class="w-head-right">${weighLangHtml().replace(/data-act="lang"/g, 'data-ws="lang"')}</div>
   </div>
@@ -273,6 +306,7 @@ function wsRender() {
 
   <div id="ws-results">${wsResultsHtml()}</div>`;
   weighLabelCells(wsSection);
+  ppSyncForm(document.getElementById("ws-pp-form"));
 }
 
 function wsResultsHtml() {
@@ -283,6 +317,8 @@ function wsResultsHtml() {
   const doneP = new Set(base.filter((r) => wsCheckState(r) === "checked").map((r) => r.paper_id)).size;
   const changedP = new Set(base.filter((r) => wsCheckState(r) === "changed").map((r) => r.paper_id)).size;
   const totalKg = rows.reduce((s, r) => s + (r.actual_kg === null ? 0 : Number(r.actual_kg)), 0);
+  const canPP = wsCanPostpone();
+  const cols = 12;
   let prev = null;
 
   return `
@@ -314,16 +350,18 @@ function wsResultsHtml() {
         <thead><tr><th class="ws-cb-col" title="${T("ตรวจแล้ว", "Checked")}">✓</th><th>${T("วันส่ง", "Delivery")}</th><th>${T("บริษัท", "Company")}</th><th>PO</th><th>${T("ลูกค้า", "Customer")}</th><th>${T("สินค้า", "Product")}</th>
           <th class="w-num">${T("สั่ง", "Ordered")}</th><th class="w-num">${T("ชั่งจริง (kg)", "Actual (kg)")}</th><th class="w-num">${T("ต่าง", "Difference")}</th>
           <th>${T("ยืนยันโดย", "Confirmed by")}</th><th>${T("รูป", "Photo")}</th><th>${T("ตรวจแล้ว", "Checked")} · ${escapeHtml(WS_DEPT_LABEL[WS.dept]())}</th></tr></thead>
-        <tbody>${WS.loading ? `<tr><td colspan="12" class="w-empty">${T("กำลังโหลด…", "Loading…")}</td></tr>`
-          : rows.length ? rows.map((r) => {
+        <tbody>${WS.loading ? `<tr><td colspan="${cols}" class="w-empty">${T("กำลังโหลด…", "Loading…")}</td></tr>`
+          : rows.length ? rows.map((r, i) => {
           const first = r.paper_id !== prev;
+          const last = !rows[i + 1] || rows[i + 1].paper_id !== r.paper_id;
           prev = r.paper_id;
           const d = weighDiff(r);
           const st = wsCheckState(r);
           const label = [r.po_number ? "PO " + r.po_number : "", r.customer_name || ""].filter(Boolean).join(" · ");
           return `<tr class="ws-row ws-st-${st}${first ? " w-first" : ""}" data-paper="${escapeAttr(r.paper_id)}">
             <td class="ws-cb-col">${first ? `<input type="checkbox" class="ws-cb" data-ws-check="${escapeAttr(r.paper_id)}"${st === "checked" ? " checked" : ""} aria-label="${T("ตรวจแล้ว", "Checked")}: ${escapeAttr(label)}">` : ""}</td>
-            <td>${first ? (r.delivery_date ? escapeHtml(weighShortDate(r.delivery_date)) : `<span class="w-muted" title="${T("ไม่มีวันส่งบนใบงาน — ใช้วันที่ชั่ง", "No delivery date on the paper — weighing day shown")}">${escapeHtml(weighShortDate(r.work_date))}*</span>`) : ""}</td>
+            <td>${first ? (r.delivery_date ? escapeHtml(weighShortDate(r.delivery_date)) : `<span class="w-muted" title="${T("ไม่มีวันส่งบนใบงาน — ใช้วันที่ชั่ง", "No delivery date on the paper — weighing day shown")}">${escapeHtml(weighShortDate(r.work_date))}*</span>`) + wsMovedTag(r.paper_id)
+              + (canPP ? `<br><button type="button" class="w-btn w-btn-outline w-btn-sm ws-pp-btn" data-ws="pp-open" data-paper="${escapeAttr(r.paper_id)}"${WS.ppForm && WS.ppForm.paper === r.paper_id ? " disabled" : ""}>${T("เลื่อนส่ง", "Postpone")}</button>` : "") : ""}</td>
             <td>${first ? escapeHtml(weighCompanyShort(r.company)) : ""}</td>
             <td class="w-mono">${first ? escapeHtml(r.po_number || "") : ""}</td>
             <td>${first ? escapeHtml(r.customer_name || "") : ""}</td>
@@ -336,8 +374,8 @@ function wsResultsHtml() {
               : `<button type="button" class="btn-link" data-ws="photo" data-path="${escapeAttr(r.photo_path)}" data-paper="${escapeAttr(r.paper_id)}">${T("ดูรูป", "View")}</button>`) : ""}</td>
             <td class="ws-check-who">${first ? (st === "checked" ? `✓ ${escapeHtml(`${r.checked_by_name || ""} ${wsWhen(r.checked_at)}`.trim())}`
               : st === "changed" ? `<span class="ws-changed-tag">${T("แก้หลังตรวจ — ตรวจอีกครั้ง", "Changed since checked")}</span>` : "") : ""}</td>
-          </tr>`;
-        }).join("") : `<tr><td colspan="12" class="w-empty">${WS.rows.length
+          </tr>${last && canPP && WS.ppForm && WS.ppForm.paper === r.paper_id ? wsPostponeRowHtml(r, cols) : ""}`;
+        }).join("") : `<tr><td colspan="${cols}" class="w-empty">${WS.rows.length
           ? T("ไม่มีรายการที่ตรงกับตัวกรอง", "No lines match the filters")
           : T("ยังไม่มีน้ำหนักที่ยืนยันในช่วงนี้", "No confirmed weights in this period yet")}</td></tr>`}</tbody>
       </table>
@@ -348,6 +386,83 @@ function wsResultsHtml() {
   </section>`;
 }
 
+// "↻ moved from …" under the delivery date of a paper whose delivery moved.
+function wsMovedTag(paperId) {
+  const h = WS.hist[paperId];
+  if (!h || !h.length) return "";
+  const m = h[h.length - 1];
+  const from = m.from_delivery_date || m.from_work_date;
+  return `<br><span class="w-moved" title="${escapeAttr(ppReasonLabel(m.reason) + (m.note ? " — " + m.note : ""))}">↻ ${T("เลื่อนจาก", "moved from")} ${escapeHtml(weighShortDate(from))}</span>`;
+}
+
+// The postpone form, as a row right under the paper's lines.
+function wsPostponeRowHtml(r, cols) {
+  const f = WS.ppForm;
+  const current = r.delivery_date || r.work_date;
+  const today = weighBangkokToday();
+  const min = wsAddDays(current, 1) > today ? wsAddDays(current, 1) : today;
+  const label = [r.po_number ? "PO " + r.po_number : "", r.customer_name || ""].filter(Boolean).join(" · ");
+  return `<tr class="ws-pp-row"><td colspan="${cols}">
+    <form class="w-pp-form ws-pp-form" id="ws-pp-form" novalidate>
+      <h3>${T("เลื่อนวันส่ง", "Postpone the delivery")} — ${escapeHtml(label)}</h3>
+      <p class="w-small w-muted">${T(
+        `ตอนนี้ส่ง ${escapeHtml(weighShortDate(current))} · น้ำหนักที่ยืนยันแล้วไม่เปลี่ยน ใบงานจะย้ายไปอยู่ในวันส่งใหม่ และผู้บริหารจะได้รับแจ้ง`,
+        `Delivery now ${escapeHtml(weighShortDate(current))} · the confirmed weights stay as they are; the paper moves to the new delivery date, and management is notified.`)}</p>
+      ${f.error ? `<div class="w-msg w-msg-error" role="alert" id="ws-pp-error">${escapeHtml(f.error)}</div>` : ""}
+      <div class="w-pp-fields">
+        <label>${T("วันส่งใหม่", "New delivery date")} *
+          <input type="date" id="ws-pp-date" min="${escapeAttr(min)}" value="${escapeAttr(f.date || min)}" required></label>
+        <label class="w-pp-wide">${T("สาเหตุ", "Reason")} *
+          <select id="ws-pp-reason" data-pp="reason" required>
+            <option value="">${T("เลือกสาเหตุ", "Choose a reason")}</option>
+            ${PP_REASONS.map(([k, lab]) => `<option value="${k}"${f.reason === k ? " selected" : ""}>${escapeHtml(lab())}</option>`).join("")}
+          </select></label>
+        <label class="w-pp-full">${ppNoteLabel()}
+          <input type="text" id="ws-pp-note" data-pp="note" value="${escapeAttr(f.note || "")}" maxlength="300"></label>
+      </div>
+      <div class="w-pp-actions">
+        <button type="submit" class="w-btn w-btn-violet" id="ws-pp-save" data-pp="save"${ppReasonOk(f.reason, f.note) && !f.busy ? "" : " disabled"}>${T("เลื่อนส่ง", "Postpone")}</button>
+        <button type="button" class="w-btn w-btn-outline" data-ws="pp-cancel">${T("ยกเลิก", "Cancel")}</button>
+        <span class="w-small w-pp-hint" data-pp="hint" role="status"></span>
+      </div>
+    </form>
+  </td></tr>`;
+}
+
+async function wsPostponeSave() {
+  const f = WS.ppForm;
+  if (!f || f.busy) return;
+  const row = WS.rows.find((r) => r.paper_id === f.paper);
+  if (!row) { WS.ppForm = null; wsRenderResults(); return; }
+  const current = row.delivery_date || row.work_date;
+  let problem = null;
+  if (!f.reason) problem = T("เลือกสาเหตุ", "Choose a reason.");
+  else if (f.reason === "other" && !f.note) problem = T("สาเหตุ “อื่น ๆ” ต้องมีหมายเหตุ", "Add a comment when the reason is Other.");
+  else if (!f.date) problem = T("เลือกวันส่งใหม่", "Choose the new delivery date.");
+  else if (f.date <= current) problem = T("วันส่งใหม่ต้องหลังวันส่งเดิม", "The new delivery date must be after the current one.");
+  else if (f.date < weighBangkokToday()) problem = T("วันส่งใหม่ต้องเป็นวันนี้หรือหลังจากนี้", "The new delivery date must be today or later.");
+  if (problem) { f.error = problem; wsRenderResults(); return; }
+  f.busy = true; f.error = null;
+  wsRenderResults();
+  const { error } = await sb.rpc("weighing_postpone_delivery", {
+    p_paper: f.paper, p_delivery_date: f.date, p_reason: f.reason, p_note: f.note || null });
+  f.busy = false;
+  if (error) {
+    f.error = /weighing_postpone_delivery|schema cache|does not exist/i.test(error.message || "")
+      ? T("ยังเลื่อนไม่ได้: กรุณารัน Migration 028 ใน Supabase", "Postponing is not available yet: run Migration 028 in Supabase.")
+      : T("เลื่อนไม่สำเร็จ: ", "Could not postpone: ") + error.message;
+    wsRenderResults();
+    return;
+  }
+  const label = row.po_number ? "PO " + row.po_number : (row.customer_name || T("ใบงาน", "The paper"));
+  WS.ppForm = null;
+  WS.message = { kind: "info", text: T(
+    `เลื่อนส่ง ${label} ไปวันที่ ${weighShortDate(f.date)} แล้ว — ใบงานอยู่ในวันส่งใหม่`,
+    `${label}: delivery postponed to ${weighShortDate(f.date)} — the paper now appears under that date`) };
+  WS.sig = "";
+  await wsLoad({ keepMessage: true });
+}
+
 function wsRenderResults() {
   const el = document.getElementById("ws-results");
   if (!el) return;
@@ -355,6 +470,7 @@ function wsRenderResults() {
   const left = sc ? sc.scrollLeft : 0;
   el.innerHTML = wsResultsHtml();
   weighLabelCells(el);
+  ppSyncForm(document.getElementById("ws-pp-form"));
   const sc2 = el.querySelector(".w-scroll");
   if (sc2 && left) sc2.scrollLeft = left;
 }
@@ -390,6 +506,14 @@ wsSection.addEventListener("click", async (e) => {
     return;
   }
   if (act === "refresh") { await wsLoad(); return; }
+  if (act === "pp-open") {
+    WS.ppForm = { paper: el.dataset.paper, date: "", reason: "", note: "", error: null };
+    wsRenderResults();
+    const sel = document.getElementById("ws-pp-reason");
+    if (sel) { sel.closest("tr").scrollIntoView({ block: "nearest" }); }
+    return;
+  }
+  if (act === "pp-cancel") { WS.ppForm = null; wsRenderResults(); return; }
   if (act === "export") { wsExport(); return; }
   if (act === "photo") {
     const row = WS.rows.find((r) => r.paper_id === el.dataset.paper);
@@ -425,6 +549,7 @@ async function wsMark(paperId, checked) {
 }
 
 wsSection.addEventListener("change", async (e) => {
+  if (wsPpField(e.target)) return;
   if (e.target.dataset.wsCheck) { await wsMark(e.target.dataset.wsCheck, e.target.checked); return; }
   const f = e.target.dataset.wsField;
   if (!f || f === "q") return;
@@ -440,9 +565,28 @@ wsSection.addEventListener("change", async (e) => {
 
 // Search filters as you type, redrawing only the results (the box keeps focus).
 wsSection.addEventListener("input", (e) => {
+  if (wsPpField(e.target)) return;
   if (e.target.dataset.wsField !== "q") return;
   WS.q = e.target.value;
   wsRenderResults();
+});
+
+// Keeps the open postpone form's values (the table can be redrawn under it).
+function wsPpField(t) {
+  if (!WS.ppForm || !t.id || !t.id.startsWith("ws-pp-")) return false;
+  if (t.id === "ws-pp-date") WS.ppForm.date = t.value;
+  if (t.id === "ws-pp-reason") WS.ppForm.reason = t.value;
+  if (t.id === "ws-pp-note") WS.ppForm.note = t.value.trim();
+  ppSyncForm(t.form);
+  return true;
+}
+
+wsSection.addEventListener("submit", async (e) => {
+  if (e.target.id !== "ws-pp-form") return;
+  e.preventDefault();
+  const v = (id) => (document.getElementById(id) || {}).value || "";
+  Object.assign(WS.ppForm, { date: v("ws-pp-date"), reason: v("ws-pp-reason"), note: v("ws-pp-note").trim() });
+  await wsPostponeSave();
 });
 
 // The window is opened during the click itself, so browsers don't block it,

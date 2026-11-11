@@ -1935,3 +1935,23 @@ header.app-header .notif-panel .n-mark { color: var(--muted); font-weight: 400; 
 .pp-src-register { background: #efe8d8; color: #6b5f4a; }
 @media (max-width: 900px) { .pp-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .pp-fields { grid-template-columns: 1fr; } .pp-wide { grid-column: auto; } }
+
+/* ---------------------------------------------------------------------------
+   Postponing a delivery from Confirmed weights (Migration 028, 11 Nov 2026)
+   The Postpone button stays grey until a reason is chosen (and a comment
+   written for Other); the line beside it says what is missing.
+   --------------------------------------------------------------------------- */
+#weights-section, #postponed-section { --w-violet-bg: #ece6f5; --w-violet-bd: #d3c6ea; --w-violet-fg: #4b2e83; }
+.w-btn-violet:disabled, .w-btn-violet:disabled:hover { background: #d5dad8; border-color: #d5dad8; color: #57605d; }
+.w-pp-hint, .pp-hint { align-self: center; color: var(--w-violet-fg, #4b2e83); font-weight: 600; }
+.w-pp-actions { align-items: center; }
+#weights-section .ws-pp-btn { margin-top: 6px; white-space: nowrap; }
+#weights-section tr.ws-pp-row > td { background: #f7f4fb; padding: 12px; }
+#weights-section .ws-pp-form { background: var(--panel); border-radius: 12px; padding: 16px; max-width: 760px; }
+#weights-section .ws-pp-form h3 { white-space: normal; }
+#weights-section .w-moved { margin-left: 0; }
+@media (max-width: 700px) {
+  #weights-table tr.ws-pp-row { display: block; padding: 0 0 10px; border-top: 0; }
+  #weights-table tr.ws-pp-row > td { display: block; width: 100%; padding: 8px; }
+  #weights-section .ws-pp-form { padding: 12px; }
+}

@@ -55,18 +55,45 @@ const WEIGH_STATUS = {
   confirmed: { get label() { return T("ยืนยันแล้ว", "Confirmed"); }, cls: "w-pill-green" },
 };
 
-// Why a production is postponed (Migration 027) — the same five reasons as the
-// middle office register (postponed.js reuses these).
+// Why an order is postponed (Migrations 027, 028) — one list for production,
+// Confirmed weights and the middle office register (postponed.js and
+// weights-summary.js reuse these). Wording: Clément, 11 Nov 2026; "Client
+// request" kept so the dashboard can tell our side from the client's.
 const PP_REASONS = [
-  ["production",   () => T("ผลิตไม่ทัน", "Production not finished in time")],
-  ["raw_material", () => T("ไก่หรือวัตถุดิบไม่พอ", "Birds or raw material short")],
-  ["delivery",     () => T("การจัดส่ง", "Delivery or logistics")],
+  ["production",   () => T("ฝ่ายผลิตทำไม่ทัน", "Lack from production")],
+  ["raw_material", () => T("สินค้าไม่พอ", "Not enough product")],
+  ["delivery",     () => T("ส่งไม่ทันเวลา", "Missed the delivery time")],
   ["client",       () => T("ลูกค้าขอเลื่อน", "Client request")],
-  ["other",        () => T("อื่น ๆ (ระบุหมายเหตุ)", "Other (note required)")],
+  ["other",        () => T("อื่น ๆ (ต้องเขียนหมายเหตุ)", "Other (comment required)")],
 ];
 function ppReasonLabel(reason) {
   const r = PP_REASONS.find((x) => x[0] === reason);
   return r ? r[1]().replace(/ \(.*\)$/, "") : reason || "";
+}
+// No reason, no postponement; Other needs a comment.
+function ppReasonOk(reason, note) {
+  return !!reason && (reason !== "other" || !!String(note || "").trim());
+}
+// Keeps a postpone form's button off until a reason is chosen (and a comment
+// written for Other), with a line saying what is missing.
+function ppSyncForm(form) {
+  if (!form) return;
+  const reason = form.querySelector("[data-pp=reason]");
+  const note = form.querySelector("[data-pp=note]");
+  const btn = form.querySelector("[data-pp=save]");
+  const hint = form.querySelector("[data-pp=hint]");
+  const star = form.querySelector("[data-pp=note-star]");
+  if (!reason || !btn) return;
+  const ok = ppReasonOk(reason.value, note && note.value);
+  btn.disabled = !ok;
+  if (star) star.hidden = reason.value !== "other";
+  if (note) note.required = reason.value === "other";
+  if (hint) hint.textContent = ok ? "" : !reason.value
+    ? T("เลือกสาเหตุก่อน จึงจะเลื่อนได้", "Choose a reason to postpone.")
+    : T("สาเหตุ “อื่น ๆ”: เขียนหมายเหตุก่อน", "Other: write a comment first.");
+}
+function ppNoteLabel() {
+  return `${T("หมายเหตุ", "Comment")} <span data-pp="note-star" hidden>*</span>`;
 }
 function weighAddDays(iso, n) {
   const d = new Date(iso + "T00:00:00Z");
@@ -79,10 +106,11 @@ function weighDaysBetween(a, b) {
 function weighDayShort(iso) {
   return iso ? weighThaiDate(iso, { day: "numeric", month: "short" }) : "—";
 }
-// Latest move of a paper, if it was ever postponed.
+// Latest production move of a paper, if its production was ever postponed
+// (a delivery moved from Confirmed weights does not move the paper's day).
 function weighLastMove(p) {
-  const h = W.postponements[p.id];
-  return h && h.length ? h[h.length - 1] : null;
+  const h = (W.postponements[p.id] || []).filter((r) => r.stage !== "delivery");
+  return h.length ? h[h.length - 1] : null;
 }
 const WEIGH_IN_PROGRESS = ["uploading", "queued", "reading"];
 // A confirmed paper reopened for correction (Migration 021) shows as such
@@ -263,7 +291,7 @@ async function weighLoadPostponements() {
   W.postponements = {};
   (inc.error ? [] : inc.data || []).forEach((r) => { (W.postponements[r.paper_id] = W.postponements[r.paper_id] || []).push(r); });
   const here = new Set(ids);
-  W.movedOut = (out.error ? [] : out.data || []).filter((r) => !here.has(r.paper_id) || r.to_work_date !== W.date);
+  W.movedOut = (out.error ? [] : out.data || []).filter((r) => r.stage !== "delivery" && (!here.has(r.paper_id) || r.to_work_date !== W.date));
   W.movedOut = W.movedOut.filter((r) => !(here.has(r.paper_id) && weighPaper(r.paper_id) && weighPaper(r.paper_id).work_date === W.date));
 }
 
@@ -395,7 +423,19 @@ function weighRender() {
   if (W.view === "check" && weighPaper(W.openId)) weighRenderCheck();
   else weighRenderDay();
   weighLabelCells(weighSection);
+  ppSyncForm(document.getElementById("weigh-pp-form"));
 }
+
+// Typing a comment or picking a reason turns the Postpone button on as soon
+// as the form is complete.
+weighSection.addEventListener("input", (e) => {
+  const t = e.target;
+  if (t.id !== "pp-note" && t.id !== "pp-reason") return;
+  if (W.postponeForm) {
+    if (t.id === "pp-note") W.postponeForm.note = t.value.trim(); else W.postponeForm.reason = t.value;
+  }
+  ppSyncForm(t.form);
+});
 
 function weighCounts() {
   const c = { all: W.papers.length, wait: 0, busy: 0, done: 0, post: 0 };
@@ -478,7 +518,7 @@ function weighTableRows() {
   });
   return rows.filter((r) => {
     if (W.filter === "wait") return r.p.status === "read" || r.p.status === "failed";
-    if (W.filter === "postponed") return r.p.status === "postponed" || !!weighLastMove(r.p);
+    if (W.filter === "postponed") return r.p.status === "postponed" || !!(W.postponements[r.p.id] || []).length;
     if (W.filter === "done") return r.p.status === "confirmed";
     if (W.filter === "gap") return r.l && weighDiff(r.l).warn;
     return true;
@@ -633,9 +673,14 @@ function weighRenderCheck() {
   }
   const hist = W.postponements[p.id] || [];
   if (hist.length) {
-    const rows = hist.map((r) => `<li>${escapeHtml(weighDayShort(r.from_work_date))} → <strong>${escapeHtml(weighDayShort(r.to_work_date))}</strong> · ${T("ส่ง", "delivery")} ${escapeHtml(weighDayShort(r.from_delivery_date))} → <strong>${escapeHtml(weighDayShort(r.to_delivery_date))}</strong> · ${escapeHtml(ppReasonLabel(r.reason))}${r.note ? " — " + escapeHtml(r.note) : ""}</li>`).join("");
+    const rows = hist.map((r) => r.stage === "delivery"
+      ? `<li>${T("เลื่อนส่ง (มิดเดิลออฟฟิศ)", "Delivery moved (middle office)")} ${escapeHtml(weighDayShort(r.from_delivery_date || r.from_work_date))} → <strong>${escapeHtml(weighDayShort(r.to_delivery_date))}</strong> · ${escapeHtml(ppReasonLabel(r.reason))}${r.note ? " — " + escapeHtml(r.note) : ""}</li>`
+      : `<li>${escapeHtml(weighDayShort(r.from_work_date))} → <strong>${escapeHtml(weighDayShort(r.to_work_date))}</strong> · ${T("ส่ง", "delivery")} ${escapeHtml(weighDayShort(r.from_delivery_date))} → <strong>${escapeHtml(weighDayShort(r.to_delivery_date))}</strong> · ${escapeHtml(ppReasonLabel(r.reason))}${r.note ? " — " + escapeHtml(r.note) : ""}</li>`).join("");
+    const prodMoved = hist.some((r) => r.stage !== "delivery");
     notes.push(`<div class="w-note w-note-violet" id="weigh-pp-history">
-      <strong>${p.status === "postponed" ? T("ใบนี้เลื่อนผลิต", "This paper is postponed") : T("ใบนี้เคยเลื่อนผลิต", "This order was postponed")}</strong>
+      <strong>${p.status === "postponed" ? T("ใบนี้เลื่อนผลิต", "This paper is postponed")
+        : prodMoved ? T("ใบนี้เคยเลื่อนผลิต", "This order was postponed")
+        : T("วันส่งของใบนี้ถูกเลื่อน", "This order's delivery was postponed")}</strong>
       <ul class="w-pp-list">${rows}</ul>
       ${p.status === "postponed" ? `<span>${T(
         "เมื่อผลิตแล้ว ถ่ายรูปใบที่กรอกน้ำหนักด้วยมือถือตามปกติ — ระบบจะเสนอให้เชื่อมกับใบนี้ หรือพิมพ์น้ำหนักที่นี่แล้วกดยืนยัน",
@@ -771,16 +816,17 @@ function weighPostponeFormHtml(p) {
       <label>${T("วันส่งใหม่", "New delivery date")} *
         <input type="date" id="pp-del" min="${escapeAttr(f.prod || d.prod)}" value="${escapeAttr(f.del || d.del)}" required></label>
       <label class="w-pp-wide">${T("สาเหตุ", "Reason")} *
-        <select id="pp-reason" required>
+        <select id="pp-reason" data-pp="reason" required>
           <option value="">${T("เลือกสาเหตุ", "Choose a reason")}</option>
           ${PP_REASONS.map(([k, label]) => `<option value="${k}"${f.reason === k ? " selected" : ""}>${escapeHtml(label())}</option>`).join("")}
         </select></label>
-      <label class="w-pp-full">${T("หมายเหตุ", "Note")}
-        <input type="text" id="pp-note" value="${escapeAttr(f.note || "")}" maxlength="300"></label>
+      <label class="w-pp-full">${ppNoteLabel()}
+        <input type="text" id="pp-note" data-pp="note" value="${escapeAttr(f.note || "")}" maxlength="300"></label>
     </div>
     <div class="w-pp-actions">
-      <button type="submit" class="w-btn w-btn-violet" id="pp-save">${T("เลื่อนผลิต", "Postpone")}</button>
+      <button type="submit" class="w-btn w-btn-violet" id="pp-save" data-pp="save"${ppReasonOk(f.reason, f.note) ? "" : " disabled"}>${T("เลื่อนผลิต", "Postpone")}</button>
       <button type="button" class="w-btn w-btn-outline" data-act="postpone-cancel">${T("ยกเลิก", "Cancel")}</button>
+      <span class="w-small w-pp-hint" data-pp="hint" role="status"></span>
     </div>
   </form>`;
 }
@@ -799,7 +845,7 @@ async function weighPostponeSave() {
   else if (!f.del) problem = T("เลือกวันส่งใหม่", "Choose the new delivery date.");
   else if (f.del < f.prod) problem = T("วันส่งต้องไม่ก่อนวันผลิต", "The delivery date cannot be before the production day.");
   else if (!f.reason) problem = T("เลือกสาเหตุ", "Choose a reason.");
-  else if (f.reason === "other" && !f.note) problem = T("สาเหตุ “อื่น ๆ” ต้องมีหมายเหตุ", "Add a note when the reason is Other.");
+  else if (f.reason === "other" && !f.note) problem = T("สาเหตุ “อื่น ๆ” ต้องมีหมายเหตุ", "Add a comment when the reason is Other.");
   if (problem) { f.error = problem; weighRender(); return; }
   const btn = document.getElementById("pp-save");
   if (btn) btn.disabled = true;
@@ -1013,6 +1059,9 @@ weighSection.addEventListener("change", async (e) => {
     const f = W.postponeForm;
     const p = weighPaper(W.openId);
     if (!f || !p) return;
+    if (t.id === "pp-reason") f.reason = t.value;
+    if (t.id === "pp-note") f.note = t.value.trim();
+    ppSyncForm(t.form);
     if (t.id === "pp-del") f.deliveryTouched = true;
     if (t.id === "pp-prod" && t.value) {
       const del = document.getElementById("pp-del");

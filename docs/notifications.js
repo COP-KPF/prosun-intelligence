@@ -34,6 +34,7 @@ const NOTIF_KIND = {
   weighing_reconfirmed: { label: "Re-confirmed", cls: "n-tag-green" },
   weighing_deleted:     { label: "Deleted",      cls: "n-tag-red" },
   paper_postponed:      { label: "Postponed",    cls: "n-tag-amber" },
+  delivery_postponed:   { label: "Delivery postponed", cls: "n-tag-amber" },
   order_postponed:      { label: "Postponed",    cls: "n-tag-amber" },
   order_postponed_changed: { label: "Postponement changed", cls: "n-tag-red" },
   payable_proposed:     { label: "To approve",   cls: "n-tag-amber" },
@@ -179,7 +180,7 @@ function notifRender() {
         <div class="n-acts">
           ${detail ? `<details><summary>Details</summary>${detail}</details>` : ""}
           ${n.paper_id && n.kind !== "weighing_deleted" ? `<button type="button" class="btn-link" data-n="open" data-id="${escapeAttr(n.id)}">Open paper ›</button>` : ""}
-          ${String(n.kind).startsWith("order_postponed") ? `<button type="button" class="btn-link" data-n="open-postponed" data-id="${escapeAttr(n.id)}">Open postponed orders ›</button>` : ""}
+          ${String(n.kind).startsWith("order_postponed") || n.kind === "delivery_postponed" ? `<button type="button" class="btn-link" data-n="open-postponed" data-id="${escapeAttr(n.id)}">Open postponed orders ›</button>` : ""}
           ${String(n.kind).startsWith("payable_") ? `<button type="button" class="btn-link" data-n="open-payables" data-id="${escapeAttr(n.id)}">Open payables ›</button>` : ""}
           ${n.read_at ? "" : `<button type="button" class="btn-link n-mark" data-n="read" data-id="${escapeAttr(n.id)}">Mark as read</button>`}
         </div>

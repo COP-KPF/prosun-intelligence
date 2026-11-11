@@ -322,9 +322,9 @@ function mgPostponedHtml() {
       <button type="button" class="mg-go" data-act="go" data-view="postponed">${T("เปิดรายการ ›", "Open the list ›")}</button></div>
     <div class="mg-tiles">
       ${mgTile({ id: "mg-t-pp-total", label: T("ถูกเลื่อน", "Postponed"), value: mgN(total),
-        sub: T(`ฝ่ายผลิตเลื่อน ${mgN(p.by_factory)} · มิดเดิลออฟฟิศบันทึก ${mgN(total - Number(p.by_factory))}`,
-               `${mgN(p.by_factory)} by production · ${mgN(total - Number(p.by_factory))} recorded by the middle office`) })}
-      ${mgTile({ id: "mg-t-pp-prod", label: T("เพราะผลิตไม่ทัน", "Because production was late"), value: mgN(prod),
+        sub: T(`ฝ่ายผลิตเลื่อน ${mgN(p.by_factory)} · มิดเดิลออฟฟิศเลื่อน ${mgN(total - Number(p.by_factory))}`,
+               `${mgN(p.by_factory)} by production · ${mgN(total - Number(p.by_factory))} by the middle office`) })}
+      ${mgTile({ id: "mg-t-pp-prod", label: T("ฝ่ายผลิตทำไม่ทัน", "Lack from production"), value: mgN(prod),
         state: prod > 0 ? "alert" : "good",
         stateText: prod > 0 ? T("⚠ ต้องติดตาม", "⚠ Needs follow-up") : T("✓ ไม่มี", "✓ None"),
         sub: T(`ฝั่งเรา ${mgN(ours)} · ลูกค้าขอ ${mgN(total - ours)} · ${mgKg(p.kg)} กก.`, `${mgN(ours)} on our side · ${mgN(total - ours)} client request · ${mgKg(p.kg)} kg`) })}
@@ -336,8 +336,8 @@ function mgPostponedHtml() {
     ${repeat}
     ${recent ? `<details class="mg-details"><summary>${T("ดูรายการล่าสุด", "See the latest postponements")}</summary><div class="mg-table-wrap"><table class="mg-table"><thead><tr><th>${T("วันส่งเดิม", "Original delivery")}</th><th>${T("วันส่งใหม่", "New delivery")}</th><th>${T("ลูกค้า", "Client")}</th><th>PO</th><th>${T("สาเหตุ", "Reason")}</th><th>${T("ที่มา", "Source")}</th></tr></thead><tbody>${recent}</tbody></table></div></details>` : ""}
     <p class="mg-small mg-muted">${T(
-      `นับตามวันส่งเดิมที่พลาด รวมที่ฝ่ายผลิตเลื่อนในหน้าชั่งน้ำหนัก และที่มิดเดิลออฟฟิศบันทึก ตรวจเทียบอัตโนมัติ: ใบงานที่ถ่ายรูปหลังวันส่งที่พิมพ์บนใบโดยไม่มีการเลื่อน ${mgN(p.late_papers)} ใบ (ควรตรวจสอบ ยังไม่ใช่หลักฐาน)`,
-      `Counted on the delivery date that was missed, from production's postponements on the weighing screen and the middle office register. Automatic cross-check: ${mgN(p.late_papers)} papers photographed after the delivery date printed on them with no postponement recorded (worth checking, not proof).`)}</p>
+      `นับตามวันส่งเดิมที่พลาด รวมที่ฝ่ายผลิตเลื่อนในหน้าชั่งน้ำหนัก ที่มิดเดิลออฟฟิศเลื่อนในหน้าน้ำหนักที่ยืนยัน และที่บันทึกในรายการ ตรวจเทียบอัตโนมัติ: ใบงานที่ถ่ายรูปหลังวันส่งที่พิมพ์บนใบโดยไม่มีการเลื่อน ${mgN(p.late_papers)} ใบ (ควรตรวจสอบ ยังไม่ใช่หลักฐาน)`,
+      `Counted on the delivery date that was missed: production's postponements on the weighing screen, the middle office's from Confirmed weights, and its register. Automatic cross-check: ${mgN(p.late_papers)} papers photographed after the delivery date printed on them with no postponement recorded (worth checking, not proof).`)}</p>
   </div>`;
 }
 

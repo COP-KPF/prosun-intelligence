@@ -4,9 +4,12 @@
 // One list of every postponed order, from two sources:
 //   - Production: papers postponed on the weighing screen (the factory could
 //     not produce them that day). Read-only here; production records them.
-//   - Middle office: the register, for postponements the factory never sees —
-//     a client asking to move a delivery, or an order moved before its paper
-//     reached production. Sale support adds and corrects; only admin deletes.
+//   - Middle office: deliveries postponed from Confirmed weights (Migration
+//     028 — the paper was produced, only its delivery moved), and the register,
+//     for postponements that never reach the weighing screen — a client asking
+//     to move a delivery, or an order moved before its paper reached
+//     production. Sale support adds and corrects register rows; only admin
+//     deletes them.
 // Every new postponement, and any change to a register record's dates or
 // reason, notifies management in the bell. The Management dashboard counts
 // both sources.
@@ -43,13 +46,13 @@ function ppDays(a, b) {
 // Both sources in one shape, newest date missed first.
 function ppRows() {
   const f = PP.factory.map(r => ({
-    source: "factory", id: r.id, paper_id: r.paper_id,
+    source: r.stage === "delivery" ? "confirmed" : "factory", id: r.id, paper_id: r.paper_id,
     customer_name: r.customer_name, po_number: r.po_number, company: r.company,
     product: r.lines ? T(`${r.lines} รายการ`, `${r.lines} line${r.lines === 1 ? "" : "s"}`) : null,
     quantity_kg: r.kg_ordered,
     original_date: r.from_delivery_date || r.from_work_date,
     new_date: r.to_delivery_date,
-    production: [r.from_work_date, r.to_work_date],
+    production: r.stage === "delivery" ? null : [r.from_work_date, r.to_work_date],
     reason: r.reason, note: r.note, created_by: r.created_by, created_at: r.created_at,
   }));
   const m = PP.register.map(r => Object.assign({ source: "register" }, r));
@@ -133,12 +136,13 @@ function ppFormHtml() {
       <label>${T("วันส่งเดิม", "Original delivery date")} *<input id="pp-original" type="date" required value="${v("original_date")}"></label>
       <label>${T("วันส่งใหม่", "New delivery date")}<input id="pp-new" type="date" value="${v("new_date")}"></label>
       <label class="pp-wide">${T("สาเหตุ", "Reason")} *
-        <select id="pp-reason" required><option value="">${T("เลือกสาเหตุ", "Choose a reason")}</option>${reasons}</select>
+        <select id="pp-reason" data-pp="reason" required><option value="">${T("เลือกสาเหตุ", "Choose a reason")}</option>${reasons}</select>
       </label>
-      <label class="pp-full">${T("หมายเหตุ", "Note")}<input id="pp-note" value="${v("note")}"></label>
+      <label class="pp-full">${ppNoteLabel()}<input id="pp-note" data-pp="note" value="${v("note")}"></label>
     </div>
     <div class="pp-actions">
-      <button type="submit" class="ws-chip on" id="pp-save">${PP.editing ? T("บันทึกการแก้ไข", "Save correction") : T("บันทึก", "Save")}</button>
+      <button type="submit" class="ws-chip on" id="pp-save" data-pp="save">${PP.editing ? T("บันทึกการแก้ไข", "Save correction") : T("บันทึก", "Save")}</button>
+      <span class="mg-small pp-hint" data-pp="hint" role="status"></span>
       ${PP.editing ? `<button type="button" class="ws-chip" data-act="cancel">${T("ยกเลิก", "Cancel")}</button>` : ""}
       <span class="mg-small mg-muted">${T("ผู้บริหารจะได้รับแจ้งทุกครั้งที่บันทึก หรือแก้วันที่และสาเหตุ", "Management is notified of each new record and of any change to its dates or reason.")}</span>
     </div>
@@ -147,7 +151,7 @@ function ppFormHtml() {
 
 function ppVisible(rows) {
   if (PP.show === "factory") return rows.filter(r => r.source === "factory");
-  if (PP.show === "register") return rows.filter(r => r.source === "register");
+  if (PP.show === "register") return rows.filter(r => r.source !== "factory");
   if (PP.show === "open") return rows.filter(r => !r.new_date);
   return rows;
 }
@@ -162,7 +166,8 @@ function ppTableHtml(all) {
     const delay = ppDays(r.original_date, r.new_date);
     const src = r.source === "factory"
       ? `<span class="pp-src pp-src-factory">${T("ฝ่ายผลิต", "Production")}</span>`
-      : `<span class="pp-src pp-src-register">${T("มิดเดิลออฟฟิศ", "Middle office")}</span>`;
+      : `<span class="pp-src pp-src-register">${T("มิดเดิลออฟฟิศ", "Middle office")}</span>${r.source === "confirmed"
+        ? `<br><small class="mg-muted">${T("จากน้ำหนักที่ยืนยัน", "from Confirmed weights")}</small>` : ""}`;
     return `<tr class="${r.new_date ? "" : "mg-flag"}" data-source="${r.source}">
       <td>${src}</td>
       <td>${escapeHtml(ppDate(r.original_date))}</td>
@@ -196,7 +201,7 @@ function ppDraw() {
   const n = {
     all: all.length,
     factory: all.filter(r => r.source === "factory").length,
-    register: all.filter(r => r.source === "register").length,
+    register: all.filter(r => r.source !== "factory").length,
     open: all.filter(r => !r.new_date).length,
   };
   const chip = (k, label) =>
@@ -206,8 +211,8 @@ function ppDraw() {
   ppSection.innerHTML = `
     <div class="mg-bar">
       <p class="mg-small mg-muted">${T(
-        "ทุกออเดอร์ที่วันส่งถูกเลื่อน: จากฝ่ายผลิต (หน้าชั่งน้ำหนัก) และที่มิดเดิลออฟฟิศบันทึก ถ้าเลื่อนซ้ำจะขึ้นเป็นรายการใหม่",
-        "Every order whose delivery was pushed back: by production (weighing screen) and recorded by the middle office. An order moved twice shows twice.")}</p>
+        "ทุกออเดอร์ที่วันส่งถูกเลื่อน: จากฝ่ายผลิต (หน้าชั่งน้ำหนัก) จากมิดเดิลออฟฟิศในหน้าน้ำหนักที่ยืนยัน และที่บันทึกด้านล่าง ถ้าเลื่อนซ้ำจะขึ้นเป็นรายการใหม่",
+        "Every order whose delivery was pushed back: by production (weighing screen), by the middle office from Confirmed weights, and recorded below. An order moved twice shows twice.")}</p>
       ${weighLangHtml()}
     </div>
     ${msg}
@@ -219,7 +224,11 @@ function ppDraw() {
     </div>
     ${ppTableHtml(all)}
     ${PP.missing ? "" : ppFormHtml()}`;
+  ppSyncForm(document.getElementById("pp-form"));
 }
+
+ppSection.addEventListener("input", e => { if (e.target.dataset.pp) ppSyncForm(e.target.form); });
+ppSection.addEventListener("change", e => { if (e.target.dataset.pp) ppSyncForm(e.target.form); });
 
 
 // ----------------------------------------------------------- events
@@ -277,7 +286,7 @@ ppSection.addEventListener("submit", async e => {
   else if (!row.original_date) problem = T("กรุณาระบุวันส่งเดิม", "Enter the original delivery date.");
   else if (!row.reason) problem = T("กรุณาเลือกสาเหตุ", "Choose a reason.");
   else if (row.new_date && row.new_date <= row.original_date) problem = T("วันส่งใหม่ต้องหลังวันส่งเดิม", "The new date must be after the original date.");
-  else if (row.reason === "other" && !row.note) problem = T("สาเหตุ “อื่น ๆ” ต้องมีหมายเหตุ", "Add a note when the reason is Other.");
+  else if (row.reason === "other" && !row.note) problem = T("สาเหตุ “อื่น ๆ” ต้องมีหมายเหตุ", "Add a comment when the reason is Other.");
   if (problem) { ppFormError(problem); return; }
   const saveBtn = document.getElementById("pp-save");
   saveBtn.disabled = true;
