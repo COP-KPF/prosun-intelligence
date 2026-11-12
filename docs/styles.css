@@ -1955,3 +1955,5 @@ header.app-header .notif-panel .n-mark { color: var(--muted); font-weight: 400; 
   #weights-table tr.ws-pp-row > td { display: block; width: 100%; padding: 8px; }
   #weights-section .ws-pp-form { padding: 12px; }
 }
+#weights-section .ws-moved { white-space: normal; }
+#weights-section .ws-moved-why { color: var(--muted); }

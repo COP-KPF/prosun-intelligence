@@ -1195,7 +1195,7 @@ function generateQuotePDF(q) {
 // deal_value or notes.
 // ============================================================================
 
-const PACE_ROLES = ["sale_support", "purchasing", "production", "accounting"];
+const PACE_ROLES = ["sale_support", "purchasing", "production", "accounting", "delivery"];
 const ORDER_UNITS = ["Kg", "Pcs", "Grams", "Pack", "Jar"];
 
 let paceView = "orders";
@@ -1216,6 +1216,7 @@ const tabWeightsMidBtn   = document.getElementById("tab-weights-middle");      /
 const tabPayablesBtn     = document.getElementById("tab-payables");            // Accounting › Payables (Migration 025)
 const tabManagementBtn   = document.getElementById("tab-management");          // Management dashboard, admin only (Migration 024)
 const tabPostponedBtn    = document.getElementById("tab-postponed");           // Middle office › Postponed orders (Migration 027)
+const tabDeliveryBtn     = document.getElementById("tab-delivery");            // Delivery › Delivery board (Migration 029)
 // Admin reaches Confirmed weights from Accounting, Purchasing and the Middle
 // office (30 Oct 2026, Clément); this remembers which entry was used, for the
 // highlight, the department label above the title, and whose "checked" marks
@@ -1903,6 +1904,8 @@ function setupPaceRole() {
     note.textContent = "Enter and review customer orders. You also maintain the product catalogue — retire a product by deactivating it rather than deleting, so past orders keep their reference.";
   } else if (myProfile.role === "purchasing") {
     note.textContent = "Read-only view of every order, so purchasing can see demand before buying. Entering and changing orders is sale support's job.";
+  } else if (myProfile.role === "delivery") {
+    note.textContent = "ดูว่าออเดอร์ไหนพร้อมส่ง ออเดอร์ไหนถูกเลื่อน แล้วกดออกส่ง / ส่งถึงแล้ว / แจ้งปัญหา";
   } else if (myProfile.role === "accounting") {
     note.textContent = "Payables: scan each supplier bill and check it against the scan. Confirmed weights are read-only: a wrong number is corrected by the factory on the weighing screen.";
   } else {
@@ -1918,18 +1921,21 @@ function setupPaceRole() {
 //   Production (production, factory_admin) — Weighing (Migration 018)
 //   Accounting (accounting) — Confirmed weights, read-only (Migration 020);
 //     purchasing reaches the same screen from its own menu
+//   Delivery (delivery) — Delivery board (Migration 029); the middle office
+//     sees it too (read-only, with postponement reasons)
 // This is the screen only; the database's RLS still decides what each role
 // can read (purchasing reads orders because the calculator is built on them).
 const PACE_MENU = {
-  admin:         ["management", "orders", "postponed", "calculator", "weighing", "payables", "weights"],
-  sale_support:  ["orders", "confirm-birds", "postponed", "weights"],
+  admin:         ["management", "orders", "postponed", "calculator", "weighing", "delivery", "payables", "weights"],
+  sale_support:  ["orders", "confirm-birds", "postponed", "weights", "delivery"],
   purchasing:    ["calculator", "weights"],
   production:    ["weighing"],
   factory_admin: ["weighing"],
   accounting:    ["payables", "weights"],
+  delivery:      ["delivery"],
 };
-const PACE_HOME = { admin: "orders", sale_support: "orders", purchasing: "calculator", production: "weighing", factory_admin: "weighing", accounting: "weights" };
-const PACE_DEPT = { orders: "Middle office", postponed: "Middle office", calculator: "Purchasing", weighing: "Production", weights: "Accounting", payables: "Accounting", management: "Management" };
+const PACE_HOME = { admin: "orders", sale_support: "orders", purchasing: "calculator", production: "weighing", factory_admin: "weighing", accounting: "weights", delivery: "delivery" };
+const PACE_DEPT = { orders: "Middle office", postponed: "Middle office", calculator: "Purchasing", weighing: "Production", weights: "Accounting", payables: "Accounting", management: "Management", delivery: "Delivery" };
 
 function setPaceTabsForRole() {
   const items = PACE_MENU[myProfile && myProfile.role] || [];
@@ -1945,6 +1951,8 @@ function setPaceTabsForRole() {
   tabPayablesBtn.classList.toggle("hidden", !items.includes("payables"));
   tabManagementBtn.classList.toggle("hidden", !items.includes("management"));
   tabPostponedBtn.classList.toggle("hidden", !items.includes("postponed"));
+  tabDeliveryBtn.classList.toggle("hidden", !items.includes("delivery"));
+  document.getElementById("pace-group-delivery").classList.toggle("hidden", !items.includes("delivery"));
   document.getElementById("pace-group-management").classList.toggle("hidden", !items.includes("management"));
   document.getElementById("pace-group-middle").classList.toggle("hidden", !items.includes("orders") && !items.includes("confirm-birds") && !(w && ["sale_support", "admin"].includes(role)));
   document.getElementById("pace-group-purchasing").classList.toggle("hidden", !items.includes("calculator"));
@@ -2006,6 +2014,7 @@ async function switchPaceView(view) {
   tabPayablesBtn.classList.toggle("active", view === "payables");
   tabManagementBtn.classList.toggle("active", view === "management");
   tabPostponedBtn.classList.toggle("active", view === "postponed");
+  tabDeliveryBtn.classList.toggle("active", view === "delivery");
   if (myProfile.role === "purchasing") paceWeightsDept = "Purchasing";
   else if (myProfile.role === "sale_support") paceWeightsDept = "Middle office";
   else if (myProfile.role !== "admin") paceWeightsDept = "Accounting";
@@ -2027,6 +2036,7 @@ async function switchPaceView(view) {
   if (view !== "management") closeManagement();      // management.js
   if (view !== "payables") closePayables();          // payables.js
   if (view !== "postponed") closePostponed();        // postponed.js
+  if (view !== "delivery") closeDelivery();          // delivery.js
 
   // Purchasing and production read; only sale support and admin write. Entry
   // also needs one specific channel, since the product list is per channel.
@@ -2059,6 +2069,10 @@ async function switchPaceView(view) {
     document.getElementById("list-title").textContent = "ออเดอร์ที่ถูกเลื่อน — Postponed orders";
     await openPostponed();                            // postponed.js
   }
+  else if (view === "delivery") {
+    document.getElementById("list-title").textContent = "จัดส่ง — Delivery board";
+    await openDelivery();                             // delivery.js
+  }
 }
 
 tabCalculatorBtn.addEventListener("click", () => switchPaceView("calculator"));
@@ -2067,6 +2081,7 @@ tabConfirmBirdsBtn.addEventListener("click", () => switchPaceView("calculator"))
 tabManagementBtn.addEventListener("click", () => switchPaceView("management"));
 tabPayablesBtn.addEventListener("click", () => switchPaceView("payables"));
 tabPostponedBtn.addEventListener("click", () => switchPaceView("postponed"));
+tabDeliveryBtn.addEventListener("click", () => switchPaceView("delivery"));
 tabWeightsBtn.addEventListener("click", () => { paceWeightsDept = "Accounting"; switchPaceView("weights"); });
 tabWeightsBuyBtn.addEventListener("click", () => { paceWeightsDept = "Purchasing"; switchPaceView("weights"); });
 tabWeightsMidBtn.addEventListener("click", () => { paceWeightsDept = "Middle office"; switchPaceView("weights"); });

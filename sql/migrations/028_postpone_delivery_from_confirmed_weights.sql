@@ -25,6 +25,10 @@
 --   - Migration 021's "Confirmed paper changed" bell is not sent for this
 --     change: the postponement's own bell says it, with the reason.
 --
+-- Who sees what (Clément, 11 Nov): every department sees that an order was
+-- postponed and its delivery dates ("postponed, delivery from … to …"); only
+-- admin (Clément, Khun Jum) and the middle office see the reason and comment.
+--
 -- Run order: after 027. Safe to re-run.
 -- ============================================================================
 
@@ -336,3 +340,62 @@ comment on function public.management_postponements(date, date, text) is
 
 revoke all on function public.management_postponements(date, date, text) from public, anon;
 grant execute on function public.management_postponements(date, date, text) to authenticated, service_role;
+
+
+-- ----------------------------------------------------------------------------
+-- 7. Who sees what (Clément, 11 Nov): every department sees that an order was
+--    postponed — "postponed, delivery from … to …" — but only admin (Clément,
+--    Khun Jum) and the middle office see the reason and the comment.
+-- ----------------------------------------------------------------------------
+-- The history table itself is now read only by admin and the middle office.
+drop policy if exists "weighing_postponements: read" on public.weighing_postponements;
+create policy "weighing_postponements: read"
+  on public.weighing_postponements for select to authenticated
+  using (public.current_role() in ('admin', 'sale_support'));
+
+-- Everyone else gets the dates through this function; reason and comment come
+-- back empty unless the caller is admin or middle office. Accounting and
+-- purchasing see only confirmed papers (the ones in their Confirmed weights).
+-- p_papers: history of these papers; p_from_work_date: papers postponed away
+-- from that production day (the weighing screen's "Postponed from this day").
+create or replace function public.weighing_postponement_marks(p_papers uuid[] default null,
+                                                              p_from_work_date date default null)
+returns table (id uuid, paper_id uuid, stage text, from_work_date date, to_work_date date,
+               from_delivery_date date, to_delivery_date date, created_at timestamptz,
+               created_by uuid, customer_name text, po_number text, reason text, note text)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  r   text := coalesce(public.current_role(), '');
+  why boolean := r in ('admin', 'sale_support');
+begin
+  if r not in ('admin', 'sale_support', 'factory_admin', 'production', 'accounting', 'purchasing') then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if coalesce(array_length(p_papers, 1), 0) > 500 then
+    raise exception 'too many papers at once' using errcode = '22023';
+  end if;
+  return query
+    select w.id, w.paper_id, w.stage, w.from_work_date, w.to_work_date,
+           w.from_delivery_date, w.to_delivery_date, w.created_at, w.created_by,
+           w.customer_name, w.po_number,
+           case when why then w.reason end,
+           case when why then w.note end
+    from public.weighing_postponements w
+    left join public.weighing_papers p on p.id = w.paper_id
+    where ((p_papers is not null and w.paper_id = any(p_papers))
+           or (p_from_work_date is not null and w.from_work_date = p_from_work_date))
+      and (r not in ('accounting', 'purchasing') or p.status = 'confirmed')
+    order by w.created_at;
+end;
+$$;
+
+comment on function public.weighing_postponement_marks(uuid[], date) is
+  'Postponement dates for the weighing screen and Confirmed weights. Reason and comment only for '
+  'admin and sale_support; accounting and purchasing see confirmed papers only. Migration 028.';
+
+revoke all on function public.weighing_postponement_marks(uuid[], date) from public, anon;
+grant execute on function public.weighing_postponement_marks(uuid[], date) to authenticated, service_role;

@@ -200,7 +200,7 @@ async function wsLoad(opts = {}) {
   }
   const rows = lines.data || [];
   const count = pending.error ? WS.pending : Number(pending.data) || 0;
-  if (wsCanPostpone()) await wsLoadHist(rows);
+  await wsLoadHist(rows);
   const sig = JSON.stringify([rows, count, WS.hist]);
   WS.updatedAt = new Date();
   if (silent && sig === WS.sig) {
@@ -215,17 +215,14 @@ async function wsLoad(opts = {}) {
   wsSchedule();
 }
 
-// Postponement history of the papers on screen (quietly empty if Migration
-// 027 has not run, or for readers who cannot see it).
+// Postponement dates of the papers on screen, for every department (the
+// reason comes back only for admin and the middle office — Migration 028).
+// Quietly empty if the migrations have not run yet.
 async function wsLoadHist(rows) {
   const ids = [...new Set(rows.map((r) => r.paper_id))];
-  WS.hist = {};
-  if (!ids.length) return;
-  const { data, error } = await sb.from("weighing_postponements")
-    .select("paper_id, stage, from_work_date, from_delivery_date, to_delivery_date, reason, note, created_at")
-    .in("paper_id", ids).order("created_at", { ascending: true });
-  if (error) return;
-  (data || []).forEach((h) => { (WS.hist[h.paper_id] = WS.hist[h.paper_id] || []).push(h); });
+  const hist = {};
+  if (ids.length) (await ppMarks(ids, null)).forEach((h) => { (hist[h.paper_id] = hist[h.paper_id] || []).push(h); });
+  WS.hist = hist;
 }
 
 function wsUpdatedText() {
@@ -386,13 +383,14 @@ function wsResultsHtml() {
   </section>`;
 }
 
-// "↻ moved from …" under the delivery date of a paper whose delivery moved.
+// "↻ Postponed · delivery from 11 Nov to 13 Nov" under the delivery date, for
+// every department; the reason below it only for admin and the middle office.
 function wsMovedTag(paperId) {
   const h = WS.hist[paperId];
   if (!h || !h.length) return "";
-  const m = h[h.length - 1];
-  const from = m.from_delivery_date || m.from_work_date;
-  return `<br><span class="w-moved" title="${escapeAttr(ppReasonLabel(m.reason) + (m.note ? " — " + m.note : ""))}">↻ ${T("เลื่อนจาก", "moved from")} ${escapeHtml(weighShortDate(from))}</span>`;
+  const why = ppReasonText(h[h.length - 1]);
+  return `<br><span class="w-moved ws-moved">↻ ${escapeHtml(ppMovedText(h))}</span>`
+    + (why ? `<br><span class="w-small ws-moved-why">${escapeHtml(why)}</span>` : "");
 }
 
 // The postpone form, as a row right under the paper's lines.
@@ -613,10 +611,10 @@ function wsExport() {
   const header = WEIGH_LANG === "en"
     ? ["Delivery date", "Weighing day", "Company", "PO", "Customer", "Line", "Product", "Ordered",
        "Ordered qty", "Unit", "Actual (kg)", "Difference (kg)", "kg per unit", "Corrected by hand",
-       "Confirmed by", "Confirmed at", "Checked (" + WS_DEPT_LABEL[WS.dept]() + ") by", "Checked at"]
+       "Confirmed by", "Confirmed at", "Checked (" + WS_DEPT_LABEL[WS.dept]() + ") by", "Checked at", "Postponed"]
     : ["วันส่ง", "วันที่ชั่ง", "บริษัท", "PO", "ลูกค้า", "ลำดับ", "สินค้า", "สั่ง",
        "จำนวนสั่ง", "หน่วย", "น้ำหนักจริง (kg)", "ต่าง (kg)", "kg ต่อหน่วย", "แก้ไขด้วยมือ",
-       "ยืนยันโดย", "เวลายืนยัน", "ตรวจแล้ว (" + WS_DEPT_LABEL[WS.dept]() + ") โดย", "เวลาตรวจ"];
+       "ยืนยันโดย", "เวลายืนยัน", "ตรวจแล้ว (" + WS_DEPT_LABEL[WS.dept]() + ") โดย", "เวลาตรวจ", "เลื่อน"];
   const out = [header];
   rows.forEach((r) => {
     const d = weighDiff(r);
@@ -633,9 +631,10 @@ function wsExport() {
       r.confirmed_at ? new Date(new Date(r.confirmed_at).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ") : "",
       wsCheckState(r) === "checked" ? (r.checked_by_name || "") : wsCheckState(r) === "changed" ? T("แก้หลังตรวจ", "Changed since checked") : "",
       wsCheckState(r) === "checked" && r.checked_at ? new Date(new Date(r.checked_at).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ") : "",
+      ppMovedText(WS.hist[r.paper_id]),
     ]);
   });
   const name = WS.from === WS.to ? WS.from : `${WS.from} to ${WS.to}`;
   downloadXlsx(`Confirmed weights ${name}.xlsx`, T("น้ำหนักที่ยืนยันแล้ว", "Confirmed weights"), out,
-    [12, 12, 12, 13, 26, 6, 40, 12, 9, 7, 12, 12, 10, 10, 16, 16, 18, 16]);
+    [12, 12, 12, 13, 26, 6, 40, 12, 9, 7, 12, 12, 10, 10, 16, 16, 18, 16, 34]);
 }

@@ -92,6 +92,32 @@ function ppSyncForm(form) {
     ? T("เลือกสาเหตุก่อน จึงจะเลื่อนได้", "Choose a reason to postpone.")
     : T("สาเหตุ “อื่น ๆ”: เขียนหมายเหตุก่อน", "Other: write a comment first.");
 }
+// "Postponed · delivery from 11 Nov to 13 Nov" — shown to every department.
+// From the first move's original delivery date (or production day if the
+// paper had none) to the latest new one. The reason is added only where the
+// database returned it (admin and middle office — Migration 028).
+function ppMovedText(hist) {
+  if (!hist || !hist.length) return "";
+  const a = hist[0].from_delivery_date || hist[0].from_work_date;
+  const b = hist[hist.length - 1].to_delivery_date;
+  return T(`เลื่อนแล้ว · ส่งจาก ${weighDayShort(a)} เป็น ${weighDayShort(b)}`,
+           `Postponed · delivery from ${weighDayShort(a)} to ${weighDayShort(b)}`);
+}
+function ppReasonText(r) {
+  if (!r || !r.reason) return "";
+  return ppReasonLabel(r.reason) + (r.note ? " — " + r.note : "");
+}
+// Postponement dates (and reasons for admin / middle office) through the
+// database function; before Migration 028 runs, the table is read directly.
+async function ppMarks(paperIds, fromWorkDate) {
+  const res = await sb.rpc("weighing_postponement_marks", { p_papers: paperIds || null, p_from_work_date: fromWorkDate || null });
+  if (!res.error) return res.data || [];
+  if (!/weighing_postponement_marks|schema cache|does not exist|Could not find/i.test(res.error.message || "")) return [];
+  let q = sb.from("weighing_postponements").select("*").order("created_at", { ascending: true });
+  q = paperIds ? q.in("paper_id", paperIds) : q.eq("from_work_date", fromWorkDate);
+  const old = await q;
+  return old.error ? [] : old.data || [];
+}
 function ppNoteLabel() {
   return `${T("หมายเหตุ", "Comment")} <span data-pp="note-star" hidden>*</span>`;
 }
@@ -105,12 +131,6 @@ function weighDaysBetween(a, b) {
 }
 function weighDayShort(iso) {
   return iso ? weighThaiDate(iso, { day: "numeric", month: "short" }) : "—";
-}
-// Latest production move of a paper, if its production was ever postponed
-// (a delivery moved from Confirmed weights does not move the paper's day).
-function weighLastMove(p) {
-  const h = (W.postponements[p.id] || []).filter((r) => r.stage !== "delivery");
-  return h.length ? h[h.length - 1] : null;
 }
 const WEIGH_IN_PROGRESS = ["uploading", "queued", "reading"];
 // A confirmed paper reopened for correction (Migration 021) shows as such
@@ -284,14 +304,13 @@ async function weighLoad() {
 async function weighLoadPostponements() {
   const ids = W.papers.map((p) => p.id);
   const [inc, out] = await Promise.all([
-    ids.length ? sb.from("weighing_postponements").select("*").in("paper_id", ids).order("created_at", { ascending: true })
-               : Promise.resolve({ data: [] }),
-    sb.from("weighing_postponements").select("*").eq("from_work_date", W.date).order("created_at", { ascending: true }),
+    ids.length ? ppMarks(ids, null) : Promise.resolve([]),
+    ppMarks(null, W.date),
   ]);
   W.postponements = {};
-  (inc.error ? [] : inc.data || []).forEach((r) => { (W.postponements[r.paper_id] = W.postponements[r.paper_id] || []).push(r); });
+  inc.forEach((r) => { (W.postponements[r.paper_id] = W.postponements[r.paper_id] || []).push(r); });
   const here = new Set(ids);
-  W.movedOut = (out.error ? [] : out.data || []).filter((r) => r.stage !== "delivery" && (!here.has(r.paper_id) || r.to_work_date !== W.date));
+  W.movedOut = out.filter((r) => r.stage !== "delivery" && (!here.has(r.paper_id) || r.to_work_date !== W.date));
   W.movedOut = W.movedOut.filter((r) => !(here.has(r.paper_id) && weighPaper(r.paper_id) && weighPaper(r.paper_id).work_date === W.date));
 }
 
@@ -497,11 +516,14 @@ function weighPaperCardHtml(p) {
   </button>`;
 }
 
-// "↻ from 10 Nov" on a paper that came to this day by a postponement.
+// "↻ Postponed · delivery from 11 Nov to 13 Nov" on a paper whose order was
+// postponed (production's move or the middle office's); the reason shows on
+// hover only for admin and the middle office.
 function weighMovedTag(p) {
-  const m = weighLastMove(p);
-  if (!m) return "";
-  return ` <span class="w-moved" title="${escapeAttr(ppReasonLabel(m.reason))}">↻ ${T("เลื่อนจาก", "from")} ${escapeHtml(weighDayShort(m.from_work_date))}</span>`;
+  const h = W.postponements[p.id];
+  if (!h || !h.length) return "";
+  const why = ppReasonText(h[h.length - 1]);
+  return ` <span class="w-moved"${why ? ` title="${escapeAttr(why)}"` : ""}>↻ ${escapeHtml(ppMovedText(h))}</span>`;
 }
 
 function weighTableRows() {
@@ -630,17 +652,18 @@ function weighRenderDay() {
 // Papers postponed away from this day — still visible here, with where they went.
 function weighMovedOutHtml() {
   if (!W.movedOut.length) return "";
+  const why = W.movedOut.some((r) => r.reason);     // reasons: admin and middle office only
   return `<section class="w-panel w-moved-out" id="weigh-moved-out">
     <div class="w-panel-head"><h3>${T("เลื่อนผลิตออกจากวันนี้", "Postponed from this day")}</h3>
       <span class="w-small w-muted">${T(`${W.movedOut.length} ใบ`, `${W.movedOut.length} paper${W.movedOut.length === 1 ? "" : "s"}`)}</span></div>
     <div class="table-scroll"><table class="w-table">
-      <thead><tr><th>PO</th><th>${T("ลูกค้า", "Customer")}</th><th>${T("ผลิตใหม่", "New production day")}</th><th>${T("ส่งใหม่", "New delivery")}</th><th>${T("สาเหตุ", "Reason")}</th><th>${T("โดย", "By")}</th><th></th></tr></thead>
+      <thead><tr><th>PO</th><th>${T("ลูกค้า", "Customer")}</th><th>${T("ผลิตใหม่", "New production day")}</th><th>${T("ส่งใหม่", "New delivery")}</th>${why ? `<th>${T("สาเหตุ", "Reason")}</th>` : ""}<th>${T("โดย", "By")}</th><th></th></tr></thead>
       <tbody>${W.movedOut.map((r) => `<tr>
         <td class="w-mono">${escapeHtml(r.po_number || "—")}</td>
         <td>${escapeHtml(r.customer_name || "—")}</td>
         <td>${escapeHtml(weighThaiDate(r.to_work_date, { weekday: "short", day: "numeric", month: "short" }))}</td>
         <td>${escapeHtml(weighDayShort(r.to_delivery_date))}${r.from_delivery_date ? ` <span class="w-muted w-small">(${T("เดิม", "was")} ${escapeHtml(weighDayShort(r.from_delivery_date))})</span>` : ""}</td>
-        <td>${escapeHtml(ppReasonLabel(r.reason))}${r.note ? `<br><small class="w-muted">${escapeHtml(r.note)}</small>` : ""}</td>
+        ${why ? `<td>${escapeHtml(ppReasonLabel(r.reason))}${r.note ? `<br><small class="w-muted">${escapeHtml(r.note)}</small>` : ""}</td>` : ""}
         <td>${escapeHtml(W.names[r.created_by] || "")} ${escapeHtml(weighTime(r.created_at))}</td>
         <td>${r.paper_id ? `<button type="button" class="btn-link" data-act="goto-day" data-date="${escapeAttr(r.to_work_date)}" data-id="${escapeAttr(r.paper_id)}">${T("ไปที่วันนั้น ›", "Go to that day ›")}</button>` : ""}</td>
       </tr>`).join("")}</tbody>
@@ -674,13 +697,14 @@ function weighRenderCheck() {
   const hist = W.postponements[p.id] || [];
   if (hist.length) {
     const rows = hist.map((r) => r.stage === "delivery"
-      ? `<li>${T("เลื่อนส่ง (มิดเดิลออฟฟิศ)", "Delivery moved (middle office)")} ${escapeHtml(weighDayShort(r.from_delivery_date || r.from_work_date))} → <strong>${escapeHtml(weighDayShort(r.to_delivery_date))}</strong> · ${escapeHtml(ppReasonLabel(r.reason))}${r.note ? " — " + escapeHtml(r.note) : ""}</li>`
-      : `<li>${escapeHtml(weighDayShort(r.from_work_date))} → <strong>${escapeHtml(weighDayShort(r.to_work_date))}</strong> · ${T("ส่ง", "delivery")} ${escapeHtml(weighDayShort(r.from_delivery_date))} → <strong>${escapeHtml(weighDayShort(r.to_delivery_date))}</strong> · ${escapeHtml(ppReasonLabel(r.reason))}${r.note ? " — " + escapeHtml(r.note) : ""}</li>`).join("");
+      ? `<li>${T("เลื่อนส่ง (มิดเดิลออฟฟิศ)", "Delivery moved (middle office)")} ${escapeHtml(weighDayShort(r.from_delivery_date || r.from_work_date))} → <strong>${escapeHtml(weighDayShort(r.to_delivery_date))}</strong> ${r.reason ? " · " + escapeHtml(ppReasonText(r)) : ""}</li>`
+      : `<li>${escapeHtml(weighDayShort(r.from_work_date))} → <strong>${escapeHtml(weighDayShort(r.to_work_date))}</strong> · ${T("ส่ง", "delivery")} ${escapeHtml(weighDayShort(r.from_delivery_date))} → <strong>${escapeHtml(weighDayShort(r.to_delivery_date))}</strong>${r.reason ? " · " + escapeHtml(ppReasonText(r)) : ""}</li>`).join("");
     const prodMoved = hist.some((r) => r.stage !== "delivery");
     notes.push(`<div class="w-note w-note-violet" id="weigh-pp-history">
       <strong>${p.status === "postponed" ? T("ใบนี้เลื่อนผลิต", "This paper is postponed")
         : prodMoved ? T("ใบนี้เคยเลื่อนผลิต", "This order was postponed")
         : T("วันส่งของใบนี้ถูกเลื่อน", "This order's delivery was postponed")}</strong>
+      <div>${escapeHtml(ppMovedText(hist))}</div>
       <ul class="w-pp-list">${rows}</ul>
       ${p.status === "postponed" ? `<span>${T(
         "เมื่อผลิตแล้ว ถ่ายรูปใบที่กรอกน้ำหนักด้วยมือถือตามปกติ — ระบบจะเสนอให้เชื่อมกับใบนี้ หรือพิมพ์น้ำหนักที่นี่แล้วกดยืนยัน",

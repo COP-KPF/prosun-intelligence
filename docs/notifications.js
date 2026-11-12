@@ -37,6 +37,7 @@ const NOTIF_KIND = {
   delivery_postponed:   { label: "Delivery postponed", cls: "n-tag-amber" },
   order_postponed:      { label: "Postponed",    cls: "n-tag-amber" },
   order_postponed_changed: { label: "Postponement changed", cls: "n-tag-red" },
+  delivery_problem:     { label: "Delivery problem", cls: "n-tag-red" },
   payable_proposed:     { label: "To approve",   cls: "n-tag-amber" },
   payable_approved:     { label: "Approved",     cls: "n-tag-green" },
   payable_held:         { label: "Held",         cls: "n-tag-amber" },
@@ -181,6 +182,7 @@ function notifRender() {
           ${detail ? `<details><summary>Details</summary>${detail}</details>` : ""}
           ${n.paper_id && n.kind !== "weighing_deleted" ? `<button type="button" class="btn-link" data-n="open" data-id="${escapeAttr(n.id)}">Open paper ›</button>` : ""}
           ${String(n.kind).startsWith("order_postponed") || n.kind === "delivery_postponed" ? `<button type="button" class="btn-link" data-n="open-postponed" data-id="${escapeAttr(n.id)}">Open postponed orders ›</button>` : ""}
+          ${n.kind === "delivery_problem" ? `<button type="button" class="btn-link" data-n="open-delivery" data-id="${escapeAttr(n.id)}">Open delivery board ›</button>` : ""}
           ${String(n.kind).startsWith("payable_") ? `<button type="button" class="btn-link" data-n="open-payables" data-id="${escapeAttr(n.id)}">Open payables ›</button>` : ""}
           ${n.read_at ? "" : `<button type="button" class="btn-link n-mark" data-n="read" data-id="${escapeAttr(n.id)}">Mark as read</button>`}
         </div>
@@ -231,6 +233,21 @@ notifPanel.addEventListener("click", async (e) => {
       document.querySelector(".page-footer").classList.remove("hidden");
     }
     await switchPaceView("postponed");
+    return;
+  }
+  if (act === "open-delivery") {
+    await notifMarkRead([el.dataset.id]);
+    notifClose();
+    const chooser = document.getElementById("system-chooser");
+    if (chooser && !chooser.classList.contains("hidden")) {
+      chooser.classList.add("hidden");
+      document.querySelector(".toolbar").classList.remove("hidden");
+      document.querySelector(".page-footer").classList.remove("hidden");
+    }
+    const n = N.items.find((x) => x.id === el.dataset.id);
+    const day = n && n.details && n.details.mark && n.details.mark.delivery_date;
+    if (day && typeof DL !== "undefined") { DL.day = day; DL.data = null; DL.sig = ""; }
+    await switchPaceView("delivery");
     return;
   }
   if (act === "open-payables") {
