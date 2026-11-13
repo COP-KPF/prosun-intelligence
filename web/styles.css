@@ -1957,3 +1957,18 @@ header.app-header .notif-panel .n-mark { color: var(--muted); font-weight: 400; 
 }
 #weights-section .ws-moved { white-space: normal; }
 #weights-section .ws-moved-why { color: var(--muted); }
+
+/* ---------- PACE: Refresh button beside each section title (13 Nov 2026) ---------- */
+.pace-refresh-wrap { display: none; align-items: center; gap: 10px; margin-left: auto; }
+body.pace-mode .pace-refresh-wrap { display: flex; }
+.pace-refresh-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; font-weight: 600; white-space: nowrap; }
+.pace-refresh-btn small { font-weight: 400; opacity: 0.75; }
+.pace-refresh-btn:disabled { opacity: 0.6; cursor: wait; }
+.pace-refresh-icon { display: inline-block; font-size: 1.05rem; line-height: 1; }
+.pace-refresh-btn.is-loading .pace-refresh-icon { animation: pace-spin 0.9s linear infinite; }
+@keyframes pace-spin { to { transform: rotate(360deg); } }
+.pace-refresh-stamp { font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
+@media (max-width: 700px) {
+  .pace-refresh-wrap { width: 100%; justify-content: space-between; margin-left: 0; }
+  .pace-refresh-btn small { display: none; }
+}

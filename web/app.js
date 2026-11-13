@@ -1996,6 +1996,7 @@ document.getElementById("pace-menu-btn").addEventListener("click", () =>
 
 async function switchPaceView(view) {
   paceView = view;
+  document.getElementById("pace-refresh-stamp").textContent = "";   // Refresh button's "Updated HH:MM" belongs to the last section
   setPaceTabsForRole();
   if (myProfile.role === "admin") {
     // Coming from the chooser: close the CRM side entirely.
@@ -2087,6 +2088,76 @@ tabWeightsBuyBtn.addEventListener("click", () => { paceWeightsDept = "Purchasing
 tabWeightsMidBtn.addEventListener("click", () => { paceWeightsDept = "Middle office"; switchPaceView("weights"); });
 
 document.getElementById("new-order-btn").addEventListener("click", openOrderEntry);
+
+// ----------------------------------------------------------- Refresh button
+// 13 Nov 2026, Clément: one Refresh button beside the title of every PACE
+// section. It reloads only that section's data — the same loader each
+// section already uses for its own automatic refresh — so filters, the
+// chosen day/week/channel and any open panel stay as they are. It is not a
+// page reload: new app code after a deploy still needs Ctrl+Shift+R.
+const paceRefreshBtn   = document.getElementById("pace-refresh-btn");
+const paceRefreshStamp = document.getElementById("pace-refresh-stamp");
+let paceRefreshing = false;
+
+function paceRefreshTime() {
+  return new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" });
+}
+
+// Text typed in a half-filled form must survive the redraw: the register
+// form on Postponed orders and the problem note on the Delivery board are
+// rebuilt from scratch by their sections.
+function paceKeepTyped() {
+  const els = [...document.querySelectorAll("#pp-form input[id], #pp-form select[id], #pp-form textarea[id], #dl-problem-note")];
+  const saved = els.map(el => [el.id, el.type === "checkbox" ? el.checked : el.value]);
+  return () => {
+    saved.forEach(([id, v]) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (el.type === "checkbox") el.checked = v; else el.value = v;
+    });
+    const ppForm = document.getElementById("pp-form");
+    if (ppForm && saved.length) ppSyncForm(ppForm);
+  };
+}
+
+async function refreshPaceView() {
+  if (paceRefreshing) return;
+  const view = paceView;
+  // Something is being saved right now: reloading under it could show the
+  // old value for a moment. Ask to try again rather than race the save.
+  if ((view === "weighing" && W.saving) || (view === "delivery" && DL.busy)) {
+    paceRefreshStamp.textContent = "Saving… try again in a moment";
+    return;
+  }
+  paceRefreshing = true;
+  paceRefreshBtn.disabled = true;
+  paceRefreshBtn.classList.add("is-loading");
+  paceRefreshStamp.textContent = "Refreshing…";
+  const restore = paceKeepTyped();
+  let ok = true;
+  try {
+    if (view === "orders") await loadOrders({ silent: true });
+    else if (view === "calculator") await loadCalculatorCycles();
+    else if (view === "weighing") await weighLoad();
+    else if (view === "weights") await wsLoad();
+    else if (view === "management") await mgLoad();
+    else if (view === "payables") { await pyFlush(); await pyLoad(); }
+    else if (view === "postponed") await ppLoad();
+    else if (view === "delivery") await dlLoad();
+    restore();
+  } catch (e) {
+    ok = false;
+    console.error("Refresh failed:", e);
+  } finally {
+    paceRefreshing = false;
+    paceRefreshBtn.disabled = false;
+    paceRefreshBtn.classList.remove("is-loading");
+  }
+  if (view !== paceView) return;              // the user moved to another section meanwhile
+  paceRefreshStamp.textContent = ok ? "Updated " + paceRefreshTime() : "Could not refresh — check the connection";
+}
+
+paceRefreshBtn.addEventListener("click", refreshPaceView);
 
 
 // ============================================================================

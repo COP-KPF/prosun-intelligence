@@ -4,15 +4,15 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Klong Phai Farm CRM</title>
-<link rel="stylesheet" href="styles.css?v=20261111-3" />
-<link rel="stylesheet" href="delivery.css?v=20261111-3" />
+<link rel="stylesheet" href="styles.css?v=20261113-1" />
+<link rel="stylesheet" href="delivery.css?v=20261113-1" />
 </head>
 <body>
 
   <!-- ============ LOGIN SCREEN ============ -->
   <div id="login-screen">
     <form class="login-card" id="login-form">
-      <img src="logo.png?v=20261111-3" class="login-logo" alt="Klong Phai Farm" width="160" height="120" />
+      <img src="logo.png?v=20261113-1" class="login-logo" alt="Klong Phai Farm" width="160" height="120" />
       <h1>Klong Phai Farm CRM</h1>
       <p class="subtitle">Sign in with the account your admin created for you.</p>
 
@@ -37,7 +37,7 @@
   <div id="app-screen" class="hidden">
     <header class="app-header">
       <div class="brand-wrap">
-      <img src="logo.png?v=20261111-3" class="brand-logo" alt="Klong Phai Farm" width="64" height="48" />
+      <img src="logo.png?v=20261113-1" class="brand-logo" alt="Klong Phai Farm" width="64" height="48" />
       <div class="brand">
         <strong id="app-title">Klong Phai Farm CRM</strong>
         <span class="brand-sub" id="app-subtitle"></span>
@@ -155,6 +155,15 @@
             <button type="button" class="tab-btn" id="tab-summary" data-view="summary">Team summary</button>
             <button type="button" class="tab-btn" id="tab-products" data-view="products">Products</button>
           </div>
+        </div>
+        <!-- PACE only (13 Nov 2026, Clément): reloads the data of the section
+             on screen, without reloading the page or losing its filters.
+             New app code after a deploy still needs Ctrl+Shift+R. -->
+        <div class="pace-refresh-wrap" id="pace-refresh-wrap">
+          <span class="pace-refresh-stamp" id="pace-refresh-stamp" role="status" aria-live="polite"></span>
+          <button type="button" class="btn-secondary pace-refresh-btn" id="pace-refresh-btn" title="Load the latest data for this section">
+            <span class="pace-refresh-icon" aria-hidden="true">↻</span> Refresh<small>โหลดใหม่</small>
+          </button>
         </div>
         <button class="btn-secondary" id="new-client-btn">+ New client / lead</button>
       </div>
@@ -649,18 +658,18 @@
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
   <!-- QR code on the weighing screen, so the phone opens the camera page -->
   <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
-  <script src="config.js?v=20261111-3"></script>
-  <script src="weighing-common.js?v=20261111-3"></script>
+  <script src="config.js?v=20261113-1"></script>
+  <script src="weighing-common.js?v=20261113-1"></script>
   <!-- weighing.js before app.js: app.js starts the app as soon as it loads,
        and a signed-in factory admin goes straight to openWeighing(). -->
-  <script src="weighing.js?v=20261111-3"></script>
-  <script src="weights-summary.js?v=20261111-3"></script>
-  <script src="postponed.js?v=20261111-3"></script>
-  <script src="delivery.js?v=20261111-3"></script>
-  <script src="management.js?v=20261111-3"></script>
-  <script src="payables-common.js?v=20261111-3"></script>
-  <script src="payables.js?v=20261111-3"></script>
-  <script src="notifications.js?v=20261111-3"></script>
-  <script src="app.js?v=20261111-3"></script>
+  <script src="weighing.js?v=20261113-1"></script>
+  <script src="weights-summary.js?v=20261113-1"></script>
+  <script src="postponed.js?v=20261113-1"></script>
+  <script src="delivery.js?v=20261113-1"></script>
+  <script src="management.js?v=20261113-1"></script>
+  <script src="payables-common.js?v=20261113-1"></script>
+  <script src="payables.js?v=20261113-1"></script>
+  <script src="notifications.js?v=20261113-1"></script>
+  <script src="app.js?v=20261113-1"></script>
 </body>
 </html>

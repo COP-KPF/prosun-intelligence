@@ -81,6 +81,9 @@ async function identify(db: any, req: Request, body: any): Promise<Caller> {
     if (!error && data?.user) {
       const { data: prof } = await db.from("profiles").select("role").eq("id", data.user.id).single();
       if (prof?.role === "accounting") return { kind: "user", id: data.user.id };
+      // Migration 026: someone else allowed to scan (payable_permissions.can_scan).
+      const { data: perm } = await db.from("payable_permissions").select("can_scan").eq("user_id", data.user.id).maybeSingle();
+      if (perm?.can_scan) return { kind: "user", id: data.user.id };
       if (!body?.token) return { kind: "none", reason: "role" };
     }
   }
