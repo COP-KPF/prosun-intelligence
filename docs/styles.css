@@ -1465,6 +1465,17 @@ header.app-header .notif-panel .n-mark { color: var(--muted); font-weight: 400; 
 .ws-changed-tag { display: inline-block; font-size: 0.76rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #f6d6a8; color: #7a4300; }
 .ws-c-checked { background: #e4efe6 !important; border-color: #bfddc8 !important; color: #1e6b3a !important; }
 .ws-c-checked strong { color: #1e6b3a !important; }
+/* Invoice column — accounting's "Invoiced" mark (Migration 030) */
+.ws-c-inv { background: #e4ecf8 !important; border-color: #b6cbec !important; color: #174a94 !important; }
+.ws-c-inv strong { color: #174a94 !important; }
+.ws-inv-col { min-width: 170px; }
+.ws-inv-form { display: flex; gap: 6px; align-items: center; }
+.ws-inv-no { width: 110px; min-height: 30px; padding: 3px 7px; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 0.82rem; }
+.ws-inv-btn { white-space: nowrap; }
+.ws-inv { line-height: 1.3; }
+.ws-inv-done { color: #174a94; }
+.ws-inv-changed { color: #7a4300; }
+.ws-inv-actions { display: flex; gap: 8px; align-items: center; margin-top: 3px; flex-wrap: wrap; }
 
 /* Weighing check screen: every part of a line editable (31 Oct 2026) */
 .w-lines input.w-desc { width: 100%; min-width: 170px; }
@@ -1972,3 +1983,27 @@ body.pace-mode .pace-refresh-wrap { display: flex; }
   .pace-refresh-wrap { width: 100%; justify-content: space-between; margin-left: 0; }
   .pace-refresh-btn small { display: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   Management summary (Migration 031, 13 Nov 2026) — reuses the dashboard's
+   .mg-* pieces; only the summary's own layout is here.
+   --------------------------------------------------------------------------- */
+#mgsummary-section {
+  --mg-done: #2e7d4f; --mg-open: #c9892b; --mg-alert: #a8262c; --mg-good: #1e6b3a;
+  display: flex; flex-direction: column; gap: 16px;
+  font-family: -apple-system, "Segoe UI", "Noto Sans Thai", "Leelawadee UI", Tahoma, sans-serif;
+}
+#mgsummary-section h3 { margin: 0; font-size: 1.02rem; }
+#mgsummary-section p { margin: 0; }
+#mgsummary-section select { min-height: 38px; width: auto; }
+.sm-plot { height: 190px; }
+.sm-pair { grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+.sm-share { min-width: 120px; white-space: nowrap; }
+.sm-bar { display: inline-block; height: 10px; border-radius: 0 4px 4px 0; background: #7a6440; vertical-align: middle; margin-right: 8px; max-width: calc(100% - 44px); }
+.sm-bar-v { font-size: 0.82rem; font-variant-numeric: tabular-nums; vertical-align: middle; }
+.sm-zone { min-height: 30px; padding: 3px 10px; font-size: 0.8rem; }
+#sm-prices .mg-table td { white-space: nowrap; }
+@media (max-width: 700px) {
+  .sm-pair { grid-template-columns: minmax(0, 1fr); }
+}
+

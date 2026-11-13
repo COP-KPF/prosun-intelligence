@@ -57,7 +57,24 @@ const WS = {
   show: "all",         // all | todo (not checked, or changed since) | done
   hist: {},            // paper id → its postponement history (middle office and admin can read it)
   ppForm: null,        // { paper, date, reason, note, error } — the open "postpone delivery" form
+  inv: {},             // paper id → accounting's invoice mark (Migration 030)
+  invDraft: {},        // paper id → invoice number being typed (survives refreshes)
+  invBusy: null,       // paper id being saved
 };
+
+// Accounting (and admin) tick "Invoiced" once the Odoo invoice exists; every
+// other reader of this screen sees the tick read-only (Migration 030).
+function wsCanInvoice() {
+  const r = myProfile && myProfile.role;
+  return r === "accounting" || r === "admin";
+}
+
+// none | done | changed (weights re-confirmed after the invoice was marked)
+function wsInvState(paperId) {
+  const m = WS.inv[paperId];
+  if (!m) return "none";
+  return m.changed ? "changed" : "done";
+}
 
 // Only the middle office postpones a delivery here (the database checks too).
 function wsCanPostpone() {
@@ -155,20 +172,25 @@ function wsSchedule() {
   if (!wsOpen()) return;
   WS.timer = setTimeout(async () => {
     if (!wsOpen()) return;
-    if (document.hidden || WS.loading || WS.ppForm) { wsSchedule(); return; }
+    if (document.hidden || WS.loading || WS.ppForm || WS.invBusy || wsTypingInvoice()) { wsSchedule(); return; }
     await wsLoad({ silent: true });
   }, WS_REFRESH_MS);
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && wsOpen() && !WS.loading && !WS.ppForm) wsLoad({ silent: true });
+  if (!document.hidden && wsOpen() && !WS.loading && !WS.ppForm && !WS.invBusy && !wsTypingInvoice()) wsLoad({ silent: true });
 });
+
+function wsTypingInvoice() {
+  const a = document.activeElement;
+  return !!(a && a.classList && a.classList.contains("ws-inv-no") && wsSection.contains(a));
+}
 
 document.getElementById("switch-system-btn").addEventListener("click", closeWeights);
 document.getElementById("sign-out-btn").addEventListener("click", () => {
   closeWeights();
   WS.from = WS.to = null; WS.preset = "today"; WS.rows = []; WS.q = ""; WS.company = "all"; WS.show = "all"; WS.sig = "";
-  WS.hist = {}; WS.ppForm = null;
+  WS.hist = {}; WS.ppForm = null; WS.inv = {}; WS.invDraft = {}; WS.invBusy = null;
 });
 
 
@@ -200,8 +222,8 @@ async function wsLoad(opts = {}) {
   }
   const rows = lines.data || [];
   const count = pending.error ? WS.pending : Number(pending.data) || 0;
-  await wsLoadHist(rows);
-  const sig = JSON.stringify([rows, count, WS.hist]);
+  await Promise.all([wsLoadHist(rows), wsLoadInv(rows)]);
+  const sig = JSON.stringify([rows, count, WS.hist, WS.inv]);
   WS.updatedAt = new Date();
   if (silent && sig === WS.sig) {
     const st = document.getElementById("ws-updated");
@@ -225,6 +247,17 @@ async function wsLoadHist(rows) {
   WS.hist = hist;
 }
 
+// Invoice marks of the papers on screen. Quietly empty before Migration 030.
+async function wsLoadInv(rows) {
+  const ids = [...new Set(rows.map((r) => r.paper_id))];
+  const inv = {};
+  if (ids.length) {
+    const { data, error } = await sb.rpc("weighing_invoice_marks", { p_papers: ids });
+    if (!error) (data || []).forEach((m) => { inv[m.paper_id] = m; });
+  }
+  WS.inv = inv;
+}
+
 function wsUpdatedText() {
   return WS.updatedAt
     ? T(`อัปเดต ${weighTime(WS.updatedAt.toISOString())} · รีเฟรชเองทุก 20 วินาที`, `Updated ${weighTime(WS.updatedAt.toISOString())} · refreshes by itself every 20 s`)
@@ -238,6 +271,7 @@ function wsFiltered(ignoreShow) {
       const st = wsCheckState(r);
       if (WS.show === "done" && st !== "checked") return false;
       if (WS.show === "todo" && st === "checked") return false;
+      if (WS.show === "noinv" && wsInvState(r.paper_id) === "done") return false;
     }
     if (WS.company !== "all" && r.company !== WS.company) return false;
     if (!q) return true;
@@ -270,6 +304,9 @@ function wsRender() {
       <div class="w-small ws-howto">${T(
         `คลิกที่ใบงานเพื่อทำเครื่องหมายว่าตรวจแล้ว — เพื่อนใน${WS_DEPT_LABEL[WS.dept]()}จะเห็นด้วย · เอาเครื่องหมายออกที่ช่อง ✓`,
         `Click a paper to mark it checked — your ${WS_DEPT_LABEL[WS.dept]()} colleagues see it too · untick the ✓ box to undo`)}</div>
+      ${wsCanInvoice() ? `<div class="w-small ws-howto">${T(
+        "ออกใบแจ้งหนี้ใน Odoo แล้ว ให้กด “🧾 ออกแล้ว” ในช่องใบแจ้งหนี้ (ใส่เลขที่ได้ถ้ามี) — ฝ่ายจัดส่งจะเห็นทันที",
+        "Once the Odoo invoice is made, press “🧾 Invoiced” in the Invoice column (the invoice number is optional) — the delivery team sees it at once.")}</div>` : ""}
       ${wsCanPostpone() ? `<div class="w-small ws-howto">${T(
         "ถ้าต้องเลื่อนวันส่ง กด “เลื่อนส่ง” ใต้วันส่ง — ต้องเลือกสาเหตุ น้ำหนักไม่เปลี่ยน ผู้บริหารจะได้รับแจ้ง",
         "To postpone a delivery, press “Postpone” under the delivery date — a reason is required; the weights stay as confirmed, and management is notified.")}</div>` : ""}
@@ -295,6 +332,7 @@ function wsRender() {
           <option value="all"${WS.show === "all" ? " selected" : ""}>${T("ทั้งหมด", "All papers")}</option>
           <option value="todo"${WS.show === "todo" ? " selected" : ""}>${T("ยังไม่ได้ตรวจ", "Not checked yet")}</option>
           <option value="done"${WS.show === "done" ? " selected" : ""}>${T("ตรวจแล้ว", "Checked")}</option>
+          <option value="noinv"${WS.show === "noinv" ? " selected" : ""}>${T("ยังไม่ออกใบแจ้งหนี้", "Not invoiced yet")}</option>
         </select></label>
       <label class="ws-search">${T("ค้นหา", "Search")}<input type="search" data-ws-field="q" value="${escapeAttr(WS.q)}" placeholder="${T("ลูกค้า, PO หรือสินค้า", "Customer, PO or product")}"></label>
       <button type="button" class="w-btn w-btn-outline" data-ws="refresh">${T("โหลดใหม่", "Refresh")}</button>
@@ -315,7 +353,11 @@ function wsResultsHtml() {
   const changedP = new Set(base.filter((r) => wsCheckState(r) === "changed").map((r) => r.paper_id)).size;
   const totalKg = rows.reduce((s, r) => s + (r.actual_kg === null ? 0 : Number(r.actual_kg)), 0);
   const canPP = wsCanPostpone();
-  const cols = 12;
+  const canInv = wsCanInvoice();
+  const basePaperIds = [...new Set(base.map((r) => r.paper_id))];
+  const invP = basePaperIds.filter((id) => wsInvState(id) === "done").length;
+  const invChangedP = basePaperIds.filter((id) => wsInvState(id) === "changed").length;
+  const cols = 13;
   let prev = null;
 
   return `
@@ -325,7 +367,11 @@ function wsResultsHtml() {
     <div class="w-counter"><span>${T("น้ำหนักรวม (kg)", "Total actual (kg)")}</span><strong>${weighFmt(totalKg)}</strong></div>
     <div class="w-counter ${WS.pending ? "w-c-amber" : ""}"><span>${T("ยังไม่ยืนยัน", "Not yet confirmed")}</span><strong>${WS.pending}</strong></div>
     <div class="w-counter ws-c-checked"><span>${T("ตรวจแล้ว", "Checked")} (${escapeHtml(WS_DEPT_LABEL[WS.dept]())})</span><strong>${doneP} / ${basePapers}</strong></div>
+    <div class="w-counter ws-c-inv"><span>🧾 ${T("ออกใบแจ้งหนี้แล้ว", "Invoiced")}</span><strong>${invP} / ${basePapers}</strong></div>
   </div>
+  ${invChangedP ? `<div class="w-note w-note-amber ws-pending">${T(
+    `${invChangedP} ใบที่ออกใบแจ้งหนี้แล้ว ถูกแก้น้ำหนักที่โรงงานภายหลัง — ตรวจใบแจ้งหนี้ใน Odoo`,
+    `${invChangedP} invoiced paper${invChangedP === 1 ? " was" : "s were"} corrected at the factory afterwards — check the invoice in Odoo`)}</div>` : ""}
   ${changedP ? `<div class="w-note w-note-amber ws-pending">${T(
     `${changedP} ใบที่ตรวจแล้วถูกแก้น้ำหนักที่โรงงานภายหลัง (สีส้ม) — ตรวจอีกครั้ง`,
     `${changedP} checked paper${changedP === 1 ? " was" : "s were"} corrected at the factory afterwards (amber) — check again`)}</div>` : ""}
@@ -346,7 +392,7 @@ function wsResultsHtml() {
       <table class="w-table" id="weights-table">
         <thead><tr><th class="ws-cb-col" title="${T("ตรวจแล้ว", "Checked")}">✓</th><th>${T("วันส่ง", "Delivery")}</th><th>${T("บริษัท", "Company")}</th><th>PO</th><th>${T("ลูกค้า", "Customer")}</th><th>${T("สินค้า", "Product")}</th>
           <th class="w-num">${T("สั่ง", "Ordered")}</th><th class="w-num">${T("ชั่งจริง (kg)", "Actual (kg)")}</th><th class="w-num">${T("ต่าง", "Difference")}</th>
-          <th>${T("ยืนยันโดย", "Confirmed by")}</th><th>${T("รูป", "Photo")}</th><th>${T("ตรวจแล้ว", "Checked")} · ${escapeHtml(WS_DEPT_LABEL[WS.dept]())}</th></tr></thead>
+          <th>${T("ยืนยันโดย", "Confirmed by")}</th><th>${T("รูป", "Photo")}</th><th>${T("ตรวจแล้ว", "Checked")} · ${escapeHtml(WS_DEPT_LABEL[WS.dept]())}</th><th>🧾 ${T("ใบแจ้งหนี้", "Invoice")}</th></tr></thead>
         <tbody>${WS.loading ? `<tr><td colspan="${cols}" class="w-empty">${T("กำลังโหลด…", "Loading…")}</td></tr>`
           : rows.length ? rows.map((r, i) => {
           const first = r.paper_id !== prev;
@@ -371,6 +417,7 @@ function wsResultsHtml() {
               : `<button type="button" class="btn-link" data-ws="photo" data-path="${escapeAttr(r.photo_path)}" data-paper="${escapeAttr(r.paper_id)}">${T("ดูรูป", "View")}</button>`) : ""}</td>
             <td class="ws-check-who">${first ? (st === "checked" ? `✓ ${escapeHtml(`${r.checked_by_name || ""} ${wsWhen(r.checked_at)}`.trim())}`
               : st === "changed" ? `<span class="ws-changed-tag">${T("แก้หลังตรวจ — ตรวจอีกครั้ง", "Changed since checked")}</span>` : "") : ""}</td>
+            <td class="ws-inv-col">${first ? wsInvCellHtml(r, canInv) : ""}</td>
           </tr>${last && canPP && WS.ppForm && WS.ppForm.paper === r.paper_id ? wsPostponeRowHtml(r, cols) : ""}`;
         }).join("") : `<tr><td colspan="${cols}" class="w-empty">${WS.rows.length
           ? T("ไม่มีรายการที่ตรงกับตัวกรอง", "No lines match the filters")
@@ -381,6 +428,51 @@ function wsResultsHtml() {
       "แถวสีเขียว = ตรวจแล้ว · แถวสีส้ม = โรงงานแก้น้ำหนักหลังตรวจ · สินค้าที่สั่งเป็นตัว / แพค แสดงน้ำหนักเฉลี่ยต่อหน่วยในช่อง “ต่าง” · ตัวเลขสีส้ม = ต่างจากที่สั่งเกิน ±5% · * = ใบงานไม่มีวันส่ง ใช้วันที่ชั่ง · รูปเก็บไว้ 4 สัปดาห์",
       "Green rows = checked · amber rows = corrected at the factory after they were checked · lines ordered by the piece or pack show the average kg per unit under “Difference” · orange figures = more than ±5% off the order · * = no delivery date on the paper, weighing day used · photos are kept 4 weeks")}</p>
   </section>`;
+}
+
+// The Invoice cell: accounting / admin tick it (optional Odoo number); the
+// other departments see it read-only.
+function wsInvCellHtml(r, canInv) {
+  const id = r.paper_id;
+  const m = WS.inv[id];
+  const st = wsInvState(id);
+  const busy = WS.invBusy === id ? " disabled" : "";
+  if (m) {
+    const who = escapeHtml(`${m.invoiced_by_name || ""} ${wsWhen(m.invoiced_at)}`.trim());
+    return `<div class="ws-inv ws-inv-${st}">🧾 ${m.invoice_no ? `<strong class="w-mono">${escapeHtml(m.invoice_no)}</strong>` : `<strong>${T("ออกแล้ว", "Invoiced")}</strong>`}
+        <div class="w-small w-muted">${who}</div>
+        ${st === "changed" ? `<span class="ws-changed-tag">${T("น้ำหนักเปลี่ยนหลังออกใบแจ้งหนี้", "Weights changed after invoice")}</span>` : ""}
+      </div>
+      ${canInv ? `<div class="ws-inv-actions">
+        ${st === "changed" ? `<button type="button" class="w-btn w-btn-sm" data-ws="inv-mark" data-paper="${escapeAttr(id)}" data-keep="1"${busy}>${T("ตรวจแล้ว ใบแจ้งหนี้ถูกต้อง", "Invoice checked")}</button>` : ""}
+        <button type="button" class="btn-link ws-inv-undo" data-ws="inv-undo" data-paper="${escapeAttr(id)}"${busy}>${T("ยกเลิก", "Undo")}</button></div>` : ""}`;
+  }
+  if (!canInv) return `<span class="w-muted">${T("ยังไม่ออก", "Not yet")}</span>`;
+  const draft = WS.invDraft[id] || "";
+  return `<div class="ws-inv-form">
+      <input type="text" class="ws-inv-no" data-ws-inv-no="${escapeAttr(id)}" value="${escapeAttr(draft)}" maxlength="40"
+        placeholder="${T("เลขที่ (ถ้ามี)", "No. (optional)")}" aria-label="${T("เลขที่ใบแจ้งหนี้", "Invoice number")}">
+      <button type="button" class="w-btn w-btn-sm ws-inv-btn" data-ws="inv-mark" data-paper="${escapeAttr(id)}"${busy}>🧾 ${T("ออกแล้ว", "Invoiced")}</button>
+    </div>`;
+}
+
+async function wsInvoice(paperId, invoiced, number) {
+  if (WS.invBusy) return;
+  WS.invBusy = paperId;
+  wsRenderResults();
+  const { data, error } = await sb.rpc("weighing_mark_invoiced", { p_paper: paperId, p_invoiced: invoiced, p_invoice_no: number || null });
+  WS.invBusy = null;
+  if (error) {
+    WS.message = { kind: "error", text: (/weighing_mark_invoiced|schema cache|Could not find/i.test(error.message)
+      ? T("ยังไม่ได้รัน Migration 030 ใน Supabase", "Migration 030 has not been run in Supabase yet")
+      : T("บันทึกใบแจ้งหนี้ไม่ได้: ", "Could not save the invoice mark: ") + error.message) };
+    wsRender();
+    return;
+  }
+  if (invoiced) { WS.inv[paperId] = data; delete WS.invDraft[paperId]; }
+  else delete WS.inv[paperId];
+  WS.sig = "";
+  wsRenderResults();
 }
 
 // "↻ Postponed · delivery from 11 Nov to 13 Nov" under the delivery date, for
@@ -513,6 +605,18 @@ wsSection.addEventListener("click", async (e) => {
   }
   if (act === "pp-cancel") { WS.ppForm = null; wsRenderResults(); return; }
   if (act === "export") { wsExport(); return; }
+  if (act === "inv-mark") {
+    const id = el.dataset.paper;
+    const keep = el.dataset.keep && WS.inv[id] ? WS.inv[id].invoice_no : null;
+    const input = wsSection.querySelector(`[data-ws-inv-no="${CSS.escape(id)}"]`);
+    await wsInvoice(id, true, keep || (input ? input.value.trim() : WS.invDraft[id] || ""));
+    return;
+  }
+  if (act === "inv-undo") {
+    if (!confirm(T("ยกเลิกเครื่องหมายว่าออกใบแจ้งหนี้แล้ว?", "Remove the “invoiced” mark of this paper?"))) return;
+    await wsInvoice(el.dataset.paper, false);
+    return;
+  }
   if (act === "photo") {
     const row = WS.rows.find((r) => r.paper_id === el.dataset.paper);
     const opening = wsOpenPhoto(el.dataset.path);      // opens the tab during the click
@@ -546,8 +650,15 @@ async function wsMark(paperId, checked) {
   wsRenderResults();
 }
 
+wsSection.addEventListener("keydown", async (e) => {
+  if (e.key !== "Enter" || !e.target.dataset || !e.target.dataset.wsInvNo) return;
+  e.preventDefault();
+  await wsInvoice(e.target.dataset.wsInvNo, true, e.target.value.trim());
+});
+
 wsSection.addEventListener("change", async (e) => {
   if (wsPpField(e.target)) return;
+  if (e.target.dataset.wsInvNo) return;
   if (e.target.dataset.wsCheck) { await wsMark(e.target.dataset.wsCheck, e.target.checked); return; }
   const f = e.target.dataset.wsField;
   if (!f || f === "q") return;
@@ -564,6 +675,7 @@ wsSection.addEventListener("change", async (e) => {
 // Search filters as you type, redrawing only the results (the box keeps focus).
 wsSection.addEventListener("input", (e) => {
   if (wsPpField(e.target)) return;
+  if (e.target.dataset.wsInvNo) { WS.invDraft[e.target.dataset.wsInvNo] = e.target.value; return; }
   if (e.target.dataset.wsField !== "q") return;
   WS.q = e.target.value;
   wsRenderResults();
@@ -611,10 +723,10 @@ function wsExport() {
   const header = WEIGH_LANG === "en"
     ? ["Delivery date", "Weighing day", "Company", "PO", "Customer", "Line", "Product", "Ordered",
        "Ordered qty", "Unit", "Actual (kg)", "Difference (kg)", "kg per unit", "Corrected by hand",
-       "Confirmed by", "Confirmed at", "Checked (" + WS_DEPT_LABEL[WS.dept]() + ") by", "Checked at", "Postponed"]
+       "Confirmed by", "Confirmed at", "Checked (" + WS_DEPT_LABEL[WS.dept]() + ") by", "Checked at", "Postponed", "Invoice"]
     : ["วันส่ง", "วันที่ชั่ง", "บริษัท", "PO", "ลูกค้า", "ลำดับ", "สินค้า", "สั่ง",
        "จำนวนสั่ง", "หน่วย", "น้ำหนักจริง (kg)", "ต่าง (kg)", "kg ต่อหน่วย", "แก้ไขด้วยมือ",
-       "ยืนยันโดย", "เวลายืนยัน", "ตรวจแล้ว (" + WS_DEPT_LABEL[WS.dept]() + ") โดย", "เวลาตรวจ", "เลื่อน"];
+       "ยืนยันโดย", "เวลายืนยัน", "ตรวจแล้ว (" + WS_DEPT_LABEL[WS.dept]() + ") โดย", "เวลาตรวจ", "เลื่อน", "ใบแจ้งหนี้"];
   const out = [header];
   rows.forEach((r) => {
     const d = weighDiff(r);
@@ -632,9 +744,11 @@ function wsExport() {
       wsCheckState(r) === "checked" ? (r.checked_by_name || "") : wsCheckState(r) === "changed" ? T("แก้หลังตรวจ", "Changed since checked") : "",
       wsCheckState(r) === "checked" && r.checked_at ? new Date(new Date(r.checked_at).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ") : "",
       ppMovedText(WS.hist[r.paper_id]),
+      WS.inv[r.paper_id] ? (WS.inv[r.paper_id].invoice_no || T("ออกแล้ว", "Invoiced"))
+        + (WS.inv[r.paper_id].changed ? T(" (น้ำหนักเปลี่ยนหลังออก)", " (weights changed after)") : "") : "",
     ]);
   });
   const name = WS.from === WS.to ? WS.from : `${WS.from} to ${WS.to}`;
   downloadXlsx(`Confirmed weights ${name}.xlsx`, T("น้ำหนักที่ยืนยันแล้ว", "Confirmed weights"), out,
-    [12, 12, 12, 13, 26, 6, 40, 12, 9, 7, 12, 12, 10, 10, 16, 16, 18, 16, 34]);
+    [12, 12, 12, 13, 26, 6, 40, 12, 9, 7, 12, 12, 10, 10, 16, 16, 18, 16, 34, 20]);
 }

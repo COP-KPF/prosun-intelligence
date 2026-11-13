@@ -15,6 +15,10 @@
 // middle office, register). Big tiles on top count each status and filter
 // the board; a bar shows how far the day's deliveries have got.
 //
+// 13 Nov (Migration 030): every card also shows the kg in large (actual once
+// finished, ordered before) and accounting's invoice status; a line on top
+// counts orders finished, kg finished and orders invoiced for the day.
+//
 // The delivery team marks Out / Delivered / Problem (comment required — the
 // admins get a bell). Reasons for postponements are shown to admin and the
 // middle office only; the database leaves them out for everyone else.
@@ -38,6 +42,7 @@ const DL = {
   sig: "",            // data signature, to redraw only on change
   only: null,         // status key the tiles filter on (null = all)
   company: "all",     // all | Prosun Farm | Prosun Food
+  noInvoice: false,   // show only finished orders without an invoice
   q: "",              // search
   open: new Set(),    // cards whose product list is open
   problemFor: null,   // paper id whose problem form is open
@@ -55,7 +60,7 @@ const DL_STATES = {
                hint: () => T("เลื่อนมาวันนี้ ยังไม่ได้ผลิต", "Postponed to this day, not produced yet") },
   checking:  { icon: "⚖️", cls: "dl-amber",  label: () => T("ผลิตแล้ว รอยืนยันน้ำหนัก", "Produced · checking weights"),
                hint: () => T("ถ่ายรูปใบงานแล้ว กำลังตรวจน้ำหนัก", "Paper photographed, weights being checked") },
-  ready:     { icon: "✅", cls: "dl-green",  label: () => T("พร้อมส่ง", "Ready to deliver"),
+  ready:     { icon: "✅", cls: "dl-green",  label: () => T("ผลิตเสร็จ พร้อมส่ง", "Finished · ready"),
                hint: () => T("ยืนยันน้ำหนักแล้ว", "Weights confirmed") },
   out:       { icon: "🚚", cls: "dl-blue",   label: () => T("ออกส่งแล้ว", "On the road"),
                hint: () => T("กำลังไปส่ง", "Out for delivery") },
@@ -69,7 +74,7 @@ const DL_STATES = {
 const DL_ORDER = ["produce", "checking", "ready", "out", "delivered", "problem", "pushed"];
 const DL_LANES = [
   { key: "production", states: ["produce", "checking"], icon: "🏭", label: () => T("กำลังผลิต", "In production") },
-  { key: "ready",      states: ["ready"],               icon: "✅", label: () => T("พร้อมส่ง", "Ready to deliver") },
+  { key: "ready",      states: ["ready"],               icon: "✅", label: () => T("ผลิตเสร็จ พร้อมส่ง", "Finished · ready") },
   { key: "road",       states: ["problem", "out"],      icon: "🚚", label: () => T("ออกส่ง", "On the road") },
   { key: "done",       states: ["delivered"],           icon: "🏁", label: () => T("ส่งถึงแล้ว", "Delivered") },
 ];
@@ -83,6 +88,15 @@ function dlStateOf(p) {
 }
 
 function dlCanMark() { return !!(DL.data && DL.data.can_mark); }
+
+// Finished = weights confirmed at the factory.
+function dlFinished(p) { return p.status === "confirmed"; }
+
+// Accounting's invoice mark (Migration 030): none | done | changed.
+function dlInvState(p) {
+  if (!p.invoice) return "none";
+  return p.invoice.changed ? "changed" : "done";
+}
 
 // kg for a card: confirmed weights once confirmed, else the ordered kg ("~").
 function dlKg(p) {
@@ -134,7 +148,7 @@ function dlIsOpen() { return !dlSection.classList.contains("hidden"); }
 document.getElementById("switch-system-btn").addEventListener("click", closeDelivery);
 document.getElementById("sign-out-btn").addEventListener("click", () => {
   closeDelivery();
-  Object.assign(DL, { day: null, data: null, sig: "", only: null, company: "all", q: "", problemFor: null, message: null });
+  Object.assign(DL, { day: null, data: null, sig: "", only: null, company: "all", noInvoice: false, q: "", problemFor: null, message: null });
   DL.open.clear();
 });
 
@@ -228,6 +242,7 @@ function dlItems() {
 function dlMatches(it) {
   const p = it.p;
   if (DL.company !== "all" && p.company !== DL.company) return false;
+  if (DL.noInvoice && (it.kind !== "paper" || !dlFinished(p) || dlInvState(p) === "done")) return false;
   if (DL.q) {
     const lines = Array.isArray(p.lines) ? p.lines : [];   // pushed items carry a count, not lines
     const hay = [p.customer_name, p.po_number, p.product,
@@ -310,12 +325,35 @@ function dlProgressHtml(items) {
   </div>`;
 }
 
+// The three things the team asked for, for the whole day: how many orders are
+// finished, how many kg, and how many already have their invoice.
+function dlSummaryHtml(items) {
+  const due = items.filter(it => it.kind === "paper");
+  if (!due.length) return "";
+  const fin = due.filter(it => dlFinished(it.p));
+  const kg = fin.reduce((t, it) => t + ((dlKg(it.p) || {}).kg || 0), 0);
+  const inv = fin.filter(it => dlInvState(it.p) === "done").length;
+  const missing = fin.length - inv;
+  const fmt = n => n.toLocaleString("en-GB", { maximumFractionDigits: 1 });
+  return `<div class="dl-summary">
+    <div class="dl-sum dl-sum-fin"><span class="dl-sum-n">${fin.length}<small> / ${due.length}</small></span>
+      <span class="dl-sum-l">✅ ${T("ออเดอร์ผลิตเสร็จ", "orders finished")}</span></div>
+    <div class="dl-sum dl-sum-kg"><span class="dl-sum-n">${fmt(kg)}<small> kg</small></span>
+      <span class="dl-sum-l">⚖️ ${T("น้ำหนักจริงที่ผลิตเสร็จ", "actual kg finished")}</span></div>
+    <button type="button" class="dl-sum dl-sum-inv ${missing ? "dl-sum-warn" : ""} ${DL.noInvoice ? "on" : ""}" data-act="noinv" aria-pressed="${DL.noInvoice}"
+      title="${T("กดเพื่อดูเฉพาะที่ยังไม่มีใบแจ้งหนี้", "Click to show only finished orders without an invoice")}">
+      <span class="dl-sum-n">${inv}<small> / ${fin.length}</small></span>
+      <span class="dl-sum-l">🧾 ${T("ออกใบแจ้งหนี้แล้ว", "invoiced")}${missing ? ` · <strong>${missing} ${T("ยังไม่ออก", "missing")}</strong>` : ""}</span></button>
+  </div>`;
+}
+
 function dlFiltersHtml() {
   const c = (v, label) =>
     `<button type="button" class="ws-chip ${DL.company === v ? "on" : ""}" data-act="company" data-company="${escapeAttr(v)}" aria-pressed="${DL.company === v}">${label}</button>`;
   return `<div class="dl-filters">
     <div class="ws-presets">${c("all", T("ทุกบริษัท", "All companies"))}${c("Prosun Farm", "PSFarm")}${c("Prosun Food", "PSFood")}</div>
     <input type="search" id="dl-search" class="dl-search" placeholder="${T("ค้นหาลูกค้า / PO / สินค้า", "Search client / PO / product")}" value="${escapeAttr(DL.q)}" aria-label="${T("ค้นหา", "Search")}">
+    ${DL.noInvoice ? `<button type="button" class="ws-chip on" data-act="noinv">🧾 ${T("เฉพาะที่ยังไม่มีใบแจ้งหนี้", "Only without invoice")} ✕</button>` : ""}
     ${DL.only ? `<button type="button" class="ws-chip on" data-act="only" data-state="${DL.only}">${T("แสดงเฉพาะ", "Showing only")}: ${escapeHtml(DL_STATES[DL.only].label())} ✕</button>` : ""}
     <span class="mg-small mg-muted dl-stamp" id="dl-stamp"></span>
   </div>`;
@@ -342,7 +380,7 @@ function dlLinesHtml(p) {
       <td class="mg-n">${l.actual_kg !== null && l.actual_kg !== undefined ? `${Number(l.actual_kg).toLocaleString("en-GB", { maximumFractionDigits: 2 })}${confirmed ? "" : "?"}` : "—"}</td>
     </tr>`).join("");
   return `<details class="dl-lines" data-id="${escapeAttr(p.id)}" ${open ? "open" : ""}>
-    <summary>${T(`${lines.length} รายการ`, `${lines.length} product${lines.length === 1 ? "" : "s"}`)}${dlKg(p) ? " · " + escapeHtml(dlKgText(dlKg(p))) : ""}</summary>
+    <summary>${T(`ดูสินค้า ${lines.length} รายการ`, `${lines.length} product${lines.length === 1 ? "" : "s"} — kg per product`)}</summary>
     <table><thead><tr><th>${T("สินค้า", "Product")}</th><th class="mg-n">${T("สั่ง", "Ordered")}</th><th class="mg-n">kg</th></tr></thead><tbody>${rows}</tbody></table>
   </details>`;
 }
@@ -378,6 +416,29 @@ function dlActionsHtml(p, state) {
   return `<div class="dl-actions">${undo}</div>`;   // delivered
 }
 
+// Big kg figure: confirmed (actual) once finished, otherwise what was ordered.
+function dlKgBigHtml(p) {
+  const k = dlKg(p);
+  if (!k) return "";
+  const actual = dlFinished(p);
+  return `<div class="dl-kg ${actual ? "dl-kg-actual" : "dl-kg-ordered"}">
+    <span class="dl-kg-n">${actual ? "" : "~"}${k.kg.toLocaleString("en-GB", { maximumFractionDigits: 1 })}<small> kg</small></span>
+    <span class="dl-kg-l">${actual ? T("ชั่งจริง", "actual") : T("ตามที่สั่ง", "ordered")}</span>
+  </div>`;
+}
+
+function dlInvoiceHtml(p) {
+  const st = dlInvState(p);
+  if (st === "done") {
+    return `<div class="dl-inv dl-inv-done">🧾 ${T("ออกใบแจ้งหนี้แล้ว", "Invoiced")}${p.invoice.invoice_no ? ` · <strong>${escapeHtml(p.invoice.invoice_no)}</strong>` : ""}</div>`;
+  }
+  if (st === "changed") {
+    return `<div class="dl-inv dl-inv-changed">🧾 ${T("น้ำหนักเปลี่ยนหลังออกใบแจ้งหนี้ — รอบัญชีตรวจ", "Weights changed after invoice — accounting to check")}${p.invoice.invoice_no ? ` · ${escapeHtml(p.invoice.invoice_no)}` : ""}</div>`;
+  }
+  if (dlFinished(p)) return `<div class="dl-inv dl-inv-none">🧾 ${T("ยังไม่ออกใบแจ้งหนี้", "No invoice yet")}</div>`;
+  return `<div class="dl-inv dl-inv-wait">🧾 ${T("ออกใบแจ้งหนี้ได้เมื่อยืนยันน้ำหนัก", "Invoice after weights are confirmed")}</div>`;
+}
+
 function dlPaperCardHtml(it) {
   const p = it.p;
   const s = DL_STATES[it.state];
@@ -397,8 +458,14 @@ function dlPaperCardHtml(it) {
       <span class="dl-badge ${s.cls}"><span aria-hidden="true">${s.icon}</span> ${escapeHtml(s.label())}</span>
       ${dlCompanyChip(p.company)}
     </div>
-    <h4 class="dl-client">${escapeHtml(name)}</h4>
-    <div class="dl-meta">${dlPo(p.po_number)}</div>
+    <div class="dl-main">
+      <div class="dl-main-left">
+        <h4 class="dl-client">${escapeHtml(name)}</h4>
+        <div class="dl-meta">${dlPo(p.po_number)}</div>
+      </div>
+      ${dlKgBigHtml(p)}
+    </div>
+    ${dlInvoiceHtml(p)}
     ${moved || unconfirmed || reopened ? `<div class="dl-tags">${moved}${unconfirmed}${reopened}</div>` : ""}
     ${mark}${note}
     ${dlLinesHtml(p)}
@@ -432,6 +499,12 @@ function dlPushedCardHtml(it) {
   </article>`;
 }
 
+function dlLaneKg(cards) {
+  let kg = 0, approx = false;
+  cards.forEach(it => { const k = dlKg(it.p); if (k) { kg += k.kg; approx = approx || k.approx; } });
+  return kg ? `${approx ? "~" : ""}${kg.toLocaleString("en-GB", { maximumFractionDigits: 1 })} kg` : "";
+}
+
 function dlDrawBoard() {
   const wrap = document.getElementById("dl-board-wrap");
   if (!wrap) return;
@@ -455,7 +528,8 @@ function dlDrawBoard() {
       .sort((a, b) => lane.states.indexOf(a.state) - lane.states.indexOf(b.state));
     const hidden = DL.only && !lane.states.includes(DL.only);
     return `<section class="dl-lane dl-lane-${lane.key} ${hidden ? "dl-lane-dim" : ""}" aria-label="${escapeAttr(lane.label())}">
-      <header class="dl-lane-head"><span aria-hidden="true">${lane.icon}</span> ${escapeHtml(lane.label())} <span class="dl-lane-n">${cards.length}</span></header>
+      <header class="dl-lane-head"><span aria-hidden="true">${lane.icon}</span> ${escapeHtml(lane.label())}
+        ${cards.length ? `<span class="dl-lane-kg">${dlLaneKg(cards)}</span>` : ""}<span class="dl-lane-n">${cards.length}</span></header>
       <div class="dl-lane-body">${cards.length ? cards.map(dlPaperCardHtml).join("") : `<p class="dl-empty">—</p>`}</div>
     </section>`;
   }).join("");
@@ -474,6 +548,7 @@ function dlDrawBoard() {
 
   wrap.innerHTML = `${msg}
     ${dlTilesHtml(items)}
+    ${dlSummaryHtml(all.filter(it => DL.company === "all" || it.p.company === DL.company))}
     ${dlProgressHtml(items)}
     ${dlFiltersHtml()}
     ${nothing || `<div class="dl-board">${lanes}</div>${pushedHtml}`}`;
@@ -506,6 +581,7 @@ dlSection.addEventListener("click", async e => {
   }
   else if (act === "only") { DL.only = DL.only === b.dataset.state ? null : b.dataset.state; dlDrawBoard(); }
   else if (act === "company") { DL.company = b.dataset.company; dlDrawBoard(); }
+  else if (act === "noinv") { DL.noInvoice = !DL.noInvoice; dlDrawBoard(); }
   else if (act === "mark") await dlMark(b.dataset.id, b.dataset.status);
   else if (act === "undo") {
     if (!confirm(T("ล้างสถานะการส่งของออเดอร์นี้?", "Clear the delivery status of this order?"))) return;

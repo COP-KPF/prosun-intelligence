@@ -123,6 +123,39 @@
 .dl-lines th { color: var(--muted); font-weight: 600; }
 .dl-lines .mg-n { text-align: right; white-space: nowrap; }
 
+/* ---- kg and invoice on the card (Migration 030) ---- */
+.dl-main { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.dl-main-left { min-width: 0; }
+.dl-kg { display: flex; flex-direction: column; align-items: flex-end; flex: none; line-height: 1.05;
+  padding: 4px 9px; border-radius: 10px; background: #f5f0e4; border: 1px solid #e3d6bb; }
+.dl-kg-n { font-size: 1.45rem; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dl-kg-n small { font-size: .8rem; font-weight: 700; margin-left: 1px; }
+.dl-kg-l { font-size: .7rem; color: var(--muted); font-weight: 600; }
+.dl-kg-ordered .dl-kg-n { color: var(--muted); font-size: 1.2rem; }
+.dl-inv { font-size: .84rem; font-weight: 700; padding: 4px 8px; border-radius: 8px; border: 1px solid transparent; }
+.dl-inv-done    { background: var(--dl-blue-bg);  color: var(--dl-blue);  border-color: var(--dl-blue-bd); }
+.dl-inv-none    { background: var(--dl-red-bg);   color: var(--dl-red);   border-color: var(--dl-red-bd); }
+.dl-inv-changed { background: var(--dl-amber-bg); color: var(--dl-amber); border-color: var(--dl-amber-bd); }
+.dl-inv-wait    { background: transparent; color: var(--muted); font-weight: 600; border: 1px dashed var(--border); }
+.dl-lane-kg { font-size: .8rem; font-weight: 700; opacity: .85; margin-left: auto; }
+.dl-lane-kg + .dl-lane-n { margin-left: 6px; }
+
+/* ---- day summary: finished · kg · invoiced ---- */
+.dl-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dl-sum { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 10px 16px; border-radius: 14px;
+  background: var(--panel); border: 2px solid var(--border); font: inherit; color: var(--text); }
+.dl-sum-n { font-size: 1.9rem; font-weight: 800; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.dl-sum-n small { font-size: 1rem; font-weight: 700; color: var(--muted); }
+.dl-sum-l { font-size: .88rem; font-weight: 600; }
+.dl-sum-fin { border-color: var(--dl-green-bd); }
+.dl-sum-fin .dl-sum-n { color: var(--dl-green); }
+.dl-sum-kg .dl-sum-n { color: var(--accent); }
+.dl-sum-inv { cursor: pointer; border-color: var(--dl-blue-bd); }
+.dl-sum-inv .dl-sum-n { color: var(--dl-blue); }
+.dl-sum-inv.dl-sum-warn strong { color: var(--dl-red); }
+.dl-sum-inv.on { box-shadow: 0 0 0 3px var(--gold); }
+.dl-sum-inv:focus-visible { outline: 3px solid #d9c8a6; outline-offset: 2px; }
+
 /* ---- buttons ---- */
 .dl-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .dl-btn { min-height: 40px; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--border);
@@ -160,6 +193,9 @@
 @media (max-width: 700px) {
   .dl-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .dl-tile { min-height: 84px; padding: 10px 12px; }
+  .dl-summary { grid-template-columns: 1fr; gap: 6px; }
+  .dl-sum { flex-direction: row; align-items: baseline; gap: 10px; padding: 8px 12px; }
+  .dl-sum-n { font-size: 1.5rem; }
   .dl-tile[data-state="pushed"] { grid-column: 1 / -1; min-height: 0; flex-direction: row; align-items: center; gap: 10px; }
   .dl-tile-n { font-size: 1.9rem; }
   .dl-board { grid-template-columns: 1fr; }

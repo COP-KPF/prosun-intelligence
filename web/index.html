@@ -4,19 +4,19 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Klong Phai Farm CRM</title>
-<link rel="icon" href="favicon.ico?v=20261113-1" sizes="48x48" />
-<link rel="icon" type="image/png" href="favicon-32.png?v=20261113-1" sizes="32x32" />
-<link rel="icon" type="image/png" href="icon-192.png?v=20261113-1" sizes="192x192" />
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=20261113-1" />
-<link rel="stylesheet" href="styles.css?v=20261113-1" />
-<link rel="stylesheet" href="delivery.css?v=20261113-1" />
+<link rel="icon" href="favicon.ico?v=20261113-3" sizes="48x48" />
+<link rel="icon" type="image/png" href="favicon-32.png?v=20261113-3" sizes="32x32" />
+<link rel="icon" type="image/png" href="icon-192.png?v=20261113-3" sizes="192x192" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=20261113-3" />
+<link rel="stylesheet" href="styles.css?v=20261113-3" />
+<link rel="stylesheet" href="delivery.css?v=20261113-3" />
 </head>
 <body>
 
   <!-- ============ LOGIN SCREEN ============ -->
   <div id="login-screen">
     <form class="login-card" id="login-form">
-      <img src="logo.png?v=20261113-1" class="login-logo" alt="Klong Phai Farm" width="160" height="120" />
+      <img src="logo.png?v=20261113-3" class="login-logo" alt="Klong Phai Farm" width="160" height="120" />
       <h1>Klong Phai Farm CRM</h1>
       <p class="subtitle">Sign in with the account your admin created for you.</p>
 
@@ -41,7 +41,7 @@
   <div id="app-screen" class="hidden">
     <header class="app-header">
       <div class="brand-wrap">
-      <img src="logo.png?v=20261113-1" class="brand-logo" alt="Klong Phai Farm" width="64" height="48" />
+      <img src="logo.png?v=20261113-3" class="brand-logo" alt="Klong Phai Farm" width="64" height="48" />
       <div class="brand">
         <strong id="app-title">Klong Phai Farm CRM</strong>
         <span class="brand-sub" id="app-subtitle"></span>
@@ -86,6 +86,8 @@
         <div class="pace-nav-group" id="pace-group-management">
           <div class="pace-nav-head"><span class="pace-dot" aria-hidden="true"></span>Management<small>ผู้บริหาร</small></div>
           <button type="button" class="pace-nav-item" id="tab-management" data-view="management">Dashboard<small class="pace-nav-sub">แดชบอร์ด</small></button>
+          <!-- Summary: kg per day and month, approx. revenue, postponement reasons (Migration 031) -->
+          <button type="button" class="pace-nav-item" id="tab-mgsummary" data-view="mgsummary">Summary<small class="pace-nav-sub">สรุปผลและรายได้</small></button>
         </div>
         <div class="pace-nav-group" id="pace-group-middle">
           <div class="pace-nav-head"><span class="pace-dot pace-dot-middle" aria-hidden="true"></span>Middle office<small>Sale support</small></div>
@@ -457,6 +459,7 @@
       <div id="weighing-section" class="hidden" lang="th"></div>
       <div id="weights-section" class="hidden"></div>
       <div id="management-section" class="hidden"></div>
+      <div id="mgsummary-section" class="hidden"></div>
       <div id="payables-section" class="hidden"></div>
       <div id="postponed-section" class="hidden"></div>
       <div id="delivery-section" class="hidden"></div>
@@ -662,18 +665,19 @@
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
   <!-- QR code on the weighing screen, so the phone opens the camera page -->
   <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
-  <script src="config.js?v=20261113-1"></script>
-  <script src="weighing-common.js?v=20261113-1"></script>
+  <script src="config.js?v=20261113-3"></script>
+  <script src="weighing-common.js?v=20261113-3"></script>
   <!-- weighing.js before app.js: app.js starts the app as soon as it loads,
        and a signed-in factory admin goes straight to openWeighing(). -->
-  <script src="weighing.js?v=20261113-1"></script>
-  <script src="weights-summary.js?v=20261113-1"></script>
-  <script src="postponed.js?v=20261113-1"></script>
-  <script src="delivery.js?v=20261113-1"></script>
-  <script src="management.js?v=20261113-1"></script>
-  <script src="payables-common.js?v=20261113-1"></script>
-  <script src="payables.js?v=20261113-1"></script>
-  <script src="notifications.js?v=20261113-1"></script>
-  <script src="app.js?v=20261113-1"></script>
+  <script src="weighing.js?v=20261113-3"></script>
+  <script src="weights-summary.js?v=20261113-3"></script>
+  <script src="postponed.js?v=20261113-3"></script>
+  <script src="delivery.js?v=20261113-3"></script>
+  <script src="management.js?v=20261113-3"></script>
+  <script src="management-summary.js?v=20261113-3"></script>
+  <script src="payables-common.js?v=20261113-3"></script>
+  <script src="payables.js?v=20261113-3"></script>
+  <script src="notifications.js?v=20261113-3"></script>
+  <script src="app.js?v=20261113-3"></script>
 </body>
 </html>
