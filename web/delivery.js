@@ -3,7 +3,9 @@
 // ============================================================================
 // Clément, 11 Nov: an interface for the delivery team — which order is
 // finished, which one is pushed back — very visual.
-// 13 Nov (030): kg and accounting's invoice status on every order.
+// 13 Nov (030): kg and accounting's invoice status on every order — taken off
+// the board again on 17 Nov (invoicing is accounting's project, not live yet);
+// the database still returns it.
 // 17 Nov (033): the real flow — a confirmed working paper means the order is
 // produced and done; it waits at the factory, the delivery team picks it up
 // by truck, brings it to the dispatch center and delivers it to the client.
@@ -11,8 +13,9 @@
 // canvas, with order numbers 1, 2, 3… in both sections:
 //
 //   1 · Summary — five counters (At factory, At dispatch, On the road,
-//       Delivered, Problem), kg finished / invoiced / delivered, and ONE table
-//       of every order due that day: #, client, PO, company, kg, invoice,
+//       Delivered, Problem), kg finished / papers confirmed / delivered, and ONE
+//       table of every order due that day: #, client, PO, company, kg, working
+//       paper status (17 Nov, in place of the invoice),
 //       status — orders not finished yet and orders pushed to another day
 //       included. This is what everyone sees; it is also what Print prints.
 //   2 · Delivery (delivery team and admin only) — every finished order of the
@@ -22,7 +25,8 @@
 //       OTHER days still waiting at the factory are listed as links to their
 //       day (production often runs a day or two before delivery).
 //
-// 17 Nov (034): "📄 View" on every order of the summary table opens the
+// 17 Nov (034): the working paper status on every order of the summary table
+// is a button (📄); it opens the
 // working paper — the photographed FM-SA-01 (confirmed papers; admin: all)
 // and its lines, ordered vs actual kg, and who confirmed the weights.
 //
@@ -350,29 +354,42 @@ function dlStatusPill(it) {
     return `<span class="dl-pill dl-violet">↻ ${to ? `เลื่อนไป ${escapeHtml(to)}` : "เลื่อน · ยังไม่มีวันใหม่ · no new date"}</span>`;
   }
   if (it.state === "notready") {
-    const why = p.status === "postponed" ? dlBi("ยังไม่ผลิต", "Not produced yet")
-      : ["uploading", "queued", "reading"].includes(p.status) ? dlBi("กำลังอ่านใบงาน", "Paper being read")
-      : dlBi("รอยืนยันน้ำหนัก", "Weights being checked");
-    return `<span class="dl-pill dl-slate">⏳ ${escapeHtml(why)}</span>`;
+    return `<span class="dl-pill dl-slate">⏳ ${escapeHtml(dlBi("ยังไม่พร้อมส่ง", "Not ready yet"))}</span>`;
   }
   const s = DL_STEP[it.state];
   const when = p.mark ? ` <span class="dl-pill-time">${escapeHtml(weighTime(p.mark.marked_at))}</span>` : "";
   return `<span class="dl-pill ${s.cls}">${s.icon} ${escapeHtml(dlBi(s.th, s.en))}${when}</span>`;
 }
 
-function dlInvoiceCell(it) {
-  const p = it.p;
-  if (it.kind !== "paper" || !dlFinished(p)) return `<span class="dl-muted">—</span>`;
-  if (p.invoice && p.invoice.changed) return `<span class="dl-inv dl-inv-changed">🧾 ${escapeHtml(p.invoice.invoice_no || "")} ⚠ ${dlBi("น้ำหนักเปลี่ยน", "weights changed")}</span>`;
-  if (p.invoice) return `<span class="dl-inv dl-inv-done">🧾 ${escapeHtml(p.invoice.invoice_no || dlBi("ออกแล้ว", "invoiced"))}</span>`;
-  return `<span class="dl-inv dl-inv-none">${dlBi("ยังไม่ออก", "not yet")}</span>`;
+// Working paper status (17 Nov, in place of the invoice): where the paper
+// stands at the factory — photographed, read, weights checked and confirmed.
+function dlPaperStatus(status, p) {
+  const at = p && p.confirmed_at ? ` <span class="dl-pill-time">${escapeHtml(weighTime(p.confirmed_at))}</span>` : "";
+  if (status === "confirmed") return `<span class="dl-ps dl-ps-ok">✅ ${dlBi("ยืนยันแล้ว", "Confirmed")}${at}</span>`;
+  if (status === "read" && p && p.reopened) return `<span class="dl-ps dl-ps-warn">✏️ ${dlBi("กำลังแก้น้ำหนัก", "Being corrected")}</span>`;
+  if (status === "read") return `<span class="dl-ps dl-ps-warn">⚖️ ${dlBi("รอตรวจน้ำหนัก", "Weights to check")}</span>`;
+  if (status === "failed") return `<span class="dl-ps dl-ps-bad">⚠ ${dlBi("อ่านไม่ได้ ต้องตรวจ", "Not read, to check")}</span>`;
+  if (["uploading", "queued", "reading"].includes(status)) return `<span class="dl-ps dl-ps-wait">⏳ ${dlBi("กำลังอ่านใบงาน", "Being read")}</span>`;
+  if (status === "postponed") return `<span class="dl-ps dl-ps-wait">↻ ${dlBi("ยังไม่ผลิต (เลื่อนมา)", "Not produced (postponed here)")}</span>`;
+  return `<span class="dl-muted">—</span>`;
+}
+
+// In the table the status IS the button that opens the paper (photo + lines).
+function dlPaperCell(it, no) {
+  if (it.kind === "paper") {
+    const p = it.p;
+    return `<button type="button" class="dl-view" data-act="paper" data-id="${escapeAttr(p.id)}" data-no="${no}"
+      aria-label="ดูใบงาน · Open the working paper: ${escapeAttr(p.customer_name || "")}">📄 ${dlPaperStatus(p.status, p)}</button>`;
+  }
+  if (it.kind === "moved" && it.p.paper_status) return dlPaperStatus(it.p.paper_status, null);
+  return `<span class="dl-muted">—</span>`;
 }
 
 function dlSummaryHtml(due, pushed) {
   const fin = due.filter(it => it.state !== "notready");
   const n = k => fin.filter(it => it.state === k).length;
   const kg = fin.reduce((t, it) => t + ((dlKg(it.p) || {}).kg || 0), 0);
-  const inv = fin.filter(it => it.p.invoice && !it.p.invoice.changed).length;
+  const confirmed = due.filter(it => dlFinished(it.p)).length;
   const delivered = n("delivered");
   const tiles = DL_STEPS.map(s => `<div class="dl-tile ${s.cls} ${n(s.key) ? "" : "zero"}">
       <span class="dl-tile-n">${n(s.key)}</span>
@@ -395,10 +412,8 @@ function dlSummaryHtml(due, pushed) {
       <td class="dl-po">${dlPo(p.po_number)}</td>
       <td>${dlCompanyChip(p.company)}</td>
       <td class="dl-kg">${escapeHtml(dlKgText(k))}</td>
-      <td>${dlInvoiceCell(it)}</td>
+      <td>${dlPaperCell(it, i + 1)}</td>
       <td>${dlStatusPill(it)}</td>
-      <td class="dl-paper-col">${it.kind === "paper"
-        ? `<button type="button" class="dl-view" data-act="paper" data-id="${escapeAttr(p.id)}" data-no="${i + 1}" aria-label="ดูใบงาน · View the working paper: ${escapeAttr(p.customer_name || "")}">📄 ดู · View</button>` : ""}</td>
     </tr>`;
   }).join("");
 
@@ -412,7 +427,7 @@ function dlSummaryHtml(due, pushed) {
     <div class="dl-tiles">${tiles}</div>
     <div class="dl-totals">
       <span><strong>${dlFmt(kg)} kg</strong> ${dlBi("ผลิตเสร็จ", "finished")}</span>
-      <span><strong>${inv} / ${fin.length}</strong> ${dlBi("ออกใบแจ้งหนี้แล้ว", "invoiced")}</span>
+      <span><strong>${confirmed} / ${due.length}</strong> ${dlBi("ใบงานยืนยันแล้ว", "papers confirmed")}</span>
       <span><strong>${delivered} / ${due.length}</strong> ${dlBi("ส่งถึงแล้ว", "delivered")}</span>
     </div>
     <div class="dl-filters">
@@ -424,9 +439,9 @@ function dlSummaryHtml(due, pushed) {
       <table class="dl-table">
         <thead><tr>
           <th class="dl-no">#</th><th>ลูกค้า · Client</th><th>PO</th><th>บริษัท</th>
-          <th class="dl-kg">kg</th><th>ใบแจ้งหนี้ · Invoice</th><th>สถานะ · Status</th><th class="dl-paper-col">ใบงาน · Paper</th>
+          <th class="dl-kg">kg</th><th>สถานะใบงาน · Working paper</th><th>สถานะ · Status</th>
         </tr></thead>
-        <tbody>${body || `<tr><td colspan="8" class="dl-empty">${dlBi("ยังไม่มีออเดอร์สำหรับวันนี้ — ออเดอร์จะขึ้นเมื่อฝ่ายผลิตถ่ายรูปใบงาน", "No orders for this day yet — they appear once production photographs the working paper")}</td></tr>`}</tbody>
+        <tbody>${body || `<tr><td colspan="7" class="dl-empty">${dlBi("ยังไม่มีออเดอร์สำหรับวันนี้ — ออเดอร์จะขึ้นเมื่อฝ่ายผลิตถ่ายรูปใบงาน", "No orders for this day yet — they appear once production photographs the working paper")}</td></tr>`}</tbody>
       </table>
     </div>
   </section>`;
@@ -482,7 +497,7 @@ function dlDeliveryHtml(due) {
         <input type="checkbox" data-act="tick" data-id="${escapeAttr(p.id)}" ${DL.sel.has(p.id) ? "checked" : ""} ${dis}>
         <span class="dl-work-text">
           <strong>${escapeHtml(p.customer_name || "—")}</strong>
-          <span class="dl-work-meta">${dlPo(p.po_number)} · ${dlCompanyChip(p.company)} · <strong>${escapeHtml(dlKgText(k))} kg</strong> · ${dlInvoiceCell(it)}</span>
+          <span class="dl-work-meta">${dlPo(p.po_number)} · ${dlCompanyChip(p.company)} · <strong>${escapeHtml(dlKgText(k))} kg</strong></span>
           ${tags ? `<span class="dl-tags">${tags}</span>` : ""}
           ${note}${who}
         </span>
@@ -618,7 +633,6 @@ function dlDrawPaper() {
           <p class="dl-modal-who">${confirmed
             ? `✅ ${dlBi("ยืนยันน้ำหนักโดย", "Weights confirmed by")} <strong>${escapeHtml(p.confirmed_by_name || "—")}</strong>${p.confirmed_at ? " · " + escapeHtml(weighTime(p.confirmed_at)) : ""}`
             : `⏳ ${dlBi("ยังไม่ยืนยันน้ำหนัก — ตัวเลขอาจเปลี่ยน", "Weights not confirmed yet — figures may change")}`}</p>
-          ${dlInvoiceCell({ kind: "paper", p })}
         </div>
       </div>
     </div>

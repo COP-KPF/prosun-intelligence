@@ -89,6 +89,13 @@
 .dl-pill.dl-slate  { background: var(--dl-slate-bg);  color: var(--dl-slate);  border-color: var(--dl-slate-bd); }
 .dl-pill.dl-violet { background: var(--dl-violet-bg); color: var(--dl-violet); border-color: var(--dl-violet-bd); }
 
+/* working paper status (17 Nov, in place of the invoice) */
+.dl-ps { display: inline-flex; align-items: center; gap: 4px; font-size: .82rem; font-weight: 700; white-space: nowrap; }
+.dl-ps-ok   { color: #1e6b3a; }
+.dl-ps-warn { color: var(--dl-amber); }
+.dl-ps-bad  { color: var(--dl-red); }
+.dl-ps-wait { color: var(--dl-slate); font-weight: 600; }
+
 /* ---- 2 · delivery ---- */
 .dl-others { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
 .dl-other { min-height: 34px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--dl-amber-bd); background: var(--dl-amber-bg);
@@ -158,10 +165,10 @@
 .dl-foot { margin: 0; }
 
 /* ---- the working paper (Migration 034) ---- */
-.dl-paper-col { text-align: center; white-space: nowrap; }
-.dl-view { min-height: 34px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--gold); background: #fffaf0;
-  color: var(--accent); font: inherit; font-size: .82rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
-.dl-view:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.dl-view { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 4px 10px; border-radius: 8px;
+  border: 1px solid var(--gold); background: #fffaf0; color: var(--accent); font: inherit; font-size: .82rem;
+  font-weight: 700; cursor: pointer; white-space: nowrap; text-align: left; }
+.dl-view:hover { border-color: var(--accent); background: #fff; box-shadow: 0 1px 4px rgba(36,25,5,.15); }
 .dl-view:focus-visible, .dl-modal-close:focus-visible { outline: 3px solid #d9c8a6; outline-offset: 2px; }
 .dl-modal-back { position: fixed; inset: 0; z-index: 50; background: rgba(36, 25, 5, .45);
   display: flex; align-items: center; justify-content: center; padding: 20px; }
@@ -213,7 +220,8 @@
 @media print {
   body.pace-mode header.app-header, body.pace-mode .pace-nav, body.pace-mode .toolbar,
   body.pace-mode .page-footer, #notif-panel, #notif-btn, .dl-top-right, .dl-filters,
-  .dl-arrow, #delivery-section .dl-sec + .dl-sec, #dl-paper-root, .dl-paper-col { display: none !important; }
+  .dl-arrow, #delivery-section .dl-sec + .dl-sec, #dl-paper-root { display: none !important; }
+  .dl-view { border: 0; background: none; padding: 0; min-height: 0; }
   .dl-daynav { background: none; color: #000; box-shadow: none; padding: 0; }
   .dl-day-rel { color: #555; }
   .dl-table { min-width: 0; }
