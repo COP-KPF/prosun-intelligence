@@ -22,6 +22,10 @@
 //       OTHER days still waiting at the factory are listed as links to their
 //       day (production often runs a day or two before delivery).
 //
+// 17 Nov (034): "📄 View" on every order of the summary table opens the
+// working paper — the photographed FM-SA-01 (confirmed papers; admin: all)
+// and its lines, ordered vs actual kg, and who confirmed the weights.
+//
 // Labels are Thai and English together, so no language switch is needed.
 // Reasons for postponements: admin, middle office, company director only (the
 // database leaves them out for everyone else). Company director (032): his
@@ -48,6 +52,7 @@ const DL = {
   q: "",              // search
   sel: new Set(),     // ticked orders in section 2
   problemFor: null,   // paper id whose problem comment is open
+  paper: null,        // open working paper: { id, no, url, error, loading, opener }
   busy: false,
   loading: false,
   timer: null,
@@ -138,7 +143,7 @@ function dlIsOpen() { return !dlSection.classList.contains("hidden"); }
 document.getElementById("switch-system-btn").addEventListener("click", closeDelivery);
 document.getElementById("sign-out-btn").addEventListener("click", () => {
   closeDelivery();
-  Object.assign(DL, { day: null, data: null, sig: "", company: "all", q: "", problemFor: null, message: null });
+  Object.assign(DL, { day: null, data: null, sig: "", company: "all", q: "", problemFor: null, paper: null, message: null });
   DL.sel.clear();
 });
 
@@ -187,19 +192,20 @@ function dlSchedule() {
   if (!dlIsOpen()) return;
   DL.timer = setTimeout(async () => {
     if (!dlIsOpen()) return;
-    if (document.hidden || DL.loading || DL.busy || DL.problemFor) { dlSchedule(); return; }
+    if (document.hidden || DL.loading || DL.busy || DL.problemFor || DL.paper) { dlSchedule(); return; }
     await dlLoad({ silent: true });
   }, DL_REFRESH_MS);
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && dlIsOpen() && !DL.loading && !DL.busy && !DL.problemFor) dlLoad({ silent: true });
+  if (!document.hidden && dlIsOpen() && !DL.loading && !DL.busy && !DL.problemFor && !DL.paper) dlLoad({ silent: true });
 });
 
 async function dlSetDay(iso) {
   if (!iso || iso === DL.day) return;
   DL.day = iso;
   DL.problemFor = null;
+  DL.paper = null;
   DL.message = null;
   DL.sel.clear();
   DL.data = null;
@@ -306,8 +312,10 @@ function dlDraw() {
         <button type="button" class="ws-chip" data-act="print">🖨 ${dlBi("พิมพ์", "Print")}</button>
       </div>
     </div>
-    <div id="dl-board-wrap"></div>`;
+    <div id="dl-board-wrap"></div>
+    <div id="dl-paper-root"></div>`;
   dlDrawBoard();
+  dlDrawPaper();
 }
 
 function dlStamp() {
@@ -389,6 +397,8 @@ function dlSummaryHtml(due, pushed) {
       <td class="dl-kg">${escapeHtml(dlKgText(k))}</td>
       <td>${dlInvoiceCell(it)}</td>
       <td>${dlStatusPill(it)}</td>
+      <td class="dl-paper-col">${it.kind === "paper"
+        ? `<button type="button" class="dl-view" data-act="paper" data-id="${escapeAttr(p.id)}" data-no="${i + 1}" aria-label="ดูใบงาน · View the working paper: ${escapeAttr(p.customer_name || "")}">📄 ดู · View</button>` : ""}</td>
     </tr>`;
   }).join("");
 
@@ -414,9 +424,9 @@ function dlSummaryHtml(due, pushed) {
       <table class="dl-table">
         <thead><tr>
           <th class="dl-no">#</th><th>ลูกค้า · Client</th><th>PO</th><th>บริษัท</th>
-          <th class="dl-kg">kg</th><th>ใบแจ้งหนี้ · Invoice</th><th>สถานะ · Status</th>
+          <th class="dl-kg">kg</th><th>ใบแจ้งหนี้ · Invoice</th><th>สถานะ · Status</th><th class="dl-paper-col">ใบงาน · Paper</th>
         </tr></thead>
-        <tbody>${body || `<tr><td colspan="7" class="dl-empty">${dlBi("ยังไม่มีออเดอร์สำหรับวันนี้ — ออเดอร์จะขึ้นเมื่อฝ่ายผลิตถ่ายรูปใบงาน", "No orders for this day yet — they appear once production photographs the working paper")}</td></tr>`}</tbody>
+        <tbody>${body || `<tr><td colspan="8" class="dl-empty">${dlBi("ยังไม่มีออเดอร์สำหรับวันนี้ — ออเดอร์จะขึ้นเมื่อฝ่ายผลิตถ่ายรูปใบงาน", "No orders for this day yet — they appear once production photographs the working paper")}</td></tr>`}</tbody>
       </table>
     </div>
   </section>`;
@@ -525,6 +535,103 @@ function dlDrawBoard() {
 }
 
 
+// ----------------------------------------------------------- the working paper
+// Photo: only a confirmed paper's for everyone but admin (the storage rules,
+// Migrations 018, 020, 022, 032, 034); kept 4 weeks.
+function dlPaperPhotoState(p) {
+  if (!p.photo_path) return "none";
+  if (p.photo_deleted_at) return "deleted";
+  if (p.status !== "confirmed" && !(myProfile && myProfile.role === "admin")) return "unconfirmed";
+  return "ok";
+}
+
+async function dlOpenPaper(id, no, opener) {
+  const p = ((DL.data && DL.data.papers) || []).find(x => x.id === id);
+  if (!p) return;
+  DL.paper = { id, no, url: null, error: null, loading: false, opener };
+  if (dlPaperPhotoState(p) === "ok") {
+    DL.paper.loading = true;
+    dlDrawPaper();
+    const { data, error } = await sb.storage.from(WEIGH_BUCKET).createSignedUrl(p.photo_path, 600);
+    if (!DL.paper || DL.paper.id !== id) return;    // closed or another paper meanwhile
+    DL.paper.loading = false;
+    if (error || !data || !data.signedUrl) DL.paper.error = (error && error.message) || "photo not found";
+    else DL.paper.url = data.signedUrl;
+  }
+  dlDrawPaper();
+}
+
+function dlClosePaper() {
+  if (!DL.paper) return;
+  const opener = DL.paper.opener;
+  DL.paper = null;
+  dlDrawPaper();
+  // Back to the button that opened it (redrawn meanwhile: find it again).
+  const again = opener && dlSection.querySelector(`.dl-view[data-id="${CSS.escape(opener)}"]`);
+  if (again) again.focus();
+  dlSchedule();
+}
+
+function dlDrawPaper() {
+  const root = document.getElementById("dl-paper-root");
+  if (!root) return;
+  const st = DL.paper;
+  const p = st && ((DL.data && DL.data.papers) || []).find(x => x.id === st.id);
+  if (!st || !p) { root.innerHTML = ""; return; }
+  const confirmed = dlFinished(p);
+  const lines = Array.isArray(p.lines) ? p.lines : [];
+  const kg = dlKg(p);
+  const photoState = dlPaperPhotoState(p);
+  const photo = photoState === "ok"
+    ? (st.loading ? `<p class="dl-muted">${dlBi("กำลังโหลดรูป…", "Loading the photo…")}</p>`
+      : st.error ? `<p class="mg-msg">${dlBi("เปิดรูปไม่ได้", "Could not open the photo")}: ${escapeHtml(st.error)}</p>`
+      : `<a href="${escapeAttr(st.url)}" target="_blank" rel="noopener" class="dl-photo-link">
+           <img src="${escapeAttr(st.url)}" alt="ใบงาน · Working paper ${escapeAttr(p.po_number || "")} ${escapeAttr(p.customer_name || "")}" class="dl-photo">
+         </a>
+         <a href="${escapeAttr(st.url)}" target="_blank" rel="noopener" class="dl-photo-full">↗ ${dlBi("เปิดรูปเต็ม", "Open full size")}</a>`)
+    : `<div class="dl-photo-none">📄<p>${photoState === "deleted" ? dlBi("รูปถูกลบแล้ว (เก็บไว้ 4 สัปดาห์)", "Photo deleted (kept 4 weeks)")
+        : photoState === "unconfirmed" ? dlBi("รูปจะเปิดได้เมื่อยืนยันน้ำหนักแล้ว", "The photo opens once the weights are confirmed")
+        : dlBi("ไม่มีรูป", "No photo")}</p></div>`;
+  const rows = lines.map(l => `<tr>
+      <td class="dl-no">${escapeHtml(String(l.line_no || ""))}</td>
+      <td>${escapeHtml(l.description || "—")}</td>
+      <td class="dl-kg">${escapeHtml(l.ordered_text || (l.ordered_qty !== null && l.ordered_qty !== undefined ? `${l.ordered_qty} ${weighUnit(l.ordered_unit)}` : "—"))}</td>
+      <td class="dl-kg">${l.actual_kg !== null && l.actual_kg !== undefined ? `${Number(l.actual_kg).toLocaleString("en-GB", { maximumFractionDigits: 2 })}${confirmed ? "" : "?"}` : "—"}</td>
+    </tr>`).join("");
+  root.innerHTML = `<div class="dl-modal-back" data-act="paper-close-back">
+    <div class="dl-modal" role="dialog" aria-modal="true" aria-labelledby="dl-paper-title">
+      <header class="dl-modal-head">
+        <div>
+          <h3 id="dl-paper-title" class="dl-modal-title">📄 ${st.no ? `<span class="dl-modal-no">#${escapeHtml(String(st.no))}</span> ` : ""}${escapeHtml(p.customer_name || dlBi("กำลังอ่านใบงาน…", "Paper being read…"))}</h3>
+          <div class="dl-modal-meta">${dlPo(p.po_number)} · ${dlCompanyChip(p.company)} · ${dlBi("ส่ง", "Delivery")} ${escapeHtml(dlDateBi(p.due_date))} · ${dlStatusPill({ kind: "paper", state: dlStateOf(p), p })}</div>
+        </div>
+        <button type="button" class="dl-modal-close" data-act="paper-close" aria-label="ปิด · Close">✕</button>
+      </header>
+      <div class="dl-modal-body">
+        <div class="dl-modal-photo">${photo}</div>
+        <div class="dl-modal-lines">
+          <table class="dl-table dl-lines-table">
+            <thead><tr><th class="dl-no">#</th><th>สินค้า · Product</th><th class="dl-kg">สั่ง · Ordered</th><th class="dl-kg">${dlBi("ชั่งจริง", "Actual")} kg</th></tr></thead>
+            <tbody>${rows || `<tr><td colspan="4" class="dl-empty">${dlBi("ยังไม่มีรายการ", "No lines yet")}</td></tr>`}</tbody>
+            ${kg ? `<tfoot><tr><td></td><td><strong>${dlBi("รวม", "Total")}</strong></td><td></td><td class="dl-kg"><strong>${escapeHtml(dlKgText(kg))}</strong></td></tr></tfoot>` : ""}
+          </table>
+          <p class="dl-modal-who">${confirmed
+            ? `✅ ${dlBi("ยืนยันน้ำหนักโดย", "Weights confirmed by")} <strong>${escapeHtml(p.confirmed_by_name || "—")}</strong>${p.confirmed_at ? " · " + escapeHtml(weighTime(p.confirmed_at)) : ""}`
+            : `⏳ ${dlBi("ยังไม่ยืนยันน้ำหนัก — ตัวเลขอาจเปลี่ยน", "Weights not confirmed yet — figures may change")}`}</p>
+          ${dlInvoiceCell({ kind: "paper", p })}
+        </div>
+      </div>
+    </div>
+  </div>`;
+  const close = root.querySelector(".dl-modal-close");
+  if (close && !root.contains(document.activeElement)) close.focus();
+}
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && DL.paper && dlIsOpen()) { e.preventDefault(); dlClosePaper(); }
+});
+
+
 // ----------------------------------------------------------- events
 dlSection.addEventListener("click", async e => {
   const b = e.target.closest("[data-act]");
@@ -535,6 +642,9 @@ dlSection.addEventListener("click", async e => {
   else if (act === "prev") await dlSetDay(weighAddDays(DL.day, -1));
   else if (act === "next") await dlSetDay(weighAddDays(DL.day, 1));
   else if (act === "print") window.print();
+  else if (act === "paper") await dlOpenPaper(b.dataset.id, b.dataset.no, b.dataset.id);
+  else if (act === "paper-close") dlClosePaper();
+  else if (act === "paper-close-back") { if (e.target === b) dlClosePaper(); }
   else if (act === "company") { DL.company = b.dataset.company; dlDrawBoard(); }
   else if (act === "step") {
     const id = b.dataset.id;

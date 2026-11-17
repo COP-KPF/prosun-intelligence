@@ -157,6 +157,36 @@
 .dl-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; margin: 0; }
 .dl-foot { margin: 0; }
 
+/* ---- the working paper (Migration 034) ---- */
+.dl-paper-col { text-align: center; white-space: nowrap; }
+.dl-view { min-height: 34px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--gold); background: #fffaf0;
+  color: var(--accent); font: inherit; font-size: .82rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.dl-view:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.dl-view:focus-visible, .dl-modal-close:focus-visible { outline: 3px solid #d9c8a6; outline-offset: 2px; }
+.dl-modal-back { position: fixed; inset: 0; z-index: 50; background: rgba(36, 25, 5, .45);
+  display: flex; align-items: center; justify-content: center; padding: 20px; }
+.dl-modal { width: min(1100px, 100%); max-height: calc(100vh - 40px); overflow: auto; background: var(--bg, #f4efe3);
+  border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.3); display: flex; flex-direction: column; }
+.dl-modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 14px 18px;
+  background: var(--accent); color: #fff; border-radius: 16px 16px 0 0; border-bottom: 3px solid var(--gold); position: sticky; top: 0; z-index: 1; }
+.dl-modal-title { margin: 0 0 4px; font-size: 1.2rem; }
+.dl-modal-no { color: #e1d5bb; }
+.dl-modal-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: .88rem; color: #e1d5bb; }
+.dl-modal-close { flex: none; width: 44px; height: 44px; border-radius: 10px; border: 1px solid rgba(255,255,255,.4);
+  background: transparent; color: #fff; font-size: 1.2rem; cursor: pointer; }
+.dl-modal-body { display: flex; flex-wrap: wrap; gap: 16px; padding: 16px 18px 20px; align-items: flex-start; }
+.dl-modal-photo { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.dl-photo-link { display: block; background: #fff; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.dl-photo { display: block; width: 100%; max-height: 70vh; object-fit: contain; background: #fff; }
+.dl-photo-full { font-size: .85rem; font-weight: 700; }
+.dl-photo-none { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 220px;
+  background: #fff; border: 1px dashed var(--border); border-radius: 12px; color: var(--muted); font-size: 2rem; text-align: center; padding: 16px; }
+.dl-photo-none p { margin: 0; font-size: .9rem; }
+.dl-modal-lines { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.dl-lines-table { min-width: 0; background: #fff; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.dl-lines-table tfoot td { border-top: 2px solid var(--accent); background: #faf7f0; }
+.dl-modal-who { margin: 0; font-size: .9rem; }
+
 /* ---- smaller screens ---- */
 @media (max-width: 1000px) {
   .dl-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -174,13 +204,16 @@
   .dl-segs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
   .dl-seg { min-width: 0; }
   .dl-bulk { flex: 1 1 40%; }
+  .dl-modal-back { padding: 0; align-items: stretch; }
+  .dl-modal { max-height: 100vh; border-radius: 0; }
+  .dl-modal-head { border-radius: 0; }
 }
 
 /* ---- printing: the summary table is the day's run sheet ---- */
 @media print {
   body.pace-mode header.app-header, body.pace-mode .pace-nav, body.pace-mode .toolbar,
   body.pace-mode .page-footer, #notif-panel, #notif-btn, .dl-top-right, .dl-filters,
-  .dl-arrow, #delivery-section .dl-sec + .dl-sec { display: none !important; }
+  .dl-arrow, #delivery-section .dl-sec + .dl-sec, #dl-paper-root, .dl-paper-col { display: none !important; }
   .dl-daynav { background: none; color: #000; box-shadow: none; padding: 0; }
   .dl-day-rel { color: #555; }
   .dl-table { min-width: 0; }
