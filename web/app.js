@@ -1237,6 +1237,7 @@ const tabWeightsBuyBtn   = document.getElementById("tab-weights-purchasing");  /
 const tabWeightsMidBtn   = document.getElementById("tab-weights-middle");      // same screen, Middle office's menu (Migration 022)
 const tabPayablesBtn     = document.getElementById("tab-payables");            // Accounting › Payables (Migration 025)
 const tabManagementBtn   = document.getElementById("tab-management");          // Management dashboard, admin only (Migration 024)
+const tabOverviewBtn     = document.getElementById("tab-overview");            // Management overview, admin only (Migration 036)
 const tabMgSummaryBtn    = document.getElementById("tab-mgsummary");           // Management summary and revenue (Migration 031)
 const tabPostponedBtn    = document.getElementById("tab-postponed");           // Middle office › Postponed orders (Migration 027)
 const tabDeliveryBtn     = document.getElementById("tab-delivery");            // Delivery › Delivery board (Migration 029)
@@ -1951,7 +1952,7 @@ function setupPaceRole() {
 // This is the screen only; the database's RLS still decides what each role
 // can read (purchasing reads orders because the calculator is built on them).
 const PACE_MENU = {
-  admin:         ["management", "mgsummary", "orders", "postponed", "calculator", "weighing", "delivery", "payables", "weights"],
+  admin:         ["overview", "management", "mgsummary", "orders", "postponed", "calculator", "weighing", "delivery", "payables", "weights"],
   sale_support:  ["orders", "confirm-birds", "postponed", "weights", "delivery"],
   purchasing:    ["calculator", "weights"],
   production:    ["weighing"],
@@ -1960,8 +1961,8 @@ const PACE_MENU = {
   delivery:      ["delivery"],
   company_director: ["management", "mgsummary", "postponed", "delivery", "weights"],   // Migration 032, read-only
 };
-const PACE_HOME = { admin: "orders", sale_support: "orders", purchasing: "calculator", production: "weighing", factory_admin: "weighing", accounting: "weights", delivery: "delivery", company_director: "management" };
-const PACE_DEPT = { orders: "Middle office", postponed: "Middle office", calculator: "Purchasing", weighing: "Production", weights: "Accounting", payables: "Accounting", management: "Management", mgsummary: "Management", delivery: "Delivery" };
+const PACE_HOME = { admin: "overview", sale_support: "orders", purchasing: "calculator", production: "weighing", factory_admin: "weighing", accounting: "weights", delivery: "delivery", company_director: "management" };
+const PACE_DEPT = { orders: "Middle office", postponed: "Middle office", calculator: "Purchasing", weighing: "Production", weights: "Accounting", payables: "Accounting", management: "Management", mgsummary: "Management", overview: "Management", delivery: "Delivery" };
 
 function setPaceTabsForRole() {
   const items = PACE_MENU[myProfile && myProfile.role] || [];
@@ -1977,6 +1978,7 @@ function setPaceTabsForRole() {
   tabPayablesBtn.classList.toggle("hidden", !items.includes("payables"));
   tabManagementBtn.classList.toggle("hidden", !items.includes("management"));
   tabMgSummaryBtn.classList.toggle("hidden", !items.includes("mgsummary"));
+  tabOverviewBtn.classList.toggle("hidden", !items.includes("overview"));
   tabPostponedBtn.classList.toggle("hidden", !items.includes("postponed"));
   tabDeliveryBtn.classList.toggle("hidden", !items.includes("delivery"));
   document.getElementById("pace-group-delivery").classList.toggle("hidden", !items.includes("delivery"));
@@ -2067,6 +2069,7 @@ async function switchPaceView(view) {
   tabPayablesBtn.classList.toggle("active", view === "payables");
   tabManagementBtn.classList.toggle("active", view === "management");
   tabMgSummaryBtn.classList.toggle("active", view === "mgsummary");
+  tabOverviewBtn.classList.toggle("active", view === "overview");
   tabPostponedBtn.classList.toggle("active", view === "postponed");
   tabDeliveryBtn.classList.toggle("active", view === "delivery");
   if (myProfile.role === "purchasing") paceWeightsDept = "Purchasing";
@@ -2089,6 +2092,7 @@ async function switchPaceView(view) {
   if (view !== "weights") closeWeights();            // weights-summary.js
   if (view !== "management") closeManagement();      // management.js
   if (view !== "mgsummary") closeSummary();          // management-summary.js
+  if (view !== "overview") closeOverview();          // management-overview.js
   if (view !== "payables") closePayables();          // payables.js
   if (view !== "postponed") closePostponed();        // postponed.js
   if (view !== "delivery") closeDelivery();          // delivery.js
@@ -2120,6 +2124,10 @@ async function switchPaceView(view) {
     document.getElementById("list-title").textContent = "Management dashboard";
     await openManagement();                           // management.js
   }
+  else if (view === "overview") {
+    document.getElementById("list-title").textContent = "Overview";
+    await openOverview();                             // management-overview.js
+  }
   else if (view === "mgsummary") {
     document.getElementById("list-title").textContent = "Summary and revenue";
     await openSummary();                              // management-summary.js
@@ -2139,6 +2147,7 @@ tabWeighingBtn.addEventListener("click", () => switchPaceView("weighing"));
 tabConfirmBirdsBtn.addEventListener("click", () => switchPaceView("calculator"));
 tabManagementBtn.addEventListener("click", () => switchPaceView("management"));
 tabMgSummaryBtn.addEventListener("click", () => switchPaceView("mgsummary"));
+tabOverviewBtn.addEventListener("click", () => switchPaceView("overview"));
 tabPayablesBtn.addEventListener("click", () => switchPaceView("payables"));
 tabPostponedBtn.addEventListener("click", () => switchPaceView("postponed"));
 tabDeliveryBtn.addEventListener("click", () => switchPaceView("delivery"));
@@ -2201,6 +2210,7 @@ async function refreshPaceView() {
     else if (view === "weights") await wsLoad();
     else if (view === "management") await mgLoad();
     else if (view === "mgsummary") await smLoad();
+    else if (view === "overview") await ovLoad();
     else if (view === "payables") { await pyFlush(); await pyLoad(); }
     else if (view === "postponed") await ppLoad();
     else if (view === "delivery") await dlLoad();
@@ -4072,7 +4082,7 @@ async function openSystem(which) {
   document.querySelector(".page-footer").classList.remove("hidden");
   if (which === "pace") {
     paceTabs.classList.remove("hidden");
-    await switchPaceView("orders");
+    await switchPaceView(PACE_HOME.admin || "orders");   // admin opens on the Overview (Migration 036)
   } else {
     adminTabs.classList.remove("hidden");
     await switchAdminView("all");

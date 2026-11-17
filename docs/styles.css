@@ -2041,6 +2041,17 @@ body.pace-readonly #weights-table tr.ws-row { cursor: default; }
   }
   body.pace-mode .pace-nav-head { padding: 7px 12px 6px 16px; }
   body.pace-mode .pace-nav-item { min-height: 36px; padding: 7px 12px 7px 16px; }
+  /* 17 Nov 2026: with the one-screen height above, the department blocks were
+     squeezed to fit instead of the menu scrolling, cutting off the Thai line
+     under each item. Blocks and items keep their full height; the menu scrolls. */
+  body.pace-mode .pace-nav > *, body.pace-mode .pace-nav-item { flex-shrink: 0; }
+  /* 17 Nov 2026 (Clément): smaller type so more of the menu fits on one screen;
+     department name and its Thai name on one line. */
+  body.pace-mode .pace-nav-head { font-size: 0.66rem; padding: 6px 12px 5px 16px; flex-wrap: nowrap; align-items: baseline; gap: 6px; }
+  body.pace-mode .pace-nav-head small { width: auto; font-size: 0.68rem; margin-top: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  body.pace-mode .pace-nav-item { font-size: 0.84rem; line-height: 1.25; min-height: 32px; padding: 6px 12px 6px 16px; }
+  body.pace-mode .pace-nav-sub { font-size: 0.7rem; line-height: 1.25; }
+  body.pace-mode .pace-nav { gap: 8px; }
 }
 
 /* ---------------------------------------------------------------------------
@@ -2211,3 +2222,43 @@ body.pace-readonly #weights-table tr.ws-row { cursor: default; }
 }
 #mg-postponed .mg-sub { margin: 10px 0 6px; font-size: 0.8rem; font-weight: 700; color: var(--muted); letter-spacing: 0.02em; }
 #mg-pp-oldest .pp-pill { font-size: 0.7rem; }
+
+/* ---------------------------------------------------------------------------
+   Management overview (Migration 036, 17 Nov 2026) — reuses the dashboard's
+   .mg-* pieces and the Summary's .sm-pair layout.
+   --------------------------------------------------------------------------- */
+#overview-section {
+  --mg-done: #2e7d4f; --mg-open: #c9892b; --mg-alert: #a8262c; --mg-good: #1e6b3a;
+  display: flex; flex-direction: column; gap: 14px;
+  font-family: -apple-system, "Segoe UI", "Noto Sans Thai", "Leelawadee UI", Tahoma, sans-serif;
+}
+#overview-section h3 { margin: 0; font-size: 1.02rem; }
+#overview-section p { margin: 0; }
+.ov-h2 { margin: 6px 0 -4px; font-size: 0.78rem; letter-spacing: 0.08em; color: var(--muted); }
+.ov-grid { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.ov-wide { grid-column: span 2; display: flex; flex-direction: column; gap: 8px; }
+.ov-big { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.ov-bar { position: relative; height: 12px; border-radius: 6px; background: #efe8d9; }
+.ov-bar-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; background: var(--mg-done); }
+.ov-bar-fill.ov-behind { background: #b8862e; }
+.ov-bar-mark { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text); }
+.ov-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 14px; }
+.ov-good { color: var(--mg-good); }
+.ov-warn { color: #7a4a00; }
+.ov-ok { padding: 10px 14px; border-radius: 8px; background: #e4efe6; color: #1e6b3a; font-size: 0.88rem; font-weight: 600; }
+.ov-month { color: var(--text); }
+.ov-upload { position: relative; cursor: pointer; }
+.ov-upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.ov-upload:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ov-busy { opacity: 0.7; cursor: progress; }
+.ov-hbars { display: grid; grid-template-columns: minmax(120px, max-content) minmax(0, 1fr) 36px; gap: 8px 10px; align-items: center; font-size: 0.88rem; }
+.ov-hbar { height: 12px; background: #efe8d9; border-radius: 0 6px 6px 0; }
+.ov-hbar span { display: block; height: 12px; background: #7a6440; border-radius: 0 6px 6px 0; }
+.ov-plot { height: 200px; }
+.ov-seg-under { background: #b8862e; }
+.ov-seg-partial { opacity: 0.6; }
+.ov-tick { position: absolute; left: 50%; transform: translateX(-50%); width: min(34px, 80%); height: 3px; background: var(--text); border-radius: 2px; }
+#ov-team .mg-table td small { font-size: 0.76rem; }
+@media (max-width: 700px) {
+  .ov-wide { grid-column: auto; }
+}
