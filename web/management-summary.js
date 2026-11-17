@@ -39,6 +39,7 @@ const SM_PRESETS = [
 // ----------------------------------------------------------- open / close
 async function openSummary() {
   if (!WEIGH_LANG) WEIGH_LANG = "en";
+  if (paceScope()) SM.company = paceScope();   // company director: his company only (Migration 032)
   smSection.classList.remove("hidden");
   if (!SM.data) smSection.innerHTML = `<p class="mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
   SM.sig = "";
@@ -122,11 +123,11 @@ function smFiltersHtml() {
   return `<div class="mg-bar">
     <div class="ws-presets">${chips}</div>
     <div class="mg-bar-right">
-      <select id="sm-company" aria-label="${T("บริษัท", "Company")}">
+      ${paceScope() ? `<span class="mg-company-fixed" id="sm-company-fixed">${escapeHtml(paceScope())}</span>` : `<select id="sm-company" aria-label="${T("บริษัท", "Company")}">
         <option value="all" ${SM.company === "all" ? "selected" : ""}>${T("ทุกบริษัท", "All companies")}</option>
         <option value="Prosun Farm" ${SM.company === "Prosun Farm" ? "selected" : ""}>Prosun Farm</option>
         <option value="Prosun Food" ${SM.company === "Prosun Food" ? "selected" : ""}>Prosun Food</option>
-      </select>
+      </select>`}
       ${weighLangHtml()}
     </div>
   </div>`;
@@ -270,8 +271,10 @@ function smProductsHtml(d) {
 function smClientsHtml(d) {
   const body = d.clients.map(c => `<tr>
       <td>${escapeHtml(c.client)}</td>
-      <td><button type="button" class="ws-chip sm-zone ${c.zone === "upcountry" ? "on" : ""}" data-act="zone" data-client="${escapeHtml(c.client)}" data-zone="${c.zone === "upcountry" ? "bangkok" : "upcountry"}" ${SM.busy ? "disabled" : ""}
-        title="${T("กดเพื่อเปลี่ยน", "Click to switch")}">${c.zone === "upcountry" ? T("ต่างจังหวัด", "Up-country") : T("กรุงเทพฯ", "Bangkok")}</button></td>
+      <td>${paceReadOnly()
+        ? `<span class="sm-zone-text">${c.zone === "upcountry" ? T("ต่างจังหวัด", "Up-country") : T("กรุงเทพฯ", "Bangkok")}</span>`
+        : `<button type="button" class="ws-chip sm-zone ${c.zone === "upcountry" ? "on" : ""}" data-act="zone" data-client="${escapeHtml(c.client)}" data-zone="${c.zone === "upcountry" ? "bangkok" : "upcountry"}" ${SM.busy ? "disabled" : ""}
+        title="${T("กดเพื่อเปลี่ยน", "Click to switch")}">${c.zone === "upcountry" ? T("ต่างจังหวัด", "Up-country") : T("กรุงเทพฯ", "Bangkok")}</button>`}</td>
       <td class="mg-n">${mgKg(c.kg)}</td>
       <td class="mg-n mg-strong">${smBaht(c.revenue)}</td>
       <td class="mg-n">${Number(c.kg_unpriced) > 0 ? mgKg(c.kg_unpriced) : "—"}</td>
@@ -374,7 +377,7 @@ smSection.addEventListener("click", async e => {
   } else if (act === "go") {
     await switchPaceView(b.dataset.view);
   } else if (act === "zone") {
-    if (SM.busy) return;
+    if (SM.busy || paceReadOnly()) return;
     SM.busy = true;
     const { error } = await sb.rpc("management_set_client_zone", { p_client: b.dataset.client, p_zone: b.dataset.zone });
     SM.busy = false;

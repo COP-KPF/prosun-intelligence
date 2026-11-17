@@ -1,46 +1,49 @@
 // ============================================================================
-// Delivery board — PACE › Delivery (Migration 029, 11 Nov 2026)
+// Delivery board — PACE › Delivery (Migrations 029, 030, 032, 033)
 // ============================================================================
-// Clément: an interface for the delivery team — which order is finished,
-// which one is pushed back, and so on — very visual for them.
+// Clément, 11 Nov: an interface for the delivery team — which order is
+// finished, which one is pushed back — very visual.
+// 13 Nov (030): kg in large on every card + accounting's invoice status.
+// 17 Nov (033): follow the real flow. A confirmed working paper means
+// production has produced the order and it is done; it then waits at the
+// factory, the delivery team picks it up by truck, brings it to the dispatch
+// center and delivers it to the client.
 //
-// One delivery day at a time. Every working paper due that day is a card,
-// placed in a lane by where it stands:
-//   In production — postponed to this day and not produced yet, or produced
-//                   and photographed with its weights still being checked
-//   Ready         — weights confirmed at the factory
-//   On the road   — marked "out" by the delivery team (problems shown first)
-//   Delivered     — marked delivered
-// and a violet lane for everything pushed away from this day (production,
-// middle office, register). Big tiles on top count each status and filter
-// the board; a bar shows how far the day's deliveries have got.
+// Two views:
+//   🏭 Pick up at the factory — every finished order not collected yet,
+//      whatever its delivery day (production runs a day or two before the
+//      delivery), grouped by delivery day; "Picked up" one by one or a whole
+//      day at once.
+//   🚚 Deliveries — one delivery day:
+//      At the factory → At the dispatch center → On the road → Delivered
+//      (problems first in "On the road"), a big step bar on top, then the
+//      orders of that day not finished yet and the ones pushed to another day
+//      as short lists.
 //
-// 13 Nov (Migration 030): every card also shows the kg in large (actual once
-// finished, ordered before) and accounting's invoice status; a line on top
-// counts orders finished, kg finished and orders invoiced for the day.
+// Marks (delivery, admin): dispatch (picked up) → out → delivered, or problem
+// (comment required; admins get a bell). ↩ goes back one step. An order
+// postponed after pick-up stays "at the dispatch center" (Migration 033).
+// Reasons for postponements: admin, middle office, company director only.
+// Company director (032): his company only, no marks.
 //
-// The delivery team marks Out / Delivered / Problem (comment required — the
-// admins get a bell). Reasons for postponements are shown to admin and the
-// middle office only; the database leaves them out for everyone else.
-//
-// Data: delivery_board(day) and delivery_mark(paper, status, note) — the
-// delivery role reads no table directly. No live database events for this
-// role, so the board refreshes itself every 20 s and when the tab comes back.
+// Data: delivery_board(day) (incl. "pickups" across days), delivery_mark,
+// delivery_mark_many. Refreshes itself every 20 s and when the tab comes back.
 //
 // Loaded after weighing-common.js and weighing.js (T, WEIGH_LANG, weighLangHtml,
 // weighSetLang, weighThaiDate, weighBangkokToday, weighTime, weighAddDays,
 // weighCompanyShort, weighUnit, ppReasonLabel); uses app.js globals at run
-// time (sb, myProfile, escapeHtml, escapeAttr).
+// time (sb, myProfile, escapeHtml, escapeAttr, paceScope).
 // ============================================================================
 
 const dlSection = document.getElementById("delivery-section");
 const DL_REFRESH_MS = window.__dlRefreshMs || 20000;
 
 const DL = {
-  day: null,          // ISO date on screen
+  view: null,         // "day" | "pickup" (remembered per browser)
+  day: null,          // ISO delivery date on screen (day view)
   data: null,         // last delivery_board() result
   sig: "",            // data signature, to redraw only on change
-  only: null,         // status key the tiles filter on (null = all)
+  only: null,         // step the bar filters on (null = all)
   company: "all",     // all | Prosun Farm | Prosun Food
   noInvoice: false,   // show only finished orders without an invoice
   q: "",              // search
@@ -50,41 +53,41 @@ const DL = {
   loading: false,
   timer: null,
   message: null,      // { kind: "ok" | "err", text }
-  missing: false,     // Migration 029 not run yet
+  missing: false,     // migration not run yet
 };
 
-// The statuses, in the order the day goes. Labels are functions so they
-// follow the TH / EN switch.
+// The steps of an order, in the order they happen. Labels follow TH / EN.
 const DL_STATES = {
-  produce:   { icon: "⏳", cls: "dl-slate",  label: () => T("ยังไม่ผลิต", "To produce"),
-               hint: () => T("เลื่อนมาวันนี้ ยังไม่ได้ผลิต", "Postponed to this day, not produced yet") },
-  checking:  { icon: "⚖️", cls: "dl-amber",  label: () => T("ผลิตแล้ว รอยืนยันน้ำหนัก", "Produced · checking weights"),
-               hint: () => T("ถ่ายรูปใบงานแล้ว กำลังตรวจน้ำหนัก", "Paper photographed, weights being checked") },
-  ready:     { icon: "✅", cls: "dl-green",  label: () => T("ผลิตเสร็จ พร้อมส่ง", "Finished · ready"),
-               hint: () => T("ยืนยันน้ำหนักแล้ว", "Weights confirmed") },
-  out:       { icon: "🚚", cls: "dl-blue",   label: () => T("ออกส่งแล้ว", "On the road"),
-               hint: () => T("กำลังไปส่ง", "Out for delivery") },
+  factory:   { icon: "🏭", cls: "dl-amber",  label: () => T("รอรับที่โรงงาน", "At the factory"),
+               hint: () => T("ผลิตเสร็จแล้ว รอรถไปรับ", "Finished, waiting for the truck") },
+  dispatch:  { icon: "🏬", cls: "dl-teal",   label: () => T("ที่ศูนย์กระจายสินค้า", "At the dispatch center"),
+               hint: () => T("รับของแล้ว", "Picked up") },
+  out:       { icon: "🚚", cls: "dl-blue",   label: () => T("ระหว่างส่ง", "On the road"),
+               hint: () => T("ออกส่งลูกค้าแล้ว", "Out for delivery") },
   delivered: { icon: "🏁", cls: "dl-done",   label: () => T("ส่งถึงแล้ว", "Delivered"),
                hint: () => T("ลูกค้าได้รับแล้ว", "Received by the client") },
   problem:   { icon: "⚠️", cls: "dl-red",    label: () => T("มีปัญหา", "Problem"),
                hint: () => T("ส่งไม่สำเร็จ / มีปัญหา", "Not delivered / issue") },
+  notready:  { icon: "⏳", cls: "dl-slate",  label: () => T("ยังผลิตไม่เสร็จ", "Not finished yet"),
+               hint: () => T("ยังไม่ได้ยืนยันน้ำหนัก", "Weights not confirmed yet") },
   pushed:    { icon: "↻",  cls: "dl-violet", label: () => T("เลื่อนไปวันอื่น", "Pushed to another day"),
                hint: () => T("ไม่ส่งวันนี้", "Not going today") },
 };
-const DL_ORDER = ["produce", "checking", "ready", "out", "delivered", "problem", "pushed"];
+const DL_FLOW = ["factory", "dispatch", "out", "delivered"];
 const DL_LANES = [
-  { key: "production", states: ["produce", "checking"], icon: "🏭", label: () => T("กำลังผลิต", "In production") },
-  { key: "ready",      states: ["ready"],               icon: "✅", label: () => T("ผลิตเสร็จ พร้อมส่ง", "Finished · ready") },
-  { key: "road",       states: ["problem", "out"],      icon: "🚚", label: () => T("ออกส่ง", "On the road") },
-  { key: "done",       states: ["delivered"],           icon: "🏁", label: () => T("ส่งถึงแล้ว", "Delivered") },
+  { key: "factory",  states: ["factory"],          icon: "🏭", label: () => T("รอรับที่โรงงาน", "At the factory") },
+  { key: "dispatch", states: ["dispatch"],         icon: "🏬", label: () => T("ที่ศูนย์กระจายสินค้า", "At the dispatch center") },
+  { key: "road",     states: ["problem", "out"],   icon: "🚚", label: () => T("ระหว่างส่ง", "On the road") },
+  { key: "done",     states: ["delivered"],        icon: "🏁", label: () => T("ส่งถึงแล้ว", "Delivered") },
 ];
+// ↩ goes back one step.
+const DL_PREV = { dispatch: null, out: "dispatch", delivered: "out", problem: "out" };
 
-// Where a paper stands for the delivery team.
+// Where an order stands for the delivery team.
 function dlStateOf(p) {
   if (p.mark && DL_STATES[p.mark.status]) return p.mark.status;
-  if (p.status === "postponed") return "produce";
-  if (p.status === "confirmed") return "ready";
-  return "checking";   // uploading / queued / reading / read / failed
+  if (p.status === "confirmed") return "factory";
+  return "notready";   // postponed (not produced) / photographed, weights not confirmed / being read
 }
 
 function dlCanMark() { return !!(DL.data && DL.data.can_mark); }
@@ -127,9 +130,14 @@ function dlDate(iso, opts) {
 
 // ----------------------------------------------------------- open / close
 async function openDelivery() {
-  if (!WEIGH_LANG) WEIGH_LANG = myProfile.role === "admin" ? "en" : "th";
+  if (!WEIGH_LANG) WEIGH_LANG = myProfile.role === "admin" || myProfile.role === "company_director" ? "en" : "th";
   dlSection.classList.remove("hidden");
   if (!DL.day) DL.day = weighBangkokToday();
+  if (!DL.view) {
+    let v = null;
+    try { v = localStorage.getItem("dl-view"); } catch (e) { /* storage off */ }
+    DL.view = v === "pickup" ? "pickup" : "day";
+  }
   DL.message = null;
   DL.problemFor = null;
   dlSection.innerHTML = `<p class="mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
@@ -148,7 +156,7 @@ function dlIsOpen() { return !dlSection.classList.contains("hidden"); }
 document.getElementById("switch-system-btn").addEventListener("click", closeDelivery);
 document.getElementById("sign-out-btn").addEventListener("click", () => {
   closeDelivery();
-  Object.assign(DL, { day: null, data: null, sig: "", only: null, company: "all", noInvoice: false, q: "", problemFor: null, message: null });
+  Object.assign(DL, { view: null, day: null, data: null, sig: "", only: null, company: "all", noInvoice: false, q: "", problemFor: null, message: null });
   DL.open.clear();
 });
 
@@ -169,13 +177,17 @@ async function dlLoad(opts = {}) {
     DL.data = null;
     DL.sig = "";
     DL.message = { kind: "err", text: DL.missing
-      ? T("ยังไม่พบหน้าจัดส่งในฐานข้อมูล: กรุณารัน Migration 029 ใน Supabase", "The delivery board is not in the database yet: run Migration 029 in Supabase.")
+      ? T("ยังไม่พบหน้าจัดส่งในฐานข้อมูล: กรุณารัน Migration 033 ใน Supabase", "The delivery board is not up to date in the database: run Migration 033 in Supabase.")
       : T("โหลดข้อมูลไม่สำเร็จ: ", "Could not load: ") + error.message };
     dlDraw();
     dlSchedule();
     return;
   }
-  const sig = JSON.stringify([data.papers, data.moved, data.register]);
+  if (!Array.isArray(data.pickups)) {   // the front end arrived before Migration 033
+    DL.message = { kind: "err", text: T("กรุณารัน Migration 033 ใน Supabase เพื่อใช้ขั้นตอนรับของที่โรงงาน", "Run Migration 033 in Supabase to use the factory pick-up steps.") };
+    data.pickups = [];
+  }
+  const sig = JSON.stringify([data.papers, data.moved, data.register, data.pickups]);
   const changed = sig !== DL.sig;
   DL.data = data;
   DL.sig = sig;
@@ -227,9 +239,34 @@ async function dlMark(paperId, status, note) {
   dlDrawBoard();
 }
 
+// Several orders in one go: all or nothing.
+async function dlMarkMany(ids, status) {
+  if (DL.busy || !ids.length) return;
+  DL.busy = true;
+  dlDrawBoard();
+  const { error } = await sb.rpc("delivery_mark_many", { p_papers: ids, p_status: status });
+  DL.busy = false;
+  DL.message = error
+    ? { kind: "err", text: T("บันทึกไม่สำเร็จ (ไม่มีออเดอร์ใดถูกบันทึก): ", "Could not save (no order was changed): ") + error.message }
+    : { kind: "ok", text: status === "dispatch"
+        ? T(`รับของแล้ว ${ids.length} ออเดอร์ → ศูนย์กระจายสินค้า`, `${ids.length} order${ids.length === 1 ? "" : "s"} picked up → dispatch center`)
+        : T(`ออกส่งแล้ว ${ids.length} ออเดอร์`, `${ids.length} order${ids.length === 1 ? "" : "s"} out for delivery`) };
+  await dlLoad({ silent: true });
+  dlDrawBoard();
+}
+
+function dlSetView(v) {
+  DL.view = v === "pickup" ? "pickup" : "day";
+  DL.only = null;
+  DL.problemFor = null;
+  DL.message = null;
+  try { localStorage.setItem("dl-view", DL.view); } catch (e) { /* storage off */ }
+  dlDraw();
+}
+
 
 // ----------------------------------------------------------- items
-// Everything due that day, plus the pushed ones, in one shape.
+// The day's orders, plus the ones pushed away from it, in one shape.
 function dlItems() {
   const d = DL.data;
   if (!d) return [];
@@ -252,6 +289,10 @@ function dlMatches(it) {
   return true;
 }
 
+function dlPickups() {
+  return ((DL.data && DL.data.pickups) || []).map(p => ({ kind: "paper", state: "factory", p })).filter(dlMatches);
+}
+
 
 // ----------------------------------------------------------- draw
 function dlDayLabel(iso) {
@@ -268,8 +309,8 @@ function dlDraw() {
   const rel = dlDayLabel(DL.day);
   const chip = (iso, label) =>
     `<button type="button" class="ws-chip ${DL.day === iso ? "on" : ""}" data-act="day" data-day="${iso}" aria-pressed="${DL.day === iso}">${label}</button>`;
-  dlSection.innerHTML = `
-    <div class="dl-top">
+  const nPick = ((DL.data && DL.data.pickups) || []).length;
+  const dayNav = `
       <div class="dl-daynav" role="group" aria-label="${T("วันส่ง", "Delivery day")}">
         <button type="button" class="dl-arrow" data-act="prev" aria-label="${T("วันก่อนหน้า", "Previous day")}">‹</button>
         <div class="dl-day">
@@ -277,15 +318,32 @@ function dlDraw() {
           <strong class="dl-day-date">${escapeHtml(weighThaiDate(DL.day, { weekday: "long", day: "numeric", month: "long" }))}</strong>
         </div>
         <button type="button" class="dl-arrow" data-act="next" aria-label="${T("วันถัดไป", "Next day")}">›</button>
-      </div>
+      </div>`;
+  dlSection.innerHTML = `
+    <div class="dl-views" role="tablist" aria-label="${T("มุมมอง", "View")}">
+      <button type="button" role="tab" class="dl-view ${DL.view === "pickup" ? "on" : ""}" data-act="view" data-view="pickup" aria-selected="${DL.view === "pickup"}">
+        <span class="dl-view-icon" aria-hidden="true">🏭</span>
+        <span><strong>${T("รับของที่โรงงาน", "Pick up at the factory")}</strong>
+          <small>${T("ออเดอร์ที่ผลิตเสร็จ รอรถไปรับ ทุกวันส่ง", "Finished orders waiting for the truck, every delivery day")}</small></span>
+        <span class="dl-view-n ${nPick ? "" : "zero"}" id="dl-pick-n">${nPick}</span>
+      </button>
+      <button type="button" role="tab" class="dl-view ${DL.view === "day" ? "on" : ""}" data-act="view" data-view="day" aria-selected="${DL.view === "day"}">
+        <span class="dl-view-icon" aria-hidden="true">🚚</span>
+        <span><strong>${T("ส่งของให้ลูกค้า", "Deliveries")}</strong>
+          <small>${T("โรงงาน → ศูนย์กระจายสินค้า → ลูกค้า ของวันส่งที่เลือก", "Factory → dispatch center → client, for one delivery day")}</small></span>
+      </button>
+    </div>
+    <div class="dl-top">
+      ${DL.view === "day" ? dayNav : `<div class="dl-pick-title"><strong>🏭 ${T("รอรับที่โรงงาน", "Waiting at the factory")}</strong>
+        <span class="mg-muted">${T("ผลิตเสร็จแล้ว (ยืนยันน้ำหนักแล้ว) ยังไม่ได้รับ", "Finished (weights confirmed), not picked up yet")}</span></div>`}
       <div class="dl-top-right">
-        <div class="ws-presets">
+        ${DL.view === "day" ? `<div class="ws-presets">
           ${chip(weighAddDays(today, -1), T("เมื่อวาน", "Yesterday"))}
           ${chip(today, T("วันนี้", "Today"))}
           ${chip(weighAddDays(today, 1), T("พรุ่งนี้", "Tomorrow"))}
           <label class="dl-pick"><span class="sr-only">${T("เลือกวัน", "Pick a day")}</span>
             <input type="date" id="dl-date" value="${escapeAttr(DL.day)}"></label>
-        </div>
+        </div>` : ""}
         ${weighLangHtml()}
         <button type="button" class="ws-chip" data-act="print">🖨 ${T("พิมพ์", "Print")}</button>
       </div>
@@ -294,35 +352,32 @@ function dlDraw() {
   dlDrawBoard();
 }
 
-function dlTilesHtml(items) {
-  const n = {};
-  DL_ORDER.forEach(k => { n[k] = 0; });
-  items.forEach(it => { n[it.state] += 1; });
-  return `<div class="dl-tiles" role="group" aria-label="${T("สถานะ", "Status")}">${DL_ORDER.map(k => {
+// The day as four big steps with arrows: how many orders at each place.
+function dlFlowHtml(items) {
+  const due = items.filter(it => it.kind === "paper");
+  const n = k => due.filter(it => it.state === k || (k === "out" && it.state === "problem")).length;
+  const steps = DL_FLOW.map((k, i) => {
     const s = DL_STATES[k];
     const on = DL.only === k;
-    return `<button type="button" class="dl-tile ${s.cls} ${on ? "on" : ""} ${n[k] ? "" : "zero"}" data-act="only" data-state="${k}" aria-pressed="${on}">
-      <span class="dl-tile-icon" aria-hidden="true">${s.icon}</span>
-      <span class="dl-tile-n">${n[k]}</span>
-      <span class="dl-tile-label">${escapeHtml(s.label())}</span>
-    </button>`;
-  }).join("")}</div>`;
-}
-
-// How far the day has got: one coloured segment per status of the orders due.
-function dlProgressHtml(items) {
-  const due = items.filter(it => it.kind === "paper");
-  if (!due.length) return "";
-  const done = due.filter(it => it.state === "delivered").length;
-  const segs = ["delivered", "out", "problem", "ready", "checking", "produce"].map(k => {
-    const c = due.filter(it => it.state === k).length;
-    return c ? `<span class="dl-seg ${DL_STATES[k].cls}" style="flex:${c}" title="${escapeAttr(DL_STATES[k].label())}: ${c}"></span>` : "";
+    const c = n(k);
+    const prob = k === "out" ? due.filter(it => it.state === "problem").length : 0;
+    return `${i ? `<span class="dl-flow-arrow" aria-hidden="true">→</span>` : ""}
+      <button type="button" class="dl-step ${s.cls} ${on ? "on" : ""} ${c ? "" : "zero"}" data-act="only" data-state="${k}" aria-pressed="${on}">
+        <span class="dl-step-icon" aria-hidden="true">${s.icon}</span>
+        <span class="dl-step-n">${c}</span>
+        <span class="dl-step-label">${escapeHtml(s.label())}</span>
+        ${prob ? `<span class="dl-step-prob">⚠️ ${prob} ${T("มีปัญหา", "problem" + (prob === 1 ? "" : "s"))}</span>` : ""}
+      </button>`;
   }).join("");
-  const pct = Math.round(done * 100 / due.length);
-  return `<div class="dl-progress">
-    <div class="dl-progress-text"><strong>${done} / ${due.length}</strong> ${T("ออเดอร์ส่งถึงแล้ว", "orders delivered")} <span class="mg-muted">(${pct}%)</span></div>
-    <div class="dl-bar" role="img" aria-label="${done} / ${due.length}">${segs}</div>
-  </div>`;
+  const notReady = due.filter(it => it.state === "notready").length;
+  const pushed = items.filter(it => it.state === "pushed").length;
+  const delivered = n("delivered");
+  return `<div class="dl-flow" role="group" aria-label="${T("ขั้นตอน", "Steps")}">${steps}</div>
+    <div class="dl-flow-foot">
+      <span class="dl-flow-done"><strong>${delivered} / ${due.length}</strong> ${T("ออเดอร์ส่งถึงแล้ว", "orders delivered")}</span>
+      ${notReady ? `<a href="#dl-notready" class="dl-mini dl-slate">⏳ ${notReady} ${T("ยังผลิตไม่เสร็จ", "not finished yet")}</a>` : ""}
+      ${pushed ? `<a href="#dl-pushed" class="dl-mini dl-violet">↻ ${pushed} ${T("เลื่อนไปวันอื่น", "pushed to another day")}</a>` : ""}
+    </div>`;
 }
 
 // The three things the team asked for, for the whole day: how many orders are
@@ -351,7 +406,8 @@ function dlFiltersHtml() {
   const c = (v, label) =>
     `<button type="button" class="ws-chip ${DL.company === v ? "on" : ""}" data-act="company" data-company="${escapeAttr(v)}" aria-pressed="${DL.company === v}">${label}</button>`;
   return `<div class="dl-filters">
-    <div class="ws-presets">${c("all", T("ทุกบริษัท", "All companies"))}${c("Prosun Farm", "PSFarm")}${c("Prosun Food", "PSFood")}</div>
+    ${paceScope() ? `<span class="mg-company-fixed" id="dl-company-fixed">${escapeHtml(paceScope())}</span>`   // company director: the board holds his company only (Migration 032)
+      : `<div class="ws-presets">${c("all", T("ทุกบริษัท", "All companies"))}${c("Prosun Farm", "PSFarm")}${c("Prosun Food", "PSFood")}</div>`}
     <input type="search" id="dl-search" class="dl-search" placeholder="${T("ค้นหาลูกค้า / PO / สินค้า", "Search client / PO / product")}" value="${escapeAttr(DL.q)}" aria-label="${T("ค้นหา", "Search")}">
     ${DL.noInvoice ? `<button type="button" class="ws-chip on" data-act="noinv">🧾 ${T("เฉพาะที่ยังไม่มีใบแจ้งหนี้", "Only without invoice")} ✕</button>` : ""}
     ${DL.only ? `<button type="button" class="ws-chip on" data-act="only" data-state="${DL.only}">${T("แสดงเฉพาะ", "Showing only")}: ${escapeHtml(DL_STATES[DL.only].label())} ✕</button>` : ""}
@@ -385,14 +441,9 @@ function dlLinesHtml(p) {
   </details>`;
 }
 
-function dlActionsHtml(p, state) {
-  // Not produced yet, or the paper is still being read: nothing to deliver.
-  if (!dlCanMark() || state === "produce" || ["uploading", "queued", "reading"].includes(p.status)) return "";
+function dlProblemFormHtml(p) {
   const dis = DL.busy ? "disabled" : "";
-  const b = (status, label, cls) =>
-    `<button type="button" class="dl-btn ${cls}" data-act="mark" data-id="${escapeAttr(p.id)}" data-status="${status}" ${dis}>${label}</button>`;
-  if (DL.problemFor === p.id) {
-    return `<form class="dl-problem-form" data-id="${escapeAttr(p.id)}">
+  return `<form class="dl-problem-form" data-id="${escapeAttr(p.id)}">
       <label>${T("เกิดอะไรขึ้น? *", "What happened? *")}
         <textarea id="dl-problem-note" rows="2" required placeholder="${T("เช่น ลูกค้าปิดร้าน ของตีกลับ ส่งไม่ครบ", "e.g. client closed, goods returned, short delivery")}"></textarea></label>
       <div class="dl-actions">
@@ -401,19 +452,23 @@ function dlActionsHtml(p, state) {
       </div>
       <p class="mg-small mg-muted">${T("ผู้บริหารจะได้รับแจ้ง", "Management is notified.")}</p>
     </form>`;
-  }
+}
+
+// One big button for the next step; problem and ↩ (one step back) beside it.
+function dlActionsHtml(p, state) {
+  if (!dlCanMark() || state === "notready") return "";
+  if (DL.problemFor === p.id) return dlProblemFormHtml(p);
+  const dis = DL.busy ? "disabled" : "";
+  const b = (status, label, cls) =>
+    `<button type="button" class="dl-btn ${cls}" data-act="mark" data-id="${escapeAttr(p.id)}" data-status="${status}" ${dis}>${label}</button>`;
   const problem = `<button type="button" class="dl-btn dl-btn-ghost" data-act="problem" data-id="${escapeAttr(p.id)}" ${dis}>⚠️ ${T("แจ้งปัญหา", "Problem")}</button>`;
-  const undo = `<button type="button" class="dl-btn dl-btn-ghost" data-act="undo" data-id="${escapeAttr(p.id)}" ${dis}>↩ ${T("ย้อนกลับ", "Undo")}</button>`;
-  if (state === "checking" || state === "ready") {
-    return `<div class="dl-actions">${b("out", "🚚 " + T("ออกส่ง", "Out for delivery"), "dl-btn-blue")}${b("delivered", "🏁 " + T("ส่งถึงแล้ว", "Delivered"), "dl-btn-ghost")}${problem}</div>`;
-  }
-  if (state === "out") {
-    return `<div class="dl-actions">${b("delivered", "🏁 " + T("ส่งถึงแล้ว", "Delivered"), "dl-btn-green")}${problem}${undo}</div>`;
-  }
-  if (state === "problem") {
-    return `<div class="dl-actions">${b("delivered", "🏁 " + T("ส่งถึงแล้ว", "Delivered"), "dl-btn-green")}${undo}</div>`;
-  }
-  return `<div class="dl-actions">${undo}</div>`;   // delivered
+  const back = `<button type="button" class="dl-btn dl-btn-ghost" data-act="back" data-id="${escapeAttr(p.id)}" data-status="${escapeAttr(state)}" ${dis}
+      title="${T("ย้อนกลับหนึ่งขั้น", "One step back")}">↩ ${T("ย้อนกลับ", "Back")}</button>`;
+  if (state === "factory")  return `<div class="dl-actions">${b("dispatch", "📦 " + T("รับของแล้ว → ศูนย์", "Picked up → dispatch"), "dl-btn-teal dl-btn-big")}</div>`;
+  if (state === "dispatch") return `<div class="dl-actions">${b("out", "🚚 " + T("ออกส่ง", "Out for delivery"), "dl-btn-blue dl-btn-big")}${back}</div>`;
+  if (state === "out")      return `<div class="dl-actions">${b("delivered", "🏁 " + T("ส่งถึงแล้ว", "Delivered"), "dl-btn-green dl-btn-big")}${problem}${back}</div>`;
+  if (state === "problem")  return `<div class="dl-actions">${b("delivered", "🏁 " + T("ส่งถึงแล้ว", "Delivered"), "dl-btn-green")}${back}</div>`;
+  return `<div class="dl-actions">${back}</div>`;   // delivered
 }
 
 // Big kg figure: confirmed (actual) once finished, otherwise what was ordered.
@@ -439,20 +494,20 @@ function dlInvoiceHtml(p) {
   return `<div class="dl-inv dl-inv-wait">🧾 ${T("ออกใบแจ้งหนี้ได้เมื่อยืนยันน้ำหนัก", "Invoice after weights are confirmed")}</div>`;
 }
 
-function dlPaperCardHtml(it) {
+function dlPaperCardHtml(it, opts = {}) {
   const p = it.p;
   const s = DL_STATES[it.state];
-  const reading = ["uploading", "queued", "reading"].includes(p.status);
-  const name = p.customer_name || (reading ? T("กำลังอ่านใบงาน…", "Paper being read…") : T("ไม่ทราบชื่อลูกค้า", "Client not read"));
-  const moved = p.moved_from && p.moved_from !== DL.day
+  const name = p.customer_name || T("ไม่ทราบชื่อลูกค้า", "Client not read");
+  const moved = p.moved_from && p.moved_from !== (opts.pickup ? p.due_date : DL.day)
     ? `<span class="dl-tag dl-tag-violet">↻ ${T("เลื่อนมาจาก", "moved from")} ${escapeHtml(dlDate(p.moved_from))}</span>` : "";
-  const unconfirmed = ["out", "delivered", "problem"].includes(it.state) && p.status !== "confirmed"
-    ? `<span class="dl-tag dl-tag-amber">⚖️ ${T("น้ำหนักยังไม่ยืนยัน", "weights not confirmed yet")}</span>` : "";
-  const reopened = p.reopened ? `<span class="dl-tag dl-tag-amber">${T("เปิดแก้น้ำหนัก", "weights reopened")}</span>` : "";
+  const carried = p.mark && p.mark.carried
+    ? `<span class="dl-tag dl-tag-teal">🏬 ${T("รับมาแล้ว แต่ถูกเลื่อนวันส่ง", "Picked up, then postponed")}</span>` : "";
+  const reopened = p.reopened ? `<span class="dl-tag dl-tag-amber">${T("โรงงานเปิดแก้น้ำหนัก", "weights being corrected")}</span>` : "";
   const mark = p.mark
     ? `<div class="dl-mark">${s.icon} ${escapeHtml(s.label())} · ${escapeHtml(weighTime(p.mark.marked_at))}${p.mark.by ? " · " + escapeHtml(p.mark.by) : ""}</div>` : "";
   const note = p.mark && p.mark.status === "problem" && p.mark.note
     ? `<div class="dl-note">“${escapeHtml(p.mark.note)}”</div>` : "";
+  const tags = moved + carried + reopened;
   return `<article class="dl-card ${s.cls}" data-state="${it.state}" data-id="${escapeAttr(p.id)}">
     <div class="dl-card-head">
       <span class="dl-badge ${s.cls}"><span aria-hidden="true">${s.icon}</span> ${escapeHtml(s.label())}</span>
@@ -466,11 +521,30 @@ function dlPaperCardHtml(it) {
       ${dlKgBigHtml(p)}
     </div>
     ${dlInvoiceHtml(p)}
-    ${moved || unconfirmed || reopened ? `<div class="dl-tags">${moved}${unconfirmed}${reopened}</div>` : ""}
+    ${tags ? `<div class="dl-tags">${tags}</div>` : ""}
     ${mark}${note}
     ${dlLinesHtml(p)}
     ${dlActionsHtml(p, it.state)}
   </article>`;
+}
+
+// Orders of the day that are not finished yet: one short line each.
+function dlNotReadyHtml(list) {
+  if (!list.length) return "";
+  const rows = list.map(it => {
+    const p = it.p;
+    const reading = ["uploading", "queued", "reading"].includes(p.status);
+    const why = p.status === "postponed" ? T("ยังไม่ได้ผลิต (เลื่อนมาวันนี้)", "Not produced yet (postponed to this day)")
+      : reading ? T("กำลังอ่านใบงาน", "Paper being read")
+      : T("ผลิตแล้ว รอยืนยันน้ำหนัก", "Produced, weights being checked");
+    const k = dlKg(p);
+    return `<li class="dl-row"><span class="dl-row-name">${escapeHtml(p.customer_name || T("กำลังอ่านใบงาน…", "Paper being read…"))}</span>
+      ${dlCompanyChip(p.company)}<span class="dl-row-po">${dlPo(p.po_number)}</span>
+      <span class="dl-row-why">⏳ ${escapeHtml(why)}</span>${k ? `<span class="dl-row-kg">${escapeHtml(dlKgText(k))}</span>` : ""}</li>`;
+  }).join("");
+  return `<section class="dl-list dl-list-slate" id="dl-notready" aria-label="${escapeAttr(DL_STATES.notready.label())}">
+    <header class="dl-lane-head">⏳ ${T("ยังผลิตไม่เสร็จ — ยังไม่ต้องไปรับ", "Not finished yet — nothing to pick up")} <span class="dl-lane-n">${list.length}</span></header>
+    <ul>${rows}</ul></section>`;
 }
 
 function dlPushedCardHtml(it) {
@@ -505,53 +579,43 @@ function dlLaneKg(cards) {
   return kg ? `${approx ? "~" : ""}${kg.toLocaleString("en-GB", { maximumFractionDigits: 1 })} kg` : "";
 }
 
+// Lane header button for a whole lane at once.
+function dlBulkHtml(lane, cards) {
+  if (!dlCanMark() || !cards.length) return "";
+  const dis = DL.busy ? "disabled" : "";
+  if (lane === "factory") {
+    return `<button type="button" class="dl-bulk" data-act="bulk" data-status="dispatch" data-ids="${escapeAttr(cards.map(c => c.p.id).join(","))}" ${dis}>📦 ${T(`รับทั้งหมด (${cards.length})`, `Pick up all (${cards.length})`)}</button>`;
+  }
+  if (lane === "dispatch") {
+    return `<button type="button" class="dl-bulk" data-act="bulk" data-status="out" data-ids="${escapeAttr(cards.map(c => c.p.id).join(","))}" ${dis}>🚚 ${T(`ออกส่งทั้งหมด (${cards.length})`, `All out for delivery (${cards.length})`)}</button>`;
+  }
+  return "";
+}
+
+function dlMessageHtml() {
+  return DL.message
+    ? `<div class="${DL.message.kind === "ok" ? "pp-ok" : "mg-msg"}" id="dl-msg" role="status">${escapeHtml(DL.message.text)}</div>` : "";
+}
+
 function dlDrawBoard() {
   const wrap = document.getElementById("dl-board-wrap");
   if (!wrap) return;
-  const msg = DL.message
-    ? `<div class="${DL.message.kind === "ok" ? "pp-ok" : "mg-msg"}" id="dl-msg" role="status">${escapeHtml(DL.message.text)}</div>` : "";
   if (!DL.data) {
-    wrap.innerHTML = msg || `<p class="mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
+    wrap.innerHTML = dlMessageHtml() || `<p class="mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
     return;
+  }
+  const badge = document.getElementById("dl-pick-n");
+  if (badge) {
+    const n = (DL.data.pickups || []).length;
+    badge.textContent = n;
+    badge.classList.toggle("zero", !n);
   }
   // Keep the search box (and the caret in it) when only the board changes.
   const search = document.getElementById("dl-search");
   const typing = search && document.activeElement === search;
   const caret = typing ? search.selectionStart : null;
 
-  const all = dlItems();
-  const items = all.filter(dlMatches);
-  const shown = DL.only ? items.filter(it => it.state === DL.only) : items;
-
-  const lanes = DL_LANES.map(lane => {
-    const cards = shown.filter(it => it.kind === "paper" && lane.states.includes(it.state))
-      .sort((a, b) => lane.states.indexOf(a.state) - lane.states.indexOf(b.state));
-    const hidden = DL.only && !lane.states.includes(DL.only);
-    return `<section class="dl-lane dl-lane-${lane.key} ${hidden ? "dl-lane-dim" : ""}" aria-label="${escapeAttr(lane.label())}">
-      <header class="dl-lane-head"><span aria-hidden="true">${lane.icon}</span> ${escapeHtml(lane.label())}
-        ${cards.length ? `<span class="dl-lane-kg">${dlLaneKg(cards)}</span>` : ""}<span class="dl-lane-n">${cards.length}</span></header>
-      <div class="dl-lane-body">${cards.length ? cards.map(dlPaperCardHtml).join("") : `<p class="dl-empty">—</p>`}</div>
-    </section>`;
-  }).join("");
-
-  const pushed = shown.filter(it => it.state === "pushed");
-  const pushedHtml = pushed.length || !DL.only || DL.only === "pushed"
-    ? `<section class="dl-pushed-lane" aria-label="${escapeAttr(DL_STATES.pushed.label())}">
-        <header class="dl-lane-head">↻ ${escapeHtml(DL_STATES.pushed.label())} <span class="dl-lane-n">${pushed.length}</span>
-          <span class="mg-small mg-muted">${T("ออเดอร์ที่เคยกำหนดส่งวันนี้ แต่ถูกเลื่อน — ไม่ต้องส่งวันนี้", "Orders that were due this day and have been moved — do not deliver today")}</span></header>
-        <div class="dl-pushed-grid">${pushed.length ? pushed.map(dlPushedCardHtml).join("") : `<p class="dl-empty">${T("ไม่มีออเดอร์ที่ถูกเลื่อน", "Nothing pushed from this day")}</p>`}</div>
-      </section>` : "";
-
-  const nothing = !all.length
-    ? `<div class="mg-card dl-nothing"><strong>${T("ยังไม่มีออเดอร์สำหรับวันนี้", "No orders for this day yet")}</strong>
-        <p class="mg-small mg-muted">${T("ออเดอร์จะขึ้นที่นี่เมื่อฝ่ายผลิตถ่ายรูปใบงาน (FM-SA-01)", "Orders appear here once production photographs their working paper (FM-SA-01).")}</p></div>` : "";
-
-  wrap.innerHTML = `${msg}
-    ${dlTilesHtml(items)}
-    ${dlSummaryHtml(all.filter(it => DL.company === "all" || it.p.company === DL.company))}
-    ${dlProgressHtml(items)}
-    ${dlFiltersHtml()}
-    ${nothing || `<div class="dl-board">${lanes}</div>${pushedHtml}`}`;
+  wrap.innerHTML = DL.view === "pickup" ? dlPickupHtml() : dlDayHtml();
   dlStamp();
 
   if (typing) {
@@ -565,6 +629,79 @@ function dlDrawBoard() {
   }
 }
 
+function dlDayHtml() {
+  const all = dlItems();
+  const items = all.filter(dlMatches);
+  const shown = DL.only ? items.filter(it => it.state === DL.only || (DL.only === "out" && it.state === "problem")) : items;
+
+  const lanes = DL_LANES.map(lane => {
+    const cards = shown.filter(it => it.kind === "paper" && lane.states.includes(it.state))
+      .sort((a, b) => lane.states.indexOf(a.state) - lane.states.indexOf(b.state));
+    const hidden = DL.only && !lane.states.includes(DL.only);
+    return `<section class="dl-lane dl-lane-${lane.key} ${hidden ? "dl-lane-dim" : ""}" aria-label="${escapeAttr(lane.label())}">
+      <header class="dl-lane-head"><span aria-hidden="true">${lane.icon}</span> ${escapeHtml(lane.label())}
+        ${cards.length ? `<span class="dl-lane-kg">${dlLaneKg(cards)}</span>` : ""}<span class="dl-lane-n">${cards.length}</span></header>
+      ${dlBulkHtml(lane.key, cards.filter(c => c.state === lane.states[lane.states.length - 1]))}
+      <div class="dl-lane-body">${cards.length ? cards.map(c => dlPaperCardHtml(c)).join("") : `<p class="dl-empty">—</p>`}</div>
+    </section>`;
+  }).join("");
+
+  const notReady = DL.only ? [] : items.filter(it => it.state === "notready");
+  const pushed = items.filter(it => it.state === "pushed");
+  const pushedHtml = pushed.length && (!DL.only || DL.only === "pushed")
+    ? `<section class="dl-pushed-lane" id="dl-pushed" aria-label="${escapeAttr(DL_STATES.pushed.label())}">
+        <header class="dl-lane-head">↻ ${escapeHtml(DL_STATES.pushed.label())} <span class="dl-lane-n">${pushed.length}</span>
+          <span class="mg-small mg-muted">${T("ออเดอร์ที่เคยกำหนดส่งวันนี้ แต่ถูกเลื่อน — ไม่ต้องส่งวันนี้", "Orders that were due this day and have been moved — do not deliver today")}</span></header>
+        <div class="dl-pushed-grid">${pushed.map(dlPushedCardHtml).join("")}</div>
+      </section>` : "";
+
+  const nothing = !all.length
+    ? `<div class="mg-card dl-nothing"><strong>${T("ยังไม่มีออเดอร์สำหรับวันนี้", "No orders for this day yet")}</strong>
+        <p class="mg-small mg-muted">${T("ออเดอร์จะขึ้นที่นี่เมื่อฝ่ายผลิตถ่ายรูปใบงาน (FM-SA-01)", "Orders appear here once production photographs their working paper (FM-SA-01).")}</p></div>` : "";
+
+  return `${dlMessageHtml()}
+    ${nothing || `${dlFlowHtml(items)}
+    ${dlSummaryHtml(all.filter(it => DL.company === "all" || it.p.company === DL.company))}
+    ${dlFiltersHtml()}
+    <div class="dl-board">${lanes}</div>
+    ${dlNotReadyHtml(notReady)}
+    ${pushedHtml}`}`;
+}
+
+// Pick-up view: every finished order still at the factory, by delivery day.
+function dlPickupHtml() {
+  const list = dlPickups();
+  const today = weighBangkokToday();
+  const days = [...new Set(list.map(it => it.p.due_date))].sort();
+  const totalKg = list.reduce((t, it) => t + ((dlKg(it.p) || {}).kg || 0), 0);
+  const fmt = n => n.toLocaleString("en-GB", { maximumFractionDigits: 1 });
+  const groups = days.map(d => {
+    const cards = list.filter(it => it.p.due_date === d);
+    const late = d < today;
+    const rel = dlDayLabel(d);
+    const kg = cards.reduce((t, it) => t + ((dlKg(it.p) || {}).kg || 0), 0);
+    return `<section class="dl-pick-day ${late ? "dl-pick-late" : ""}" aria-label="${escapeAttr(d)}">
+      <header class="dl-pick-head">
+        <span class="dl-pick-date">📅 ${T("ส่ง", "Delivery")} ${escapeHtml(weighThaiDate(d, { weekday: "long", day: "numeric", month: "short" }))}
+          ${rel ? `<span class="dl-pick-rel">${escapeHtml(rel)}</span>` : ""}${late ? `<span class="dl-pick-rel dl-pick-rel-late">${T("เลยกำหนดส่ง", "Late")}</span>` : ""}</span>
+        <span class="dl-pick-sum">${cards.length} ${T("ออเดอร์", cards.length === 1 ? "order" : "orders")} · ${fmt(kg)} kg</span>
+        ${dlCanMark() ? `<button type="button" class="dl-bulk" data-act="bulk" data-status="dispatch" data-ids="${escapeAttr(cards.map(c => c.p.id).join(","))}" ${DL.busy ? "disabled" : ""}>📦 ${T(`รับทั้งหมดของวันนี้ (${cards.length})`, `Pick up all for this day (${cards.length})`)}</button>` : ""}
+      </header>
+      <div class="dl-pick-grid">${cards.map(c => dlPaperCardHtml(c, { pickup: true })).join("")}</div>
+    </section>`;
+  }).join("");
+  const empty = `<div class="mg-card dl-nothing"><strong>✅ ${T("ไม่มีของรอรับที่โรงงาน", "Nothing waiting at the factory")}</strong>
+      <p class="mg-small mg-muted">${T("ออเดอร์จะขึ้นที่นี่ทันทีที่ยืนยันน้ำหนักใบงาน", "Orders appear here as soon as their working paper's weights are confirmed.")}</p></div>`;
+  return `${dlMessageHtml()}
+    <div class="dl-pick-total">
+      <span class="dl-sum-n">${list.length}</span><span>${T("ออเดอร์รอรับ", list.length === 1 ? "order waiting" : "orders waiting")}</span>
+      <span class="dl-sum-n">${fmt(totalKg)}<small> kg</small></span>
+      ${dlCanMark() && list.length ? `<button type="button" class="dl-bulk dl-bulk-big" data-act="bulk" data-status="dispatch" data-ids="${escapeAttr(list.map(c => c.p.id).join(","))}" ${DL.busy ? "disabled" : ""}>📦 ${T(`รับทั้งหมด (${list.length})`, `Pick up everything (${list.length})`)}</button>` : ""}
+    </div>
+    ${dlFiltersHtml()}
+    ${list.length ? groups : empty}`;
+}
+
 
 // ----------------------------------------------------------- events
 dlSection.addEventListener("click", async e => {
@@ -572,6 +709,7 @@ dlSection.addEventListener("click", async e => {
   if (!b || b.disabled) return;
   const act = b.dataset.act;
   if (act === "lang") { weighSetLang(b.dataset.lang); dlDraw(); }
+  else if (act === "view") dlSetView(b.dataset.view);
   else if (act === "day") await dlSetDay(b.dataset.day);
   else if (act === "prev") await dlSetDay(weighAddDays(DL.day, -1));
   else if (act === "next") await dlSetDay(weighAddDays(DL.day, 1));
@@ -583,9 +721,19 @@ dlSection.addEventListener("click", async e => {
   else if (act === "company") { DL.company = b.dataset.company; dlDrawBoard(); }
   else if (act === "noinv") { DL.noInvoice = !DL.noInvoice; dlDrawBoard(); }
   else if (act === "mark") await dlMark(b.dataset.id, b.dataset.status);
-  else if (act === "undo") {
-    if (!confirm(T("ล้างสถานะการส่งของออเดอร์นี้?", "Clear the delivery status of this order?"))) return;
-    await dlMark(b.dataset.id, null);
+  else if (act === "back") {
+    const prev = DL_PREV[b.dataset.status];
+    const label = prev ? DL_STATES[prev].label() : DL_STATES.factory.label();
+    if (!confirm(T(`ย้อนกลับเป็น “${label}”?`, `Move this order back to “${label}”?`))) return;
+    await dlMark(b.dataset.id, prev === undefined ? null : prev);
+  }
+  else if (act === "bulk") {
+    const ids = (b.dataset.ids || "").split(",").filter(Boolean);
+    const q = b.dataset.status === "dispatch"
+      ? T(`ยืนยัน: รับของ ${ids.length} ออเดอร์จากโรงงานแล้ว?`, `Confirm: ${ids.length} order${ids.length === 1 ? "" : "s"} picked up from the factory?`)
+      : T(`ยืนยัน: ออกส่ง ${ids.length} ออเดอร์?`, `Confirm: ${ids.length} order${ids.length === 1 ? "" : "s"} out for delivery?`);
+    if (!confirm(q)) return;
+    await dlMarkMany(ids, b.dataset.status);
   }
   else if (act === "problem") { DL.problemFor = b.dataset.id; dlDrawBoard(); }
   else if (act === "problem-cancel") { DL.problemFor = null; dlDrawBoard(); dlSchedule(); }

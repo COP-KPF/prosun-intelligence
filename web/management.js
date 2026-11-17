@@ -44,6 +44,7 @@ const MG_PRESETS = [
 // ----------------------------------------------------------- open / close
 async function openManagement() {
   if (!WEIGH_LANG) WEIGH_LANG = "en";
+  if (paceScope()) MG.company = paceScope();   // company director: his company only (Migration 032)
   mgSection.classList.remove("hidden");
   if (!MG.data) mgSection.innerHTML = `<p class="mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
   MG.sig = "";
@@ -197,7 +198,7 @@ function mgTile(o) {
     <span class="mg-tile-v">${o.value}${o.unit ? `<small>${o.unit}</small>` : ""}</span>
     ${o.stateText ? `<span class="mg-state">${o.stateText}</span>` : ""}
     ${o.sub ? `<span class="mg-tile-s">${o.sub}</span>` : ""}
-    ${o.go ? `<button type="button" class="mg-go" data-act="go" data-view="${o.go}">${T("เปิด ›", "Open ›")}</button>` : ""}
+    ${o.go && paceCanOpen(o.go) ? `<button type="button" class="mg-go" data-act="go" data-view="${o.go}">${T("เปิด ›", "Open ›")}</button>` : ""}
   </div>`;
 }
 
@@ -342,6 +343,8 @@ function mgPostponedHtml() {
 }
 
 function mgSalesHtml(d) {
+  // The CRM's clients carry no company: not shown to a company director (Migration 032).
+  if (paceScope()) return "";
   const reps = d.sales.reps, un = d.sales.unassigned;
   const keys = ["clients", "active", "at_risk", "dormant", "pipeline", "lost"];
   const total = {};
@@ -365,16 +368,20 @@ function mgSalesHtml(d) {
 }
 
 function mgNoteHtml(d) {
+  // Read-only for a company director: the first counted day is shown, not edited (Migration 032).
+  const start = paceReadOnly()
+    ? `<span class="mg-strong">${T("เริ่มนับตั้งแต่วันที่", "Counting papers from")} ${escapeHtml(mgDayLong(d.count_from))}</span>`
+    : `<label for="mg-count-from" class="mg-strong">${T("เริ่มนับตั้งแต่วันที่", "Count papers from")}</label>
+      <input type="date" id="mg-count-from" value="${escapeHtml(d.count_from)}" max="${escapeHtml(d.today)}">
+      <button type="button" class="ws-chip" data-act="save-start" ${MG.saving ? "disabled" : ""}>${T("บันทึก", "Save")}</button>`;
   return `<div class="mg-card mg-small" id="mg-note">
     <div class="mg-note">
-      <label for="mg-count-from" class="mg-strong">${T("เริ่มนับตั้งแต่วันที่", "Count papers from")}</label>
-      <input type="date" id="mg-count-from" value="${escapeHtml(d.count_from)}" max="${escapeHtml(d.today)}">
-      <button type="button" class="ws-chip" data-act="save-start" ${MG.saving ? "disabled" : ""}>${T("บันทึก", "Save")}</button>
+      ${start}
       <span class="mg-muted">${T("ใบงานก่อนวันนี้ (ช่วงทดสอบ) ไม่นับในตัวเลขการชั่ง", "Papers before this date (team testing) are left out of all weighing figures.")}</span>
     </div>
     <p class="mg-muted" style="margin-top:8px">${T(
-      "ใบงานนับตามวันที่ถ่ายรูป น้ำหนักนับเฉพาะใบที่ยืนยันแล้ว “รอบัญชีตรวจ” มาจากเครื่องหมายตรวจในหน้าน้ำหนักที่ยืนยันแล้ว ไม่ได้ยืนยันว่าออกใบแจ้งหนี้ใน Odoo แล้ว ยังไม่มีรายได้ เพราะรายการยังไม่มีราคา",
-      "Papers count on the day they were photographed; weights count on confirmed papers only. “Waiting for accounting check” comes from the check mark on Confirmed weights and does not prove an Odoo invoice exists. Revenue is not shown yet because the lines carry no prices.")}</p>
+      "ใบงานนับตามวันที่ถ่ายรูป น้ำหนักนับเฉพาะใบที่ยืนยันแล้ว “รอบัญชีตรวจ” มาจากเครื่องหมายตรวจในหน้าน้ำหนักที่ยืนยันแล้ว ไม่ได้ยืนยันว่าออกใบแจ้งหนี้ใน Odoo แล้ว รายได้โดยประมาณอยู่ในหน้า ผู้บริหาร › สรุปผลและรายได้",
+      "Papers count on the day they were photographed; weights count on confirmed papers only. “Waiting for accounting check” comes from the check mark on Confirmed weights and does not prove an Odoo invoice exists. Approximate revenue is on Management › Summary.")}</p>
   </div>`;
 }
 
@@ -386,11 +393,11 @@ function mgFiltersHtml() {
   return `<div class="mg-bar">
     <div class="ws-presets">${chips}</div>
     <div class="mg-bar-right">
-      <select id="mg-company" aria-label="${T("บริษัท", "Company")}">
+      ${paceScope() ? `<span class="mg-company-fixed" id="mg-company-fixed">${escapeHtml(paceScope())}</span>` : `<select id="mg-company" aria-label="${T("บริษัท", "Company")}">
         <option value="all" ${MG.company === "all" ? "selected" : ""}>${T("ทุกบริษัท", "All companies")}</option>
         <option value="Prosun Farm" ${MG.company === "Prosun Farm" ? "selected" : ""}>Prosun Farm</option>
         <option value="Prosun Food" ${MG.company === "Prosun Food" ? "selected" : ""}>Prosun Food</option>
-      </select>
+      </select>`}
       ${weighLangHtml()}
     </div>
   </div>`;
@@ -449,6 +456,7 @@ mgSection.addEventListener("click", async e => {
     if (b.dataset.view === "weights") paceWeightsDept = "Accounting";
     await switchPaceView(b.dataset.view);
   } else if (act === "save-start") {
+    if (paceReadOnly()) return;
     const v = document.getElementById("mg-count-from").value;
     if (!v) return;
     MG.saving = true;

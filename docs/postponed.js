@@ -68,7 +68,7 @@ async function openPostponed() {
   ppSection.innerHTML = `<p class="mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
   PP.message = null;
   PP.editing = null;
-  if (!PP.customers.length) {
+  if (!PP.customers.length && !paceReadOnly()) {   // the form's client list; a company director has no form (Migration 032)
     const { data } = await sb.from("pace_customers").select("name").eq("active", true).order("name");
     PP.customers = [...new Set((data || []).map(c => c.name))];
   }
@@ -180,7 +180,7 @@ function ppTableHtml(all) {
       <td class="mg-n">${r.quantity_kg === null || r.quantity_kg === undefined ? "—" : Number(r.quantity_kg).toLocaleString("en-GB", { maximumFractionDigits: 2 })}</td>
       <td>${escapeHtml(ppReasonLabel(r.reason))}${r.note ? `<br><small class="mg-muted">${escapeHtml(r.note)}</small>` : ""}</td>
       <td>${escapeHtml(paceUserNames[r.created_by] || "—")}</td>
-      <td class="pp-row-actions">${r.source === "register" ? `
+      <td class="pp-row-actions">${r.source === "register" && !paceReadOnly() ? `
         <button type="button" class="mg-go" data-act="edit" data-id="${escapeAttr(r.id)}">${T("แก้ไข", "Correct")}</button>
         ${isAdmin ? `<button type="button" class="mg-go" data-act="delete" data-id="${escapeAttr(r.id)}">${T("ลบ", "Delete")}</button>` : ""}` : ""}
       </td>
@@ -223,7 +223,7 @@ function ppDraw() {
       ${chip("open", T("ยังไม่มีวันใหม่", "No new date yet"))}
     </div>
     ${ppTableHtml(all)}
-    ${PP.missing ? "" : ppFormHtml()}`;
+    ${PP.missing || paceReadOnly() ? "" : ppFormHtml()}`;
   ppSyncForm(document.getElementById("pp-form"));
 }
 
@@ -269,6 +269,7 @@ ppSection.addEventListener("click", async e => {
 
 ppSection.addEventListener("submit", async e => {
   e.preventDefault();
+  if (paceReadOnly()) return;
   const val = id => document.getElementById(id).value.trim();
   const row = {
     customer_name: val("pp-customer"),

@@ -134,9 +134,11 @@ function showLogin() {
 
 async function onSignedIn() {
   const { data: { user } } = await sb.auth.getUser();
+  // "*" rather than a column list: company_scope (Migration 032) is read when
+  // it exists, and signing in still works on a database where 032 has not run.
   const { data: profile, error } = await sb
     .from("profiles")
-    .select("id, full_name, role")
+    .select("*")
     .eq("id", user.id)
     .single();
 
@@ -150,7 +152,8 @@ async function onSignedIn() {
   loginScreen.classList.add("hidden");
   appScreen.classList.remove("hidden");
   document.getElementById("who-name").textContent = myProfile.full_name;
-  document.getElementById("who-role").textContent = myProfile.role;
+  document.getElementById("who-role").textContent = paceRoleLabel();
+  document.body.classList.toggle("pace-readonly", paceReadOnly());   // company director (Migration 032)
   notifStart();   // notifications.js — the bell, admin only (Migration 021)
 
   // Factory admin (Migration 018) works in PROSUN PACE with one tab only:
@@ -164,6 +167,8 @@ async function onSignedIn() {
 
   setupForRole();
   if (PACE_ROLES.includes(myProfile.role)) {
+    // Company director (Migration 032): English unless he picked Thai before.
+    if (myProfile.role === "company_director" && !WEIGH_LANG) WEIGH_LANG = "en";
     await switchPaceView(PACE_HOME[myProfile.role] || "orders");
   } else if (myProfile.role === "admin") {
     showSystemChooser();
@@ -1195,7 +1200,24 @@ function generateQuotePDF(q) {
 // deal_value or notes.
 // ============================================================================
 
-const PACE_ROLES = ["sale_support", "purchasing", "production", "accounting", "delivery"];
+const PACE_ROLES = ["sale_support", "purchasing", "production", "accounting", "delivery", "company_director"];
+
+// Company director (Migration 032, 13 Nov 2026 — Chef Julien, director of
+// Prosun Food): Management, Postponed orders, Delivery board and Confirmed
+// weights of one company, read-only. The database applies the company and
+// refuses every change; these only shape the screen.
+function paceScope() {
+  return myProfile && myProfile.role === "company_director" ? (myProfile.company_scope || null) : null;
+}
+function paceReadOnly() { return !!myProfile && myProfile.role === "company_director"; }
+function paceCanOpen(view) {
+  return ((PACE_MENU[myProfile && myProfile.role] || [])).includes(view);
+}
+function paceRoleLabel() {
+  if (!myProfile) return "";
+  if (myProfile.role === "company_director") return `Director — ${myProfile.company_scope || "?"}`;
+  return myProfile.role;
+}
 const ORDER_UNITS = ["Kg", "Pcs", "Grams", "Pack", "Jar"];
 
 let paceView = "orders";
@@ -1906,7 +1928,9 @@ function setupPaceRole() {
   } else if (myProfile.role === "purchasing") {
     note.textContent = "Read-only view of every order, so purchasing can see demand before buying. Entering and changing orders is sale support's job.";
   } else if (myProfile.role === "delivery") {
-    note.textContent = "ดูว่าออเดอร์ไหนพร้อมส่ง ออเดอร์ไหนถูกเลื่อน แล้วกดออกส่ง / ส่งถึงแล้ว / แจ้งปัญหา";
+    note.textContent = "รับของที่โรงงาน → ศูนย์กระจายสินค้า → ส่งลูกค้า: กดรับของแล้ว / ออกส่ง / ส่งถึงแล้ว / แจ้งปัญหา";
+  } else if (myProfile.role === "company_director") {
+    note.textContent = `${myProfile.company_scope || ""} only, read-only: management dashboard and summary, postponed orders, delivery board and confirmed weights.`;
   } else if (myProfile.role === "accounting") {
     note.textContent = "Payables: scan each supplier bill and check it against the scan. Confirmed weights are read-only: a wrong number is corrected by the factory on the weighing screen.";
   } else {
@@ -1934,8 +1958,9 @@ const PACE_MENU = {
   factory_admin: ["weighing"],
   accounting:    ["payables", "weights"],
   delivery:      ["delivery"],
+  company_director: ["management", "mgsummary", "postponed", "delivery", "weights"],   // Migration 032, read-only
 };
-const PACE_HOME = { admin: "orders", sale_support: "orders", purchasing: "calculator", production: "weighing", factory_admin: "weighing", accounting: "weights", delivery: "delivery" };
+const PACE_HOME = { admin: "orders", sale_support: "orders", purchasing: "calculator", production: "weighing", factory_admin: "weighing", accounting: "weights", delivery: "delivery", company_director: "management" };
 const PACE_DEPT = { orders: "Middle office", postponed: "Middle office", calculator: "Purchasing", weighing: "Production", weights: "Accounting", payables: "Accounting", management: "Management", mgsummary: "Management", delivery: "Delivery" };
 
 function setPaceTabsForRole() {
@@ -1946,7 +1971,7 @@ function setPaceTabsForRole() {
   tabWeighingBtn.classList.toggle("hidden", !items.includes("weighing"));
   const role = myProfile && myProfile.role;
   const w = items.includes("weights");
-  tabWeightsBtn.classList.toggle("hidden", !w || !["accounting", "admin"].includes(role));
+  tabWeightsBtn.classList.toggle("hidden", !w || !["accounting", "admin", "company_director"].includes(role));
   tabWeightsBuyBtn.classList.toggle("hidden", !w || !["purchasing", "admin"].includes(role));
   tabWeightsMidBtn.classList.toggle("hidden", !w || !["sale_support", "admin"].includes(role));
   tabPayablesBtn.classList.toggle("hidden", !items.includes("payables"));
@@ -1956,10 +1981,10 @@ function setPaceTabsForRole() {
   tabDeliveryBtn.classList.toggle("hidden", !items.includes("delivery"));
   document.getElementById("pace-group-delivery").classList.toggle("hidden", !items.includes("delivery"));
   document.getElementById("pace-group-management").classList.toggle("hidden", !items.includes("management"));
-  document.getElementById("pace-group-middle").classList.toggle("hidden", !items.includes("orders") && !items.includes("confirm-birds") && !(w && ["sale_support", "admin"].includes(role)));
+  document.getElementById("pace-group-middle").classList.toggle("hidden", !items.includes("orders") && !items.includes("confirm-birds") && !items.includes("postponed") && !(w && ["sale_support", "admin"].includes(role)));
   document.getElementById("pace-group-purchasing").classList.toggle("hidden", !items.includes("calculator"));
   document.getElementById("pace-group-production").classList.toggle("hidden", !items.includes("weighing"));
-  document.getElementById("pace-group-accounting").classList.toggle("hidden", !w || !["accounting", "admin"].includes(role));
+  document.getElementById("pace-group-accounting").classList.toggle("hidden", !w || !["accounting", "admin", "company_director"].includes(role));
 }
 
 // Phone menu (6 Nov 2026): on a phone the department menu folds behind one

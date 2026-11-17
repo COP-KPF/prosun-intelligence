@@ -2007,3 +2007,15 @@ body.pace-mode .pace-refresh-wrap { display: flex; }
   .sm-pair { grid-template-columns: minmax(0, 1fr); }
 }
 
+
+/* ---------------------------------------------------------------------------
+   Company director (Migration 032): one company, read-only. The company is
+   shown as a fixed label where the others have a company filter.
+   --------------------------------------------------------------------------- */
+.mg-company-fixed { display: inline-flex; align-items: center; min-height: 38px; padding: 6px 14px;
+  border-radius: 999px; border: 1px solid var(--accent); background: var(--brand-tint);
+  color: var(--accent-dark); font-weight: 600; white-space: nowrap; }
+.ws-fields .mg-company-fixed { margin-top: 4px; }
+.ws-cb-ro { color: var(--mg-done, #2e7d4f); font-weight: 700; }
+.sm-zone-text { font-size: 0.85rem; }
+body.pace-readonly #weights-table tr.ws-row { cursor: default; }

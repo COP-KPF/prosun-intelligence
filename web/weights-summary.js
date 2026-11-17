@@ -76,6 +76,10 @@ function wsInvState(paperId) {
   return m.changed ? "changed" : "done";
 }
 
+// A company director (Migration 032) reads accounting's marks and makes none
+// (the database refuses his marks anyway).
+function wsCanCheck() { return !paceReadOnly(); }
+
 // Only the middle office postpones a delivery here (the database checks too).
 function wsCanPostpone() {
   const r = myProfile && myProfile.role;
@@ -151,6 +155,7 @@ async function openWeights() {
     document.getElementById("who-role").textContent = T("บัญชี", "Accounting");
   }
   wsSection.classList.remove("hidden");
+  if (paceScope()) WS.company = paceScope();   // company director: his company only (Migration 032)
   const dept = wsDeptFor();
   if (dept !== WS.dept) { WS.dept = dept; WS.rows = []; WS.sig = ""; }
   if (!WS.from) [WS.from, WS.to] = wsPresetRange(WS.preset);
@@ -301,9 +306,10 @@ function wsRender() {
     <div>
       <h2 class="w-day">${escapeHtml(wsRangeLabel())}</h2>
       <div class="w-muted w-small">${T("น้ำหนักจริงที่โรงงานยืนยันแล้ว ตามวันส่ง — ดูอย่างเดียว ถ้าตัวเลขผิดให้โรงงานแก้", "Actual weights confirmed at the factory, by delivery date — read-only; a wrong number is corrected by the factory")}</div>
-      <div class="w-small ws-howto">${T(
+      <div class="w-small ws-howto">${wsCanCheck() ? T(
         `คลิกที่ใบงานเพื่อทำเครื่องหมายว่าตรวจแล้ว — เพื่อนใน${WS_DEPT_LABEL[WS.dept]()}จะเห็นด้วย · เอาเครื่องหมายออกที่ช่อง ✓`,
-        `Click a paper to mark it checked — your ${WS_DEPT_LABEL[WS.dept]()} colleagues see it too · untick the ✓ box to undo`)}</div>
+        `Click a paper to mark it checked — your ${WS_DEPT_LABEL[WS.dept]()} colleagues see it too · untick the ✓ box to undo`)
+        : T(`ดูอย่างเดียว · ✓ = ${WS_DEPT_LABEL[WS.dept]()}ตรวจแล้ว`, `Read-only · ✓ = checked by ${WS_DEPT_LABEL[WS.dept]()}`)}</div>
       ${wsCanInvoice() ? `<div class="w-small ws-howto">${T(
         "ออกใบแจ้งหนี้ใน Odoo แล้ว ให้กด “🧾 ออกแล้ว” ในช่องใบแจ้งหนี้ (ใส่เลขที่ได้ถ้ามี) — ฝ่ายจัดส่งจะเห็นทันที",
         "Once the Odoo invoice is made, press “🧾 Invoiced” in the Invoice column (the invoice number is optional) — the delivery team sees it at once.")}</div>` : ""}
@@ -321,12 +327,12 @@ function wsRender() {
     <div class="ws-fields">
       <label>${T("วันส่ง ตั้งแต่", "Delivery from")}<input type="date" data-ws-field="from" value="${escapeAttr(WS.from)}"></label>
       <label>${T("ถึง", "to")}<input type="date" data-ws-field="to" value="${escapeAttr(WS.to)}"></label>
-      <label>${T("บริษัท", "Company")}
+      ${paceScope() ? `<label>${T("บริษัท", "Company")}<span class="mg-company-fixed" id="ws-company-fixed">${escapeHtml(paceScope())}</span></label>` : `<label>${T("บริษัท", "Company")}
         <select data-ws-field="company">
           <option value="all"${WS.company === "all" ? " selected" : ""}>${T("ทั้งหมด", "All")}</option>
           <option value="Prosun Farm"${WS.company === "Prosun Farm" ? " selected" : ""}>Prosun Farm</option>
           <option value="Prosun Food"${WS.company === "Prosun Food" ? " selected" : ""}>Prosun Food</option>
-        </select></label>
+        </select></label>`}
       <label>${T("แสดง", "Show")}
         <select data-ws-field="show">
           <option value="all"${WS.show === "all" ? " selected" : ""}>${T("ทั้งหมด", "All papers")}</option>
@@ -386,7 +392,7 @@ function wsResultsHtml() {
         <div class="w-small w-muted">${T(`${rows.length} รายการจาก ${papers} ใบงาน`, `${rows.length} line${rows.length === 1 ? "" : "s"} from ${papers} paper${papers === 1 ? "" : "s"}`)}
           · <span id="ws-updated">${escapeHtml(wsUpdatedText())}</span></div>
       </div>
-      <button type="button" class="w-btn" data-ws="export"${rows.length ? "" : " disabled"}>${T("ส่งออก Excel", "Export to Excel")}</button>
+      ${paceReadOnly() ? "" : `<button type="button" class="w-btn" data-ws="export"${rows.length ? "" : " disabled"}>${T("ส่งออก Excel", "Export to Excel")}</button>`}
     </div>
     <div class="table-scroll w-scroll">
       <table class="w-table" id="weights-table">
@@ -402,7 +408,8 @@ function wsResultsHtml() {
           const st = wsCheckState(r);
           const label = [r.po_number ? "PO " + r.po_number : "", r.customer_name || ""].filter(Boolean).join(" · ");
           return `<tr class="ws-row ws-st-${st}${first ? " w-first" : ""}" data-paper="${escapeAttr(r.paper_id)}">
-            <td class="ws-cb-col">${first ? `<input type="checkbox" class="ws-cb" data-ws-check="${escapeAttr(r.paper_id)}"${st === "checked" ? " checked" : ""} aria-label="${T("ตรวจแล้ว", "Checked")}: ${escapeAttr(label)}">` : ""}</td>
+            <td class="ws-cb-col">${first ? (wsCanCheck() ? `<input type="checkbox" class="ws-cb" data-ws-check="${escapeAttr(r.paper_id)}"${st === "checked" ? " checked" : ""} aria-label="${T("ตรวจแล้ว", "Checked")}: ${escapeAttr(label)}">`
+              : st === "checked" ? `<span class="ws-cb-ro" aria-label="${T("ตรวจแล้ว", "Checked")}">✓</span>` : "") : ""}</td>
             <td>${first ? (r.delivery_date ? escapeHtml(weighShortDate(r.delivery_date)) : `<span class="w-muted" title="${T("ไม่มีวันส่งบนใบงาน — ใช้วันที่ชั่ง", "No delivery date on the paper — weighing day shown")}">${escapeHtml(weighShortDate(r.work_date))}*</span>`) + wsMovedTag(r.paper_id)
               + (canPP ? `<br><button type="button" class="w-btn w-btn-outline w-btn-sm ws-pp-btn" data-ws="pp-open" data-paper="${escapeAttr(r.paper_id)}"${WS.ppForm && WS.ppForm.paper === r.paper_id ? " disabled" : ""}>${T("เลื่อนส่ง", "Postpone")}</button>` : "") : ""}</td>
             <td>${first ? escapeHtml(weighCompanyShort(r.company)) : ""}</td>
@@ -573,7 +580,7 @@ wsSection.addEventListener("click", async (e) => {
   if (!el) {
     if (e.target.closest("input, select, label, a, button")) return;
     const tr = e.target.closest("tr.ws-row[data-paper]");
-    if (tr && wsSection.contains(tr)) {
+    if (tr && wsSection.contains(tr) && wsCanCheck()) {
       const row = WS.rows.find((r) => r.paper_id === tr.dataset.paper);
       if (row && wsCheckState(row) !== "checked") await wsMark(tr.dataset.paper, true);
     }
@@ -604,7 +611,8 @@ wsSection.addEventListener("click", async (e) => {
     return;
   }
   if (act === "pp-cancel") { WS.ppForm = null; wsRenderResults(); return; }
-  if (act === "export") { wsExport(); return; }
+  // No Excel export for a company director (Clément, 17 Nov 2026): the data stays on screen.
+  if (act === "export") { if (!paceReadOnly()) wsExport(); return; }
   if (act === "inv-mark") {
     const id = el.dataset.paper;
     const keep = el.dataset.keep && WS.inv[id] ? WS.inv[id].invoice_no : null;
@@ -620,7 +628,7 @@ wsSection.addEventListener("click", async (e) => {
   if (act === "photo") {
     const row = WS.rows.find((r) => r.paper_id === el.dataset.paper);
     const opening = wsOpenPhoto(el.dataset.path);      // opens the tab during the click
-    if (row && wsCheckState(row) !== "checked") wsMark(el.dataset.paper, true);
+    if (row && wsCheckState(row) !== "checked" && wsCanCheck()) wsMark(el.dataset.paper, true);
     await opening;
   }
 });
@@ -628,6 +636,7 @@ wsSection.addEventListener("click", async (e) => {
 // Mark / unmark a paper for this department. Shown at once; undone if the
 // database refuses (e.g. the factory reopened the paper meanwhile).
 async function wsMark(paperId, checked) {
+  if (!wsCanCheck()) return;
   const rows = WS.rows.filter((r) => r.paper_id === paperId);
   if (!rows.length) return;
   const before = rows.map((r) => ({ checked_at: r.checked_at, checked_by_name: r.checked_by_name, check_confirmed_at: r.check_confirmed_at }));
