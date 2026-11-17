@@ -2019,3 +2019,26 @@ body.pace-mode .pace-refresh-wrap { display: flex; }
 .ws-cb-ro { color: var(--mg-done, #2e7d4f); font-weight: 700; }
 .sm-zone-text { font-size: 0.85rem; }
 body.pace-readonly #weights-table tr.ws-row { cursor: default; }
+
+/* ===========================================================================
+   Side menu frozen while the page scrolls (17 Nov 2026, Clément: "make the
+   top line freeze and a side line so that it's easier to navigate"). The menu
+   was already sticky but taller than the screen, so it scrolled away with the
+   page; it is now at most one screen high and scrolls inside itself when it
+   has more items than fit. The beige column behind it is painted on <main>,
+   so it still runs the full page height. Desktop only: on phones it stays the
+   strip on top.
+   --------------------------------------------------------------------------- */
+@media (min-width: 901px) {
+  body.pace-mode #app-screen > main {
+    background: linear-gradient(to right, #ebe4d3 0 219px, #ddd3bd 219px 220px, transparent 220px);
+  }
+  body.pace-mode .pace-nav {
+    position: sticky; top: 0; margin-top: -20px; align-self: flex-start;
+    height: auto; min-height: 0; max-height: 100vh; overflow-y: auto;
+    overscroll-behavior: contain; scrollbar-width: thin;
+    gap: 10px; padding: 12px 12px 24px;
+  }
+  body.pace-mode .pace-nav-head { padding: 7px 12px 6px 16px; }
+  body.pace-mode .pace-nav-item { min-height: 36px; padding: 7px 12px 7px 16px; }
+}

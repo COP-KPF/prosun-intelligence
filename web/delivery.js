@@ -10,7 +10,11 @@
 // produced and done; it waits at the factory, the delivery team picks it up
 // by truck, brings it to the dispatch center and delivers it to the client.
 // 17 Nov: simpler screen, design "Option A" chosen by Clément on the design
-// canvas, with order numbers 1, 2, 3… in both sections:
+// canvas, with order numbers 1, 2, 3… in both sections. 17 Nov 13:56: compact
+// version ("Option A compact" on the canvas) — one-line day bar, the counters
+// as chips on the Summary title line, ~36 px table rows, one-line delivery
+// rows, and the table header row and the delivery bulk bar frozen at the top
+// while scrolling (the side menu is frozen app-wide in styles.css):
 //
 //   1 · Summary — five counters (At factory, At dispatch, On the road,
 //       Delivered, Problem), kg finished / papers confirmed / delivered, and ONE
@@ -66,11 +70,11 @@ const DL = {
 // The steps, in order. key = what the screen calls it; mark = the value
 // stored by delivery_mark (null = no mark: waiting at the factory).
 const DL_STEPS = [
-  { key: "factory",   mark: null,        th: "รอรับที่โรงงาน", en: "At factory",  icon: "🏭", cls: "dl-amber" },
-  { key: "dispatch",  mark: "dispatch",  th: "ที่ศูนย์",        en: "At dispatch", icon: "🏬", cls: "dl-teal" },
-  { key: "out",       mark: "out",       th: "ระหว่างส่ง",      en: "On the road", icon: "🚚", cls: "dl-blue" },
-  { key: "delivered", mark: "delivered", th: "ส่งถึงแล้ว",      en: "Delivered",   icon: "✔",  cls: "dl-done" },
-  { key: "problem",   mark: "problem",   th: "มีปัญหา",         en: "Problem",     icon: "⚠",  cls: "dl-red" },
+  { key: "factory",   mark: null,        th: "รอรับที่โรงงาน", en: "At factory",  sth: "รอรับ",     sen: "Factory",   icon: "🏭", cls: "dl-amber" },
+  { key: "dispatch",  mark: "dispatch",  th: "ที่ศูนย์",        en: "At dispatch", sth: "ที่ศูนย์",   sen: "Dispatch",  icon: "🏬", cls: "dl-teal" },
+  { key: "out",       mark: "out",       th: "ระหว่างส่ง",      en: "On the road", sth: "ระหว่างส่ง", sen: "On road",   icon: "🚚", cls: "dl-blue" },
+  { key: "delivered", mark: "delivered", th: "ส่งถึงแล้ว",      en: "Delivered",   sth: "ส่งแล้ว",    sen: "Delivered", icon: "✔",  cls: "dl-done" },
+  { key: "problem",   mark: "problem",   th: "มีปัญหา",         en: "Problem",     sth: "ปัญหา",      sen: "Problem",   icon: "⚠",  cls: "dl-red" },
 ];
 const DL_STEP = Object.fromEntries(DL_STEPS.map(s => [s.key, s]));
 const DL_ORDER = ["factory", "dispatch", "out", "problem", "delivered"];
@@ -301,10 +305,7 @@ function dlDraw() {
     <div class="dl-top">
       <div class="dl-daynav" role="group" aria-label="วันส่ง · Delivery day">
         <button type="button" class="dl-arrow" data-act="prev" aria-label="วันก่อนหน้า · Previous day">‹</button>
-        <div class="dl-day">
-          <span class="dl-day-rel">${rel ? escapeHtml(rel) + " — " : ""}วันส่ง · Delivery day</span>
-          <strong class="dl-day-date">${escapeHtml(dlDateBi(DL.day, true))}</strong>
-        </div>
+        <strong class="dl-day-date">${escapeHtml(dlDateBi(DL.day))}</strong>
         <button type="button" class="dl-arrow" data-act="next" aria-label="วันถัดไป · Next day">›</button>
       </div>
       <div class="dl-top-right">
@@ -341,7 +342,7 @@ function dlSectionHead(n, th, en, sub, extra) {
   return `<div class="dl-sec-head">
     <span class="dl-sec-n" aria-hidden="true">${n}</span>
     <h3 class="dl-sec-title" id="dl-sec-${n}">${th} · ${en}</h3>
-    <span class="dl-sec-sub">${sub}</span>
+    ${sub ? `<span class="dl-sec-sub">${sub}</span>` : ""}
     ${extra || ""}
   </div>`;
 }
@@ -391,11 +392,7 @@ function dlSummaryHtml(due, pushed) {
   const kg = fin.reduce((t, it) => t + ((dlKg(it.p) || {}).kg || 0), 0);
   const confirmed = due.filter(it => dlFinished(it.p)).length;
   const delivered = n("delivered");
-  const tiles = DL_STEPS.map(s => `<div class="dl-tile ${s.cls} ${n(s.key) ? "" : "zero"}">
-      <span class="dl-tile-n">${n(s.key)}</span>
-      <span class="dl-tile-th">${s.icon} ${s.th}</span>
-      <span class="dl-tile-en">${s.en}</span>
-    </div>`).join("");
+  const chips = DL_STEPS.map(s => `<span class="dl-chip ${s.cls} ${n(s.key) ? "" : "zero"}"><strong>${n(s.key)}</strong> ${s.icon} ${s.sth} <small>${s.sen}</small></span>`).join("");
 
   const rows = due.concat(pushed);
   const body = rows.map((it, i) => {
@@ -423,13 +420,12 @@ function dlSummaryHtml(due, pushed) {
         `<button type="button" class="ws-chip ${DL.company === v ? "on" : ""}" data-act="company" data-company="${escapeAttr(v)}" aria-pressed="${DL.company === v}">${v === "all" ? dlBi("ทุกบริษัท", "All") : v === "Prosun Farm" ? "PSFarm" : "PSFood"}</button>`).join("");
 
   return `<section class="dl-sec" aria-labelledby="dl-sec-1">
-    ${dlSectionHead(1, "สรุป", "Summary", dlBi("ทุกออเดอร์ของวันส่งนี้", "every order due this day"))}
-    <div class="dl-tiles">${tiles}</div>
-    <div class="dl-totals">
-      <span><strong>${dlFmt(kg)} kg</strong> ${dlBi("ผลิตเสร็จ", "finished")}</span>
-      <span><strong>${confirmed} / ${due.length}</strong> ${dlBi("ใบงานยืนยันแล้ว", "papers confirmed")}</span>
-      <span><strong>${delivered} / ${due.length}</strong> ${dlBi("ส่งถึงแล้ว", "delivered")}</span>
-    </div>
+    ${dlSectionHead(1, "สรุป", "Summary", "", `<span class="dl-chips">${chips}</span>
+      <span class="dl-totals">
+        <span><strong>${dlFmt(kg)} kg</strong> ${dlBi("ผลิตเสร็จ", "finished")}</span>
+        <span><strong>${confirmed} / ${due.length}</strong> ${dlBi("ใบงานยืนยัน", "confirmed")}</span>
+        <span><strong>${delivered} / ${due.length}</strong> ${dlBi("ส่งแล้ว", "delivered")}</span>
+      </span>`)}
     <div class="dl-filters">
       <div class="ws-presets">${filters}</div>
       <input type="search" id="dl-search" class="dl-search" placeholder="ค้นหาลูกค้า / PO · Search client / PO" value="${escapeAttr(DL.q)}" aria-label="ค้นหา · Search">
@@ -474,7 +470,7 @@ function dlDeliveryHtml(due) {
     `<button type="button" class="dl-other ${d < weighBangkokToday() ? "dl-other-late" : ""}" data-act="day" data-day="${d}">🏭 ${escapeHtml(dlDateBi(d))}: ${other[d]}</button>`).join("");
 
   const bulk = DL_STEPS.filter(s => s.key !== "problem").map(s =>
-    `<button type="button" class="dl-bulk ${s.cls}" data-act="bulk" data-step="${s.key}" ${selCount && !DL.busy ? "" : "disabled"}>${s.icon} ${s.th}<small>${s.en}</small></button>`).join("");
+    `<button type="button" class="dl-bulk ${s.cls}" data-act="bulk" data-step="${s.key}" ${selCount && !DL.busy ? "" : "disabled"}>${s.icon} ${s.sth} · ${s.sen}</button>`).join("");
 
   const rows = work.map((it, i) => {
     const p = it.p;
@@ -482,7 +478,7 @@ function dlDeliveryHtml(due) {
     const segs = DL_STEPS.map(s => {
       const on = it.state === s.key;
       return `<button type="button" class="dl-seg ${s.cls} ${on ? "on" : ""}" data-act="step" data-id="${escapeAttr(p.id)}" data-step="${s.key}" aria-pressed="${on}" ${dis}>
-        <span class="dl-seg-th">${s.icon} ${s.th}</span><span class="dl-seg-en">${s.en}</span></button>`;
+${s.sth} · ${s.sen}</button>`;
     }).join("");
     const tags = [
       p.moved_from && p.moved_from !== DL.day ? `<span class="dl-tag dl-tag-violet">↻ ${dlBi("เลื่อนมาจาก", "moved from")} ${escapeHtml(dlDateBi(p.moved_from))}</span>` : "",
