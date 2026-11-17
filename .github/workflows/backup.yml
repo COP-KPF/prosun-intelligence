@@ -1,51 +1,103 @@
-name: Nightly backup + keep-alive
+# Nightly full backup of the PROSUN INTELLIGENCE / PACE database to Google Drive.
+# Runs every night at 23:30 Bangkok time (16:30 UTC), and can be started by hand
+# from GitHub > Actions > "Nightly backup to Google Drive" > Run workflow.
+#
+# Keeps: last 30 daily files + the 1st of each month for 12 months.
+# The file is encrypted before it leaves GitHub; nothing is stored in this repo.
+#
+# Repo secrets needed (Settings > Secrets and variables > Actions):
+#   SUPABASE_DB_URL         Session pooler connection string (Supabase > Connect > Session pooler)
+#   BACKUP_ENCRYPTION_KEY   Long random passphrase, kept in the password manager
+#   RCLONE_CONF             Output of `rclone config show gdrive` (Google Drive token)
 
-# Runs once a day. Two jobs in one: (1) an encrypted database backup, and
-# (2) a harmless request to Supabase so the free-tier project never sits
-# idle long enough to auto-pause (that happens after 7 days of no activity).
+name: Nightly backup to Google Drive
+
 on:
   schedule:
-    - cron: "0 20 * * *"   # 20:00 UTC = 03:00 Bangkok time
-  workflow_dispatch:        # lets you also trigger it manually from the Actions tab
+    - cron: "30 16 * * *"   # 23:30 Asia/Bangkok
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: nightly-backup
+  cancel-in-progress: false
 
 jobs:
   backup:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DRIVE_ROOT: gdrive:prosun-backups
     steps:
-      - uses: actions/checkout@v4
+      - name: Install PostgreSQL 17 client and rclone
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common gnupg
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -qq postgresql-client-17
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+          /usr/lib/postgresql/17/bin/pg_dump --version
+          rclone version | head -n 1
 
-      - name: Install postgresql-client (for pg_dump)
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Write rclone config
+        env:
+          RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.config/rclone
+          printf '%s\n' "$RCLONE_CONF" > ~/.config/rclone/rclone.conf
+          chmod 600 ~/.config/rclone/rclone.conf
+          rclone lsd gdrive: > /dev/null   # fails early if the Drive token is wrong
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install Python dependencies
-        run: pip install -r scripts/requirements.txt
-
-      - name: Run encrypted backup
+      - name: Dump the database
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
-        run: python3 scripts/backup.py
-
-      - name: Commit backup file
         run: |
-          git config user.name "crm-backup-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add backups/
-          git diff --cached --quiet || git commit -m "Automated backup $(date -u +%Y-%m-%d)"
-          git push
+          set -euo pipefail
+          DAY=$(TZ=Asia/Bangkok date +%Y-%m-%d)
+          echo "DAY=$DAY" >> "$GITHUB_ENV"
+          # public = app data (orders, weights, payables, CRM...)
+          # auth   = user logins
+          # storage = list of photos / scans (the files themselves are not in the database)
+          /usr/lib/postgresql/17/bin/pg_dump "$SUPABASE_DB_URL" \
+            --format=custom --compress=9 \
+            --no-owner --no-privileges \
+            --schema=public --schema=auth --schema=storage \
+            --file="prosun-db-$DAY.dump"
+          # Check the file is a readable, non-empty dump before uploading it
+          /usr/lib/postgresql/17/bin/pg_restore --list "prosun-db-$DAY.dump" > toc.txt
+          TABLES=$(grep -c " TABLE DATA public " toc.txt || true)
+          echo "Public tables in dump: $TABLES"
+          test "$TABLES" -gt 0
+          ls -lh "prosun-db-$DAY.dump"
 
-      - name: Keep Supabase project awake
+      - name: Encrypt
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
         run: |
-          curl -s -o /dev/null -w "Supabase ping: %{http_code}\n" \
-            "$SUPABASE_URL/rest/v1/" \
-            -H "apikey: $SUPABASE_ANON_KEY"
+          set -euo pipefail
+          test -n "$BACKUP_ENCRYPTION_KEY"
+          gpg --batch --yes --pinentry-mode loopback \
+              --passphrase "$BACKUP_ENCRYPTION_KEY" \
+              --symmetric --cipher-algo AES256 \
+              --output "prosun-db-$DAY.dump.gpg" "prosun-db-$DAY.dump"
+          shred -u "prosun-db-$DAY.dump"
+
+      - name: Upload to Google Drive
+        run: |
+          set -euo pipefail
+          rclone copy "prosun-db-$DAY.dump.gpg" "$DRIVE_ROOT/daily/"
+          # On the 1st of the month, also keep a monthly copy
+          if [ "$(TZ=Asia/Bangkok date +%d)" = "01" ]; then
+            rclone copy "prosun-db-$DAY.dump.gpg" "$DRIVE_ROOT/monthly/"
+          fi
+          rclone lsl "$DRIVE_ROOT/daily/" | tail -n 3
+
+      - name: Remove old backups (30 days daily, 12 months monthly)
+        run: |
+          set -euo pipefail
+          rclone delete "$DRIVE_ROOT/daily/"   --min-age 31d
+          rclone delete "$DRIVE_ROOT/monthly/" --min-age 366d || true
