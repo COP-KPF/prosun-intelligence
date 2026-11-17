@@ -1985,7 +1985,32 @@ function setPaceTabsForRole() {
   document.getElementById("pace-group-purchasing").classList.toggle("hidden", !items.includes("calculator"));
   document.getElementById("pace-group-production").classList.toggle("hidden", !items.includes("weighing"));
   document.getElementById("pace-group-accounting").classList.toggle("hidden", !w || !["accounting", "admin", "company_director"].includes(role));
+  // Open postponed orders on the menu item, and the "late again" bell check (postponed.js, Migration 035)
+  if (items.includes("postponed") && typeof ppRefreshBadge === "function") ppRefreshBadge();
 }
+
+// Desktop (17 Nov 2026, Clément: "we are losing space"): the department menu
+// folds to a thin strip with one button, remembered per browser. Phones keep
+// their own menu button.
+(function () {
+  const btn = document.getElementById("pace-fold-btn");
+  if (!btn) return;
+  const apply = folded => {
+    document.body.classList.toggle("pace-nav-folded", folded);
+    btn.setAttribute("aria-expanded", folded ? "false" : "true");
+    btn.setAttribute("aria-label", folded ? "Show menu · แสดงเมนู" : "Hide menu · ซ่อนเมนู");
+    btn.title = folded ? "Show menu · แสดงเมนู" : "";
+    btn.querySelector(".pace-fold-icon").textContent = folded ? "☰" : "«";
+  };
+  let folded = false;
+  try { folded = localStorage.getItem("pace-nav-folded") === "1"; } catch (e) { /* private mode */ }
+  apply(folded);
+  btn.addEventListener("click", () => {
+    folded = !document.body.classList.contains("pace-nav-folded");
+    apply(folded);
+    try { localStorage.setItem("pace-nav-folded", folded ? "1" : "0"); } catch (e) { /* private mode */ }
+  });
+})();
 
 // Phone menu (6 Nov 2026): on a phone the department menu folds behind one
 // button that says where you are. With a single section there is nothing to
@@ -2141,7 +2166,7 @@ function paceRefreshTime() {
 // form on Postponed orders and the problem note on the Delivery board are
 // rebuilt from scratch by their sections.
 function paceKeepTyped() {
-  const els = [...document.querySelectorAll("#pp-form input[id], #pp-form select[id], #pp-form textarea[id], #dl-problem-note")];
+  const els = [...document.querySelectorAll("#pp-form input[id], #pp-form select[id], #pp-form textarea[id], #pp-close-note, #dl-problem-note")];
   const saved = els.map(el => [el.id, el.type === "checkbox" ? el.checked : el.value]);
   return () => {
     saved.forEach(([id, v]) => {

@@ -2042,3 +2042,172 @@ body.pace-readonly #weights-table tr.ws-row { cursor: default; }
   body.pace-mode .pace-nav-head { padding: 7px 12px 6px 16px; }
   body.pace-mode .pace-nav-item { min-height: 36px; padding: 7px 12px 7px 16px; }
 }
+
+/* ---------------------------------------------------------------------------
+   Postponed orders, followed until delivered (Migration 035, 17 Nov 2026)
+   Compact list: one line per order, small type, the counters are the
+   filters. Clément: a status must never cover other text — every cell keeps
+   to its column (fixed table layout); long text is cut with "…" (full text on
+   hover), pills too, and "Late again" wraps below the status in its cell.
+   Thai and English (ไทย / EN). On a phone each order becomes a small card.
+   --------------------------------------------------------------------------- */
+#postponed-section { gap: 10px; }
+.pp-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; }
+.pp-bar-right { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.pp-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.pp-counts { display: flex; flex-wrap: wrap; gap: 6px; }
+.pp-count {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 4px 11px;
+  border: 1px solid #d6c9ad; border-radius: 8px; background: var(--panel); color: var(--text);
+  font: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.pp-count b { font-size: 0.92rem; color: var(--accent); }
+.pp-count-waiting b { color: #4b2e83; }
+.pp-count-produced b { color: #1e6b3a; }
+.pp-count-late b { color: #9b2c25; }
+.pp-count-closed b, .pp-count-all b { color: var(--text); }
+.pp-count:hover { border-color: var(--accent); }
+.pp-count.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pp-count.on b { color: #fff; }
+.pp-count-late.on { background: #9b2c25; border-color: #9b2c25; }
+.pp-count-waiting.on { background: #4b2e83; border-color: #4b2e83; }
+.pp-count-produced.on { background: #1e6b3a; border-color: #1e6b3a; }
+.pp-count:focus-visible, .pp-name:focus-visible, .pp-go:focus-visible { outline: 3px solid #d9c8a6; outline-offset: 2px; }
+.pp-search { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--muted); }
+.pp-search select, .pp-search input { font: inherit; font-size: 0.8rem; min-height: 32px; padding: 3px 8px;
+  border: 1px solid #d6c9ad; border-radius: 6px; background: var(--panel); color: var(--text); }
+.pp-search select { width: auto; }
+.pp-search input { width: 170px; }
+.pp-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.pp-table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+.pp-table { width: 100%; min-width: 1020px; table-layout: fixed; border-collapse: collapse; font-size: 0.8rem; line-height: 1.35; }
+.pp-w-client { width: 18%; } .pp-w-co { width: 52px; } .pp-w-by { width: 16%; } .pp-w-when { width: 136px; }
+.pp-w-now { width: 178px; } .pp-w-steps { width: 62px; } .pp-w-delay { width: 58px; } .pp-w-go { width: 34px; }
+.pp-table th { text-align: left; padding: 7px 8px; background: #faf6ec; color: var(--muted); font-size: 0.7rem;
+  font-weight: 700; letter-spacing: 0.03em; border-bottom: 1px solid var(--border); vertical-align: bottom; }
+.pp-table td { padding: 6px 8px; border-bottom: 1px solid #f0e9da; vertical-align: middle; overflow: hidden; }
+.pp-row:nth-child(4n+3) td { background: #fdfbf6; }
+.pp-row:hover td { background: #f8f4ea; cursor: pointer; }
+.pp-row.pp-late td { background: #fdf3f1; }
+.pp-row.pp-closed td { color: var(--muted); }
+.pp-row.pp-open td { background: #f3efe4; border-bottom-color: transparent; }
+.pp-cut { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-name { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit;
+  text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.pp-name strong { font-weight: 600; color: var(--text); }
+.pp-row.pp-closed .pp-name strong { color: var(--muted); }
+.pp-po { font-size: 0.74rem; color: var(--muted); }
+.pp-co { display: inline-block; font-size: 0.68rem; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: #efe8d8; color: #4a3a1c; }
+.pp-co-food { background: #e5ece3; color: #1f3d2a; }
+.pp-by { font-weight: 500; }
+.pp-reason { color: var(--muted); }
+.pp-times { display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 3px; background: #fbe4e2; color: #9b2c25;
+  font-size: 0.66rem; font-weight: 700; vertical-align: 1px; }
+.pp-c-when s { color: #8a7a5c; }
+.pp-c-now { white-space: normal; }
+.pp-c-now .pp-pill + .pp-pill { margin-top: 3px; }
+.pp-pill { display: inline-block; max-width: 100%; box-sizing: border-box; vertical-align: middle; padding: 2px 8px; border-radius: 999px;
+  font-size: 0.72rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-s-violet { background: #ece6f5; color: #4b2e83; }
+.pp-s-amber  { background: #fcebd3; color: #7a4300; }
+.pp-s-grey   { background: #ece7dd; color: #4f4a40; }
+.pp-s-green  { background: #e3f1e7; color: #1e6b3a; }
+.pp-s-blue   { background: #e4ecf8; color: #174a94; }
+.pp-s-red    { background: #fbe4e2; color: #9b2c25; }
+.pp-s-done   { background: #1f3d2a; color: #f4efe3; }
+.pp-s-late   { background: #9b2c25; color: #fff; font-weight: 700; }
+.pp-c-now { display: table-cell; }
+.pp-c-now > .pp-pill { margin-right: 4px; }
+.pp-steps { display: inline-flex; gap: 4px; align-items: center; vertical-align: middle; }
+.pp-steps i { width: 8px; height: 8px; border-radius: 50%; box-sizing: border-box; background: #fff; border: 1.5px solid #c9bb9c; }
+.pp-steps i.on { background: var(--accent); border-color: var(--accent); }
+.pp-c-delay { font-weight: 600; white-space: nowrap; }
+.pp-row.pp-late .pp-c-delay { color: #9b2c25; }
+.pp-c-note { color: var(--muted); font-size: 0.76rem; }
+.pp-go { width: 28px; height: 28px; border: 0; border-radius: 6px; background: none; color: var(--accent); font-size: 1rem; font-weight: 700; cursor: pointer; }
+.pp-go:hover { background: #ebe4d3; }
+.pp-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.74rem; }
+
+/* one order opened: timeline + facts and actions */
+.pp-detail-row > td { background: #f3efe4; padding: 4px 12px 14px; white-space: normal; }
+.pp-detail { display: flex; flex-wrap: wrap; gap: 14px 24px; }
+.pp-detail h4 { margin: 4px 0 8px; font-size: 0.82rem; color: var(--accent); }
+.pp-detail-main { flex: 999 1 420px; min-width: 0; }
+.pp-detail-side { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.pp-timeline { list-style: none; margin: 0; padding: 0; }
+.pp-timeline li { display: grid; grid-template-columns: 112px 14px minmax(0, 1fr); gap: 8px; padding: 3px 0; font-size: 0.8rem; position: relative; }
+.pp-ev-at { color: var(--muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pp-ev-dot { width: 10px; height: 10px; margin-top: 4px; border-radius: 50%; background: #b59767; }
+.pp-ev-body { min-width: 0; overflow-wrap: anywhere; }
+.pp-ev-sub { color: var(--muted); font-size: 0.76rem; }
+.pp-ev-moved .pp-ev-dot { background: #4b2e83; }
+.pp-ev-good .pp-ev-dot { background: #1e6b3a; }
+.pp-ev-good .pp-ev-body { color: #1e6b3a; font-weight: 600; }
+.pp-ev-done .pp-ev-dot { background: #1f3d2a; }
+.pp-ev-done .pp-ev-body { font-weight: 700; }
+.pp-ev-bad .pp-ev-dot { background: #9b2c25; }
+.pp-ev-bad .pp-ev-body { color: #9b2c25; font-weight: 600; }
+.pp-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: 0.8rem; }
+.pp-facts dt { color: var(--muted); }
+.pp-facts dd { margin: 0; overflow-wrap: anywhere; }
+.pp-detail .pp-actions { margin-top: 0; gap: 8px; }
+.pp-detail .ws-chip { min-height: 34px; font-size: 0.8rem; }
+.pp-danger { color: #9b2c25; border-color: #efbcb7; }
+.pp-close-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; font-size: 0.8rem; }
+.pp-close-form input { flex: 1 1 200px; min-height: 34px; font: inherit; padding: 4px 8px; border: 1px solid #d6c9ad; border-radius: 6px; }
+.pp-form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 12px; }
+
+/* menu badge: open postponed orders (red when some are late again) */
+.pp-badge { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 999px; background: var(--gold); color: #241905;
+  font-size: 0.72rem; font-weight: 700; line-height: 1.6; vertical-align: 1px; }
+.pp-badge.pp-badge-late { background: #9b2c25; color: #fff; }
+.pace-nav-item.active .pp-badge { background: #f4efe3; color: #241905; }
+.pace-nav-item.active .pp-badge.pp-badge-late { background: #fbe4e2; color: #9b2c25; }
+
+/* phone: each order is a small card */
+@media (max-width: 760px) {
+  .pp-table-wrap { overflow: visible; border: 0; background: none; }
+  .pp-table { min-width: 0; display: block; }
+  .pp-table colgroup, .pp-table thead { display: none; }
+  .pp-table tbody { display: flex; flex-direction: column; gap: 8px; }
+  .pp-table tr.pp-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 10px 12px;
+    grid-template-areas: "client co" "by by" "when delay" "now steps" "note note";
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+  .pp-table tr.pp-row.pp-late { border-color: #efbcb7; background: #fdf3f1; }
+  .pp-table tr.pp-row td { display: block; padding: 0; border: 0; background: none; }
+  .pp-table .pp-c-client { grid-area: client; } .pp-table .pp-c-co { grid-area: co; justify-self: end; }
+  .pp-table .pp-c-by { grid-area: by; } .pp-table .pp-c-when { grid-area: when; }
+  .pp-table .pp-c-delay { grid-area: delay; justify-self: end; } .pp-table .pp-c-now { grid-area: now; }
+  .pp-table .pp-c-steps { grid-area: steps; justify-self: end; align-self: center; } .pp-table .pp-c-note { grid-area: note; }
+  .pp-c-go { display: none !important; }
+  .pp-name { font-size: 0.92rem; min-height: 32px; }
+  .pp-table tr.pp-detail-row { display: block; }
+  .pp-table tr.pp-detail-row > td { display: block; border-radius: 10px; }
+  .pp-timeline li { grid-template-columns: 84px 12px minmax(0, 1fr); }
+  .pp-search input { flex: 1 1 140px; width: auto; }
+}
+
+/* ---------------------------------------------------------------------------
+   Desktop: fold the department menu to a thin strip (17 Nov 2026)
+   --------------------------------------------------------------------------- */
+.pace-fold-btn { display: none; }
+@media (min-width: 901px) {
+  .pace-fold-btn {
+    display: flex; align-items: center; gap: 8px; align-self: flex-start; min-height: 36px; padding: 4px 8px;
+    border: 0; border-radius: 8px; background: none; color: var(--accent); font: inherit; font-size: 0.8rem; font-weight: 600;
+    text-align: left; cursor: pointer;
+  }
+  .pace-fold-btn small { display: block; color: var(--muted); font-size: 0.7rem; font-weight: 500; }
+  .pace-fold-btn:hover { background: #f8f4ea; }
+  .pace-fold-btn:focus-visible { outline: 3px solid #d9c8a6; outline-offset: 2px; }
+  .pace-fold-icon { font-size: 1.05rem; line-height: 1; }
+  body.pace-nav-folded .pace-nav { flex: 0 0 52px; width: 52px; box-sizing: border-box; padding: 14px 6px; align-items: center;
+    align-self: stretch; min-height: calc(100vh - 60px); }
+  body.pace-nav-folded .pace-nav-group { display: none; }
+  body.pace-nav-folded .pace-fold-text { display: none; }
+  body.pace-nav-folded .pace-fold-btn { width: 40px; height: 40px; justify-content: center; padding: 0; align-self: center; }
+  body.pace-nav-folded .pace-fold-icon { font-size: 1.25rem; }
+}
+#mg-postponed .mg-sub { margin: 10px 0 6px; font-size: 0.8rem; font-weight: 700; color: var(--muted); letter-spacing: 0.02em; }
+#mg-pp-oldest .pp-pill { font-size: 0.7rem; }
