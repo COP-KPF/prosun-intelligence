@@ -170,7 +170,10 @@ async function onSignedIn() {
     // Company director (Migration 032): English unless he picked Thai before.
     if (myProfile.role === "company_director" && !WEIGH_LANG) WEIGH_LANG = "en";
     await switchPaceView(PACE_HOME[myProfile.role] || "orders");
-  } else if (myProfile.role === "admin") {
+  } else if (CHOOSER_ROLES.includes(myProfile.role)) {
+    // Admin, and since Migration 037 the sales team (CRM + PACE › Sales).
+    document.getElementById("switch-system-btn").classList.remove("hidden");
+    document.getElementById("who-sep").classList.remove("hidden");
     showSystemChooser();
   } else {
     await loadClients();
@@ -1241,6 +1244,8 @@ const tabOverviewBtn     = document.getElementById("tab-overview");            /
 const tabMgSummaryBtn    = document.getElementById("tab-mgsummary");           // Management summary and revenue (Migration 031)
 const tabPostponedBtn    = document.getElementById("tab-postponed");           // Middle office › Postponed orders (Migration 027)
 const tabDeliveryBtn     = document.getElementById("tab-delivery");            // Delivery › Delivery board (Migration 029)
+const tabSalesClientsBtn = document.getElementById("tab-sales-clients");       // Sales › Clients (Migration 037)
+const tabSalesDelivBtn   = document.getElementById("tab-sales-deliveries");    // Sales › Orders & deliveries (Migration 037)
 // Admin reaches Confirmed weights from Accounting, Purchasing and the Middle
 // office (30 Oct 2026, Clément); this remembers which entry was used, for the
 // highlight, the department label above the title, and whose "checked" marks
@@ -1952,7 +1957,7 @@ function setupPaceRole() {
 // This is the screen only; the database's RLS still decides what each role
 // can read (purchasing reads orders because the calculator is built on them).
 const PACE_MENU = {
-  admin:         ["overview", "management", "mgsummary", "orders", "postponed", "calculator", "weighing", "delivery", "payables", "weights"],
+  admin:         ["overview", "management", "mgsummary", "sales-clients", "sales-deliveries", "orders", "postponed", "calculator", "weighing", "delivery", "payables", "weights"],
   sale_support:  ["orders", "confirm-birds", "postponed", "weights", "delivery"],
   purchasing:    ["calculator", "weights"],
   production:    ["weighing"],
@@ -1960,9 +1965,15 @@ const PACE_MENU = {
   accounting:    ["payables", "weights"],
   delivery:      ["delivery"],
   company_director: ["management", "mgsummary", "postponed", "delivery", "weights"],   // Migration 032, read-only
+  // Sales (Migration 037, 18 Nov 2026): the salespeople and the sales director
+  // reach PACE from the chooser; they keep the CRM until it moves into PACE.
+  sales:         ["sales-clients", "sales-deliveries"],
+  director:      ["sales-clients", "sales-deliveries"],
 };
-const PACE_HOME = { admin: "overview", sale_support: "orders", purchasing: "calculator", production: "weighing", factory_admin: "weighing", accounting: "weights", delivery: "delivery", company_director: "management" };
-const PACE_DEPT = { orders: "Middle office", postponed: "Middle office", calculator: "Purchasing", weighing: "Production", weights: "Accounting", payables: "Accounting", management: "Management", mgsummary: "Management", overview: "Management", delivery: "Delivery" };
+// Roles that have both systems and choose at sign-in (admin, and the sales team since Migration 037).
+const CHOOSER_ROLES = ["admin", "sales", "director"];
+const PACE_HOME = { admin: "overview", sale_support: "orders", purchasing: "calculator", production: "weighing", factory_admin: "weighing", accounting: "weights", delivery: "delivery", company_director: "management", sales: "sales-clients", director: "sales-clients" };
+const PACE_DEPT = { orders: "Middle office", postponed: "Middle office", calculator: "Purchasing", weighing: "Production", weights: "Accounting", payables: "Accounting", management: "Management", mgsummary: "Management", overview: "Management", delivery: "Delivery", "sales-clients": "Sales", "sales-deliveries": "Sales" };
 
 function setPaceTabsForRole() {
   const items = PACE_MENU[myProfile && myProfile.role] || [];
@@ -1981,6 +1992,9 @@ function setPaceTabsForRole() {
   tabOverviewBtn.classList.toggle("hidden", !items.includes("overview"));
   tabPostponedBtn.classList.toggle("hidden", !items.includes("postponed"));
   tabDeliveryBtn.classList.toggle("hidden", !items.includes("delivery"));
+  tabSalesClientsBtn.classList.toggle("hidden", !items.includes("sales-clients"));
+  tabSalesDelivBtn.classList.toggle("hidden", !items.includes("sales-deliveries"));
+  document.getElementById("pace-group-sales").classList.toggle("hidden", !items.includes("sales-clients"));
   document.getElementById("pace-group-delivery").classList.toggle("hidden", !items.includes("delivery"));
   document.getElementById("pace-group-management").classList.toggle("hidden", !items.includes("management"));
   document.getElementById("pace-group-middle").classList.toggle("hidden", !items.includes("orders") && !items.includes("confirm-birds") && !items.includes("postponed") && !(w && ["sale_support", "admin"].includes(role)));
@@ -2052,7 +2066,7 @@ async function switchPaceView(view) {
   paceView = view;
   document.getElementById("pace-refresh-stamp").textContent = "";   // Refresh button's "Updated HH:MM" belongs to the last section
   setPaceTabsForRole();
-  if (myProfile.role === "admin") {
+  if (CHOOSER_ROLES.includes(myProfile.role)) {
     // Coming from the chooser: close the CRM side entirely.
     document.getElementById("app-title").textContent = "PROSUN PACE";
     document.getElementById("app-subtitle").textContent =
@@ -2072,6 +2086,8 @@ async function switchPaceView(view) {
   tabOverviewBtn.classList.toggle("active", view === "overview");
   tabPostponedBtn.classList.toggle("active", view === "postponed");
   tabDeliveryBtn.classList.toggle("active", view === "delivery");
+  tabSalesClientsBtn.classList.toggle("active", view === "sales-clients");
+  tabSalesDelivBtn.classList.toggle("active", view === "sales-deliveries");
   if (myProfile.role === "purchasing") paceWeightsDept = "Purchasing";
   else if (myProfile.role === "sale_support") paceWeightsDept = "Middle office";
   else if (myProfile.role !== "admin") paceWeightsDept = "Accounting";
@@ -2096,6 +2112,7 @@ async function switchPaceView(view) {
   if (view !== "payables") closePayables();          // payables.js
   if (view !== "postponed") closePostponed();        // postponed.js
   if (view !== "delivery") closeDelivery();          // delivery.js
+  if (view !== "sales-clients" && view !== "sales-deliveries") closeSales();   // sales.js
 
   // Purchasing and production read; only sale support and admin write. Entry
   // also needs one specific channel, since the product list is per channel.
@@ -2140,6 +2157,14 @@ async function switchPaceView(view) {
     document.getElementById("list-title").textContent = "จัดส่ง — Delivery board";
     await openDelivery();                             // delivery.js
   }
+  else if (view === "sales-clients") {
+    document.getElementById("list-title").textContent = "ลูกค้า — Clients";
+    await openSales(view);                            // sales.js
+  }
+  else if (view === "sales-deliveries") {
+    document.getElementById("list-title").textContent = "ออเดอร์และการส่ง — Orders & deliveries";
+    await openSales(view);                            // sales.js
+  }
 }
 
 tabCalculatorBtn.addEventListener("click", () => switchPaceView("calculator"));
@@ -2151,6 +2176,8 @@ tabOverviewBtn.addEventListener("click", () => switchPaceView("overview"));
 tabPayablesBtn.addEventListener("click", () => switchPaceView("payables"));
 tabPostponedBtn.addEventListener("click", () => switchPaceView("postponed"));
 tabDeliveryBtn.addEventListener("click", () => switchPaceView("delivery"));
+tabSalesClientsBtn.addEventListener("click", () => switchPaceView("sales-clients"));
+tabSalesDelivBtn.addEventListener("click", () => switchPaceView("sales-deliveries"));
 tabWeightsBtn.addEventListener("click", () => { paceWeightsDept = "Accounting"; switchPaceView("weights"); });
 tabWeightsBuyBtn.addEventListener("click", () => { paceWeightsDept = "Purchasing"; switchPaceView("weights"); });
 tabWeightsMidBtn.addEventListener("click", () => { paceWeightsDept = "Middle office"; switchPaceView("weights"); });
@@ -2175,7 +2202,7 @@ function paceRefreshTime() {
 // form on Postponed orders and the problem note on the Delivery board are
 // rebuilt from scratch by their sections.
 function paceKeepTyped() {
-  const els = [...document.querySelectorAll("#pp-form input[id], #pp-form select[id], #pp-form textarea[id], #pp-close-note, #dl-problem-note")];
+  const els = [...document.querySelectorAll("#pp-form input[id], #pp-form select[id], #pp-form textarea[id], #pp-close-note, #dl-problem-note, #sl-call-note, #sl-q")];
   const saved = els.map(el => [el.id, el.type === "checkbox" ? el.checked : el.value]);
   return () => {
     saved.forEach(([id, v]) => {
@@ -2214,6 +2241,8 @@ async function refreshPaceView() {
     else if (view === "payables") { await pyFlush(); await pyLoad(); }
     else if (view === "postponed") await ppLoad();
     else if (view === "delivery") await dlLoad();
+    else if (view === "sales-clients") await slLoadClients();         // sales.js (Migration 037)
+    else if (view === "sales-deliveries") await slLoadDeliveries();
     restore();
   } catch (e) {
     ok = false;
@@ -4082,10 +4111,20 @@ async function openSystem(which) {
   document.querySelector(".page-footer").classList.remove("hidden");
   if (which === "pace") {
     paceTabs.classList.remove("hidden");
-    await switchPaceView(PACE_HOME.admin || "orders");   // admin opens on the Overview (Migration 036)
-  } else {
+    await switchPaceView(PACE_HOME[myProfile.role] || "orders");   // admin: the Overview (036); sales: Sales › Clients (037)
+  } else if (myProfile.role === "admin") {
     adminTabs.classList.remove("hidden");
     await switchAdminView("all");
+  } else {
+    // Sales rep / director back to the CRM, as before Migration 037.
+    closeSales();
+    paceTabs.classList.add("hidden");
+    document.body.classList.remove("pace-mode");
+    document.getElementById("app-title").textContent = "Klong Phai Farm CRM";
+    document.getElementById("app-subtitle").textContent = "";
+    setupForRole();
+    if (myProfile.role === "director") await switchDirectorView("mine");
+    else await loadClients();
   }
 }
 
