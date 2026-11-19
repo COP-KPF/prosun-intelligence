@@ -106,9 +106,11 @@ function dlKg(p) {
 function dlKgText(k) { return k ? `${k.approx ? "~" : ""}${dlFmt(k.kg)}` : "—"; }
 
 // "PO 12345", but not "PO PO-12345" when the number already says PO.
-function dlPo(po) {
-  if (!po) return "—";
-  return /^\s*(po|so)\b/i.test(po) ? escapeHtml(po) : `PO ${escapeHtml(po)}`;
+function dlPo(po, part) {
+  // Part 2, 3 … of an order split in Confirmed weights (Migration 040)
+  const tag = part > 1 ? ` <span class="dl-part">${dlBi("ส่วนที่ " + part, "Part " + part)}</span>` : "";
+  if (!po) return "—" + tag;
+  return (/^\s*(po|so)\b/i.test(po) ? escapeHtml(po) : `PO ${escapeHtml(po)}`) + tag;
 }
 
 // Dates in both languages: "พุธ 18 พ.ย. · Wed 18 Nov".
@@ -406,7 +408,7 @@ function dlSummaryHtml(due, pushed) {
     return `<tr class="dl-row-${it.state}" data-id="${escapeAttr(p.id || p.paper_id || "")}">
       <td class="dl-no">${i + 1}</td>
       <td class="dl-client"><strong>${escapeHtml(p.customer_name || dlBi("กำลังอ่านใบงาน…", "Paper being read…"))}</strong>${note}${reason}</td>
-      <td class="dl-po">${dlPo(p.po_number)}</td>
+      <td class="dl-po">${dlPo(p.po_number, p.part)}</td>
       <td>${dlCompanyChip(p.company)}</td>
       <td class="dl-kg">${escapeHtml(dlKgText(k))}</td>
       <td>${dlPaperCell(it, i + 1)}</td>
@@ -493,7 +495,7 @@ ${s.sth} · ${s.sen}</button>`;
         <input type="checkbox" data-act="tick" data-id="${escapeAttr(p.id)}" ${DL.sel.has(p.id) ? "checked" : ""} ${dis}>
         <span class="dl-work-text">
           <strong>${escapeHtml(p.customer_name || "—")}</strong>
-          <span class="dl-work-meta">${dlPo(p.po_number)} · ${dlCompanyChip(p.company)} · <strong>${escapeHtml(dlKgText(k))} kg</strong></span>
+          <span class="dl-work-meta">${dlPo(p.po_number, p.part)} · ${dlCompanyChip(p.company)} · <strong>${escapeHtml(dlKgText(k))} kg</strong></span>
           ${tags ? `<span class="dl-tags">${tags}</span>` : ""}
           ${note}${who}
         </span>
@@ -614,7 +616,7 @@ function dlDrawPaper() {
       <header class="dl-modal-head">
         <div>
           <h3 id="dl-paper-title" class="dl-modal-title">📄 ${st.no ? `<span class="dl-modal-no">#${escapeHtml(String(st.no))}</span> ` : ""}${escapeHtml(p.customer_name || dlBi("กำลังอ่านใบงาน…", "Paper being read…"))}</h3>
-          <div class="dl-modal-meta">${dlPo(p.po_number)} · ${dlCompanyChip(p.company)} · ${dlBi("ส่ง", "Delivery")} ${escapeHtml(dlDateBi(p.due_date))} · ${dlStatusPill({ kind: "paper", state: dlStateOf(p), p })}</div>
+          <div class="dl-modal-meta">${dlPo(p.po_number, p.part)} · ${dlCompanyChip(p.company)} · ${dlBi("ส่ง", "Delivery")} ${escapeHtml(dlDateBi(p.due_date))} · ${dlStatusPill({ kind: "paper", state: dlStateOf(p), p })}</div>
         </div>
         <button type="button" class="dl-modal-close" data-act="paper-close" aria-label="ปิด · Close">✕</button>
       </header>

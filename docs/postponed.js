@@ -114,6 +114,13 @@ function ppFilterLabel(k) {
 }
 
 // What happened last, in one short line.
+// "Breast 10 Kg of 25 Kg, Thigh 5 Kg" — products moved to a part (Migration 040).
+function ppMovedLines(lines) {
+  const unit = u => (typeof weighUnit === "function" && weighUnit(u)) || u || "";
+  const q = (n, u) => `${Number(n).toLocaleString("en-GB", { maximumFractionDigits: 3 })} ${unit(u)}`.trim();
+  return (lines || []).map(l => `${l.description} ${l.whole ? q(l.qty, l.unit) : q(l.qty, l.unit) + T(" จาก ", " of ") + q(l.of_qty, l.unit)}`).join(", ");
+}
+
 function ppLastUpdate(o) {
   let s;
   switch (o.state) {
@@ -136,6 +143,8 @@ function ppLastUpdate(o) {
     default: s = "";
   }
   if (o.late) s += T(` · เลยวันส่งใหม่ ${o.days_late} วัน`, ` · ${o.days_late} day${o.days_late === 1 ? "" : "s"} past the new date`);
+  // A product postponed from Confirmed weights (Migration 040): what moved
+  if (o.lines_moved && o.lines_moved.length) s = ppMovedLines(o.lines_moved) + " · " + s;
   return s;
 }
 
@@ -252,12 +261,13 @@ function ppRowHtml(o) {
   const open = PP.expanded === o.key;
   const reason = o.reason ? ppReasonLabel(o.reason) : "";
   const by = ppSourceLabel(o.last_source);
-  const name = `${o.customer_name || "—"}${o.po_number ? " · " + o.po_number : ""}`;
+  const part = o.part > 1 ? T(`ส่วนที่ ${o.part}`, `Part ${o.part}`) : "";
+  const name = `${o.customer_name || "—"}${o.po_number ? " · " + o.po_number : ""}${part ? " · " + part : ""}`;
   const update = ppLastUpdate(o);
   const delay = o.delay_days === null || o.delay_days === undefined ? "—" : `+${o.delay_days}${T(" วัน", " d")}`;
   return `<tr class="pp-row${o.late ? " pp-late" : ""}${o.open ? "" : " pp-closed"}${open ? " pp-open" : ""}" data-key="${escapeAttr(o.key)}">
     <td class="pp-c-client"><button type="button" class="pp-name" data-act="toggle" data-key="${escapeAttr(o.key)}" aria-expanded="${open}" title="${escapeAttr(name)}">
-      <strong>${escapeHtml(o.customer_name || "—")}</strong>${o.po_number ? ` <span class="pp-po">${escapeHtml(o.po_number)}</span>` : ""}</button></td>
+      <strong>${escapeHtml(o.customer_name || "—")}</strong>${o.po_number ? ` <span class="pp-po">${escapeHtml(o.po_number)}</span>` : ""}${part ? ` <span class="pp-part">${escapeHtml(part)}</span>` : ""}</button></td>
     <td class="pp-c-co"><span class="pp-co pp-co-${ppCompanyTag(o.company).toLowerCase()}">${ppCompanyTag(o.company)}</span></td>
     <td class="pp-c-by" title="${escapeAttr(by + (reason ? " · " + reason : "") + (o.note ? " — " + o.note : ""))}"><span class="pp-cut">
       <span class="pp-by">${escapeHtml(by)}</span>${o.times > 1 ? `<span class="pp-times" title="${escapeAttr(T(`เลื่อน ${o.times} ครั้ง`, `Postponed ${o.times} times`))}">${o.times}×</span>` : ""}${reason ? `<span class="pp-reason"> · ${escapeHtml(reason)}</span>` : ""}</span></td>
@@ -279,6 +289,14 @@ function ppEventHtml(e) {
   switch (e.kind) {
     case "moved":
       cls = "pp-ev-moved";
+      if (e.split_mode) {      // Migration 040: products moved to part 2, 3 …
+        text = T(`มิดเดิลออฟฟิศเลื่อนสินค้า: ${escapeHtml(ppMovedLines(e.lines))} · ส่ง ${d(e.from_date)} → ${d(e.to_date)} · `,
+                 `Products postponed by the middle office: ${escapeHtml(ppMovedLines(e.lines))} · delivery ${d(e.from_date)} → ${d(e.to_date)} · `)
+          + (e.split_mode === "production"
+            ? T(`ยังไม่ได้ผลิต — กลับไปผลิต ${d(e.to_work_date)}`, `not produced — back to production on ${d(e.to_work_date)}`)
+            : T("ผลิตแล้ว — ส่งทีหลัง", "produced — delivered later"));
+        break;
+      }
       text = e.stage === "delivery"
         ? T(`มิดเดิลออฟฟิศเลื่อนวันส่ง ${d(e.from_date)} → ${d(e.to_date)}`, `Delivery postponed by the middle office: ${d(e.from_date)} → ${d(e.to_date)}`)
         : T(`ฝ่ายผลิตเลื่อน · ผลิต ${d(e.from_work_date)} → ${d(e.to_work_date)} · ส่ง ${d(e.from_date)} → ${d(e.to_date)}`,

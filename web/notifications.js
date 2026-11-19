@@ -39,6 +39,7 @@ const NOTIF_KIND = {
   order_postponed_changed: { label: "Postponement changed", cls: "n-tag-red" },
   delivery_problem:     { label: "Delivery problem", cls: "n-tag-red" },
   postponed_late:       { label: "Late again",   cls: "n-tag-red" },          // Migration 035
+  product_postponed:    { label: "Product postponed", cls: "n-tag-amber" },  // Migration 040
   invoice_weights_changed: { label: "Weights changed after invoice", cls: "n-tag-red" },
   payable_proposed:     { label: "To approve",   cls: "n-tag-amber" },
   payable_approved:     { label: "Approved",     cls: "n-tag-green" },
@@ -183,7 +184,7 @@ function notifRender() {
         <div class="n-acts">
           ${detail ? `<details><summary>Details</summary>${detail}</details>` : ""}
           ${n.paper_id && n.kind !== "weighing_deleted" && n.kind !== "invoice_weights_changed" ? `<button type="button" class="btn-link" data-n="open" data-id="${escapeAttr(n.id)}">Open paper ›</button>` : ""}
-          ${String(n.kind).startsWith("order_postponed") || n.kind === "delivery_postponed" || n.kind === "postponed_late" ? `<button type="button" class="btn-link" data-n="open-postponed" data-id="${escapeAttr(n.id)}">Open postponed orders ›</button>` : ""}
+          ${String(n.kind).startsWith("order_postponed") || n.kind === "delivery_postponed" || n.kind === "postponed_late" || n.kind === "product_postponed" ? `<button type="button" class="btn-link" data-n="open-postponed" data-id="${escapeAttr(n.id)}">Open postponed orders ›</button>` : ""}
           ${n.kind === "invoice_weights_changed" ? `<button type="button" class="btn-link" data-n="open-weights" data-id="${escapeAttr(n.id)}">Open Confirmed weights ›</button>` : ""}
           ${n.kind === "delivery_problem" ? `<button type="button" class="btn-link" data-n="open-delivery" data-id="${escapeAttr(n.id)}">Open delivery board ›</button>` : ""}
           ${String(n.kind).startsWith("payable_") ? `<button type="button" class="btn-link" data-n="open-payables" data-id="${escapeAttr(n.id)}">Open payables ›</button>` : ""}

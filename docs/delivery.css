@@ -325,3 +325,7 @@
   .dl-table th { position: static; }
   .dl-chips { display: none; }
 }
+
+/* Part 2, 3 … of an order split in Confirmed weights (Migration 040) */
+.dl-part { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 4px; background: #ece6f5; color: #4b2e83;
+  font-size: 0.72rem; font-weight: 700; white-space: nowrap; }

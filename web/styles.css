@@ -2262,3 +2262,25 @@ body.pace-readonly #weights-table tr.ws-row { cursor: default; }
 @media (max-width: 700px) {
   .ov-wide { grid-column: auto; }
 }
+
+/* Part 2, 3 … of an order split in Confirmed weights (Migration 040) */
+.pp-part, .ws-part { display: inline-block; padding: 0 6px; border-radius: 4px; background: #ece6f5; color: #4b2e83;
+  font-size: 0.7rem; font-weight: 700; white-space: nowrap; vertical-align: 1px; }
+.ws-split-item { display: inline-block; margin-top: 2px; font-size: 0.74rem; color: #4b2e83; }
+.ws-pl-btn { margin-top: 4px; }
+.ws-pl-table { margin: 6px 0 10px; }
+.ws-pl-table td, .ws-pl-table th { padding: 6px 8px; }
+.ws-pl-table tr.ws-pl-on td { background: #f3eefa; }
+.ws-pl-table label { cursor: pointer; }
+.ws-pl-table input[type=checkbox] { width: 20px; height: 20px; }
+.ws-pl-num { width: 90px; padding: 5px 6px; text-align: right; }
+.ws-pl-mode { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px 10px; margin: 0 0 10px; }
+.ws-pl-mode legend { font-weight: 600; font-size: 0.85rem; padding: 0 4px; }
+.ws-pl-mode label { display: flex; align-items: flex-start; gap: 8px; padding: 5px 0; font-size: 0.86rem; cursor: pointer; }
+.ws-pl-mode input[type=radio] { width: 18px; height: 18px; margin-top: 2px; flex: none; }
+#weights-section .ws-pl-row > td, #weights-section .ws-pl-form { white-space: normal; }
+#weights-section .ws-pl-table td:nth-child(2) { white-space: normal; min-width: 140px; }
+#ws-pl-form .ws-pl-mode label { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; }
+#ws-pl-form .ws-pl-mode input[type=radio] { width: 18px; height: 18px; min-height: 0; margin: 2px 0 0; flex: none; }
+#ws-pl-form .ws-pl-table input[type=checkbox] { width: 20px; height: 20px; min-height: 0; margin: 0; }
+#weights-section .ws-split-item { display: block; white-space: normal; max-width: 280px; }

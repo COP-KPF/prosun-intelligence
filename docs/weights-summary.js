@@ -32,6 +32,13 @@
 // comment). The paper then appears under its new delivery date, the move is
 // listed in Middle office › Postponed orders, and admin is notified.
 //
+// Postpone a product (Migration 040, Clément 19 Nov 2026): "เลื่อนสินค้า /
+// Postpone a product" — one or more products, the whole line or part of its
+// quantity. The team says what happened: produced (delivered later, weights
+// kept) or not produced (back to production on a new day). The products move
+// to a new working paper, "part 2" of the same PO, with its own delivery and
+// invoice; the rest of the order stays here. Every reader sees the parts.
+//
 // Loaded after weighing.js (reuses weighDiff, weighFmt, weighUnit,
 // weighCompanyShort, weighShortDate, weighLangHtml's language, T) and before
 // app.js; uses app.js globals at run time (sb, myProfile, escapeHtml,
@@ -57,6 +64,8 @@ const WS = {
   show: "all",         // all | todo (not checked, or changed since) | done
   hist: {},            // paper id → its postponement history (middle office and admin can read it)
   ppForm: null,        // { paper, date, reason, note, error } — the open "postpone delivery" form
+  plForm: null,        // { paper, mode, work, date, reason, note, sel: {line → {on, qty, kg}}, error, busy } — "postpone a product" (040)
+  split: {},           // paper id → { root, part, family } — orders split into parts (040)
   inv: {},             // paper id → accounting's invoice mark (Migration 030)
   invDraft: {},        // paper id → invoice number being typed (survives refreshes)
   invBusy: null,       // paper id being saved
@@ -177,13 +186,13 @@ function wsSchedule() {
   if (!wsOpen()) return;
   WS.timer = setTimeout(async () => {
     if (!wsOpen()) return;
-    if (document.hidden || WS.loading || WS.ppForm || WS.invBusy || wsTypingInvoice()) { wsSchedule(); return; }
+    if (document.hidden || WS.loading || WS.ppForm || WS.plForm || WS.invBusy || wsTypingInvoice()) { wsSchedule(); return; }
     await wsLoad({ silent: true });
   }, WS_REFRESH_MS);
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && wsOpen() && !WS.loading && !WS.ppForm && !WS.invBusy && !wsTypingInvoice()) wsLoad({ silent: true });
+  if (!document.hidden && wsOpen() && !WS.loading && !WS.ppForm && !WS.plForm && !WS.invBusy && !wsTypingInvoice()) wsLoad({ silent: true });
 });
 
 function wsTypingInvoice() {
@@ -195,7 +204,7 @@ document.getElementById("switch-system-btn").addEventListener("click", closeWeig
 document.getElementById("sign-out-btn").addEventListener("click", () => {
   closeWeights();
   WS.from = WS.to = null; WS.preset = "today"; WS.rows = []; WS.q = ""; WS.company = "all"; WS.show = "all"; WS.sig = "";
-  WS.hist = {}; WS.ppForm = null; WS.inv = {}; WS.invDraft = {}; WS.invBusy = null;
+  WS.hist = {}; WS.ppForm = null; WS.plForm = null; WS.split = {}; WS.inv = {}; WS.invDraft = {}; WS.invBusy = null;
 });
 
 
@@ -227,8 +236,8 @@ async function wsLoad(opts = {}) {
   }
   const rows = lines.data || [];
   const count = pending.error ? WS.pending : Number(pending.data) || 0;
-  await Promise.all([wsLoadHist(rows), wsLoadInv(rows)]);
-  const sig = JSON.stringify([rows, count, WS.hist, WS.inv]);
+  await Promise.all([wsLoadHist(rows), wsLoadInv(rows), wsLoadSplit(rows)]);
+  const sig = JSON.stringify([rows, count, WS.hist, WS.inv, WS.split]);
   WS.updatedAt = new Date();
   if (silent && sig === WS.sig) {
     const st = document.getElementById("ws-updated");
@@ -250,6 +259,18 @@ async function wsLoadHist(rows) {
   const hist = {};
   if (ids.length) (await ppMarks(ids, null)).forEach((h) => { (hist[h.paper_id] = hist[h.paper_id] || []).push(h); });
   WS.hist = hist;
+}
+
+// Orders split into parts (Migration 040): which paper is part 2, 3 … and
+// what each part holds. Quietly empty before Migration 040.
+async function wsLoadSplit(rows) {
+  const ids = [...new Set(rows.map((r) => r.paper_id))];
+  const split = {};
+  if (ids.length) {
+    const { data, error } = await sb.rpc("weighing_split_marks", { p_papers: ids });
+    if (!error) (data || []).forEach((m) => { split[m.paper_id] = m; });
+  }
+  WS.split = split;
 }
 
 // Invoice marks of the papers on screen. Quietly empty before Migration 030.
@@ -315,7 +336,9 @@ function wsRender() {
         "Once the Odoo invoice is made, press “🧾 Invoiced” in the Invoice column (the invoice number is optional) — the delivery team sees it at once.")}</div>` : ""}
       ${wsCanPostpone() ? `<div class="w-small ws-howto">${T(
         "ถ้าต้องเลื่อนวันส่ง กด “เลื่อนส่ง” ใต้วันส่ง — ต้องเลือกสาเหตุ น้ำหนักไม่เปลี่ยน ผู้บริหารจะได้รับแจ้ง",
-        "To postpone a delivery, press “Postpone” under the delivery date — a reason is required; the weights stay as confirmed, and management is notified.")}</div>` : ""}
+        "To postpone a delivery, press “Postpone” under the delivery date — a reason is required; the weights stay as confirmed, and management is notified.")}
+        ${T(" เลื่อนเฉพาะบางสินค้า (ทั้งรายการหรือบางส่วน) ให้กด “เลื่อนสินค้า” — สินค้าที่เลื่อนจะเป็นใบงาน “ส่วนที่ 2” ของ PO เดียวกัน",
+          " To postpone only some products (all or part of a line), press “Postpone a product” — they become “part 2” of the same PO.")}</div>` : ""}
     </div>
     <div class="w-head-right">${weighLangHtml().replace(/data-act="lang"/g, 'data-ws="lang"')}</div>
   </div>
@@ -411,9 +434,11 @@ function wsResultsHtml() {
             <td class="ws-cb-col">${first ? (wsCanCheck() ? `<input type="checkbox" class="ws-cb" data-ws-check="${escapeAttr(r.paper_id)}"${st === "checked" ? " checked" : ""} aria-label="${T("ตรวจแล้ว", "Checked")}: ${escapeAttr(label)}">`
               : st === "checked" ? `<span class="ws-cb-ro" aria-label="${T("ตรวจแล้ว", "Checked")}">✓</span>` : "") : ""}</td>
             <td>${first ? (r.delivery_date ? escapeHtml(weighShortDate(r.delivery_date)) : `<span class="w-muted" title="${T("ไม่มีวันส่งบนใบงาน — ใช้วันที่ชั่ง", "No delivery date on the paper — weighing day shown")}">${escapeHtml(weighShortDate(r.work_date))}*</span>`) + wsMovedTag(r.paper_id)
-              + (canPP ? `<br><button type="button" class="w-btn w-btn-outline w-btn-sm ws-pp-btn" data-ws="pp-open" data-paper="${escapeAttr(r.paper_id)}"${WS.ppForm && WS.ppForm.paper === r.paper_id ? " disabled" : ""}>${T("เลื่อนส่ง", "Postpone")}</button>` : "") : ""}</td>
+              + wsSplitTag(r.paper_id)
+              + (canPP ? `<br><button type="button" class="w-btn w-btn-outline w-btn-sm ws-pp-btn" data-ws="pp-open" data-paper="${escapeAttr(r.paper_id)}"${WS.ppForm && WS.ppForm.paper === r.paper_id ? " disabled" : ""}>${T("เลื่อนส่ง", "Postpone")}</button>`
+                + (wsCanSplit(r.paper_id) ? `<br><button type="button" class="w-btn w-btn-outline w-btn-sm ws-pp-btn ws-pl-btn" data-ws="pl-open" data-paper="${escapeAttr(r.paper_id)}"${WS.plForm && WS.plForm.paper === r.paper_id ? " disabled" : ""}>${T("เลื่อนสินค้า", "Postpone a product")}</button>` : "") : "") : ""}</td>
             <td>${first ? escapeHtml(weighCompanyShort(r.company)) : ""}</td>
-            <td class="w-mono">${first ? escapeHtml(r.po_number || "") : ""}</td>
+            <td class="w-mono">${first ? escapeHtml(r.po_number || "") + wsPartTag(r.paper_id) : ""}</td>
             <td>${first ? escapeHtml(r.customer_name || "") : ""}</td>
             <td class="w-wrap">${escapeHtml(r.description || "")}${r.edited ? ` <span class="ws-edited" title="${T("แก้ตัวเลขด้วยมือที่โรงงาน", "Corrected by hand at the factory")}">${T("แก้ไข", "corrected")}</span>` : ""}</td>
             <td class="w-num">${escapeHtml(r.ordered_text || "")}</td>
@@ -425,7 +450,8 @@ function wsResultsHtml() {
             <td class="ws-check-who">${first ? (st === "checked" ? `✓ ${escapeHtml(`${r.checked_by_name || ""} ${wsWhen(r.checked_at)}`.trim())}`
               : st === "changed" ? `<span class="ws-changed-tag">${T("แก้หลังตรวจ — ตรวจอีกครั้ง", "Changed since checked")}</span>` : "") : ""}</td>
             <td class="ws-inv-col">${first ? wsInvCellHtml(r, canInv) : ""}</td>
-          </tr>${last && canPP && WS.ppForm && WS.ppForm.paper === r.paper_id ? wsPostponeRowHtml(r, cols) : ""}`;
+          </tr>${last && canPP && WS.ppForm && WS.ppForm.paper === r.paper_id ? wsPostponeRowHtml(r, cols) : ""}${
+            last && canPP && WS.plForm && WS.plForm.paper === r.paper_id ? wsSplitRowHtml(r, cols) : ""}`;
         }).join("") : `<tr><td colspan="${cols}" class="w-empty">${WS.rows.length
           ? T("ไม่มีรายการที่ตรงกับตัวกรอง", "No lines match the filters")
           : T("ยังไม่มีน้ำหนักที่ยืนยันในช่วงนี้", "No confirmed weights in this period yet")}</td></tr>`}</tbody>
@@ -526,6 +552,225 @@ function wsPostponeRowHtml(r, cols) {
   </td></tr>`;
 }
 
+// ------------------------------------------------- postpone a product (040)
+// The paper's lines, as shown in the table.
+function wsPaperLines(paperId) { return WS.rows.filter((r) => r.paper_id === paperId); }
+
+// A product can be postponed if the paper has two products or more, or one
+// with an ordered quantity (part of it can move).
+function wsCanSplit(paperId) {
+  const lines = wsPaperLines(paperId);
+  return lines.length > 1 || lines.some((l) => Number(l.ordered_qty) > 0);
+}
+
+function wsUnit(u) { return u ? weighUnit(u) : ""; }
+function wsQtyText(q, u) { return `${Number(q).toLocaleString("en-GB", { maximumFractionDigits: 3 })} ${wsUnit(u)}`.trim(); }
+
+// "Part 2" next to the PO of a part.
+function wsPartTag(paperId) {
+  const s = WS.split[paperId];
+  if (!s || s.part < 2) return "";
+  return `<br><span class="ws-part" title="${escapeAttr(T("ส่วนหนึ่งของออเดอร์ที่ถูกแยกส่ง", "A part of an order delivered in several times"))}">${T("ส่วนที่", "Part")} ${s.part}</span>`;
+}
+
+// Under the delivery date of the original order: each part and what it holds.
+function wsSplitTag(paperId) {
+  const s = WS.split[paperId];
+  if (!s || !s.family || !s.family.length) return "";
+  const items = s.family.filter((f) => f.paper_id !== paperId).map((f) => {
+    const what = (f.lines || []).map((l) => `${l.description} ${l.whole ? (l.ordered_text || wsQtyText(l.qty, l.unit))
+      : wsQtyText(l.qty, l.unit) + T(" จาก ", " of ") + (l.ordered_text || wsQtyText(l.of_qty, l.unit))}`).join(", ");
+    const how = f.mode === "production" ? T("กลับไปผลิต", "back to production") : T("ผลิตแล้ว ส่งทีหลัง", "produced, delivered later");
+    return `<span class="ws-split-item">✂ ${T("ส่วนที่", "Part")} ${f.part} → ${escapeHtml(weighShortDate(f.delivery_date))}${what ? ": " + escapeHtml(what) : ""} · ${how}</span>`;
+  });
+  if (s.part > 1) items.unshift(`<span class="ws-split-item">${T("แยกจากออเดอร์เดิม (ส่วนที่ 1)", "Split from the original order (part 1)")}</span>`);
+  return items.length ? `<br>${items.join("<br>")}` : "";
+}
+
+function wsSplitRowHtml(r, cols) {
+  const f = WS.plForm;
+  const lines = wsPaperLines(r.paper_id);
+  const current = r.delivery_date || r.work_date;
+  const today = weighBangkokToday();
+  const minDate = wsAddDays(current, 1) > today ? wsAddDays(current, 1) : today;
+  const label = [r.po_number ? "PO " + r.po_number : "", r.customer_name || ""].filter(Boolean).join(" · ");
+  const later = f.mode === "later";
+  const v = wsSplitCheck();
+  const rowsHtml = lines.map((l) => {
+    const s = f.sel[l.line_id] || {};
+    const hasQty = Number(l.ordered_qty) > 0;
+    const partial = s.on && hasQty && s.qty !== "" && s.qty !== undefined && Number(s.qty) < Number(l.ordered_qty);
+    const prop = partial && l.actual_kg !== null && Number(s.qty) > 0 ? Math.round(Number(l.actual_kg) * Number(s.qty) / Number(l.ordered_qty) * 100) / 100 : null;
+    return `<tr class="${s.on ? "ws-pl-on" : ""}">
+      <td><input type="checkbox" id="ws-pl-on-${escapeAttr(l.line_id)}" data-pl-line="${escapeAttr(l.line_id)}" data-pl="on"${s.on ? " checked" : ""}></td>
+      <td><label for="ws-pl-on-${escapeAttr(l.line_id)}">${escapeHtml(l.description || "")}</label></td>
+      <td class="w-num">${escapeHtml(l.ordered_text || "")}</td>
+      <td class="w-num">${l.actual_kg === null ? "—" : weighFmt(l.actual_kg)}</td>
+      <td class="w-num">${hasQty ? `<input type="number" class="ws-pl-num" min="0" step="any" inputmode="decimal" data-pl-line="${escapeAttr(l.line_id)}" data-pl="qty"
+          value="${escapeAttr(s.qty === undefined ? "" : String(s.qty))}" placeholder="${escapeAttr(weighFmt(l.ordered_qty))}"${s.on ? "" : " disabled"}
+          aria-label="${escapeAttr(T("จำนวนที่เลื่อน ", "Quantity to move ") + (l.description || ""))}"> ${escapeHtml(wsUnit(l.ordered_unit))}`
+        : `<span class="w-small w-muted">${T("ทั้งรายการ", "whole line")}</span>`}</td>
+      <td class="w-num">${later && partial ? `<input type="number" class="ws-pl-num" min="0" step="0.01" inputmode="decimal" data-pl-line="${escapeAttr(l.line_id)}" data-pl="kg"
+          value="${escapeAttr(s.kg === undefined ? "" : String(s.kg))}" placeholder="${prop === null ? "" : escapeAttr(String(prop))}"
+          aria-label="${escapeAttr(T("กก. ที่เลื่อน ", "Kg moved ") + (l.description || ""))}"> kg` : `<span class="w-small w-muted">${s.on && !partial ? T("ทั้งหมด", "all") : ""}</span>`}</td>
+    </tr>`;
+  }).join("");
+  return `<tr class="ws-pp-row ws-pl-row"><td colspan="${cols}">
+    <form class="w-pp-form ws-pp-form ws-pl-form" id="ws-pl-form" novalidate>
+      <h3>${T("เลื่อนสินค้า", "Postpone a product")} — ${escapeHtml(label)}</h3>
+      <p class="w-small w-muted">${T(
+        `ตอนนี้ส่ง ${escapeHtml(weighShortDate(current))} · เลือกสินค้าที่จะเลื่อน (ทั้งรายการ หรือใส่จำนวนบางส่วน) สินค้าที่เลือกจะเป็นใบงานใหม่ “ส่วนที่ 2” ของ PO เดียวกัน ส่งและออกใบแจ้งหนี้แยก ที่เหลืออยู่ในใบงานนี้`,
+        `Delivery now ${escapeHtml(weighShortDate(current))} · choose the products to move (whole line, or type part of the quantity). They become a new working paper, “part 2” of the same PO, delivered and invoiced on its own; the rest stays on this paper.`)}</p>
+      ${f.error ? `<div class="w-msg w-msg-error" role="alert" id="ws-pl-error">${escapeHtml(f.error)}</div>` : ""}
+      <div class="table-scroll"><table class="w-table ws-pl-table">
+        <thead><tr><th><span class="pp-sr">${T("เลือก", "Choose")}</span></th><th>${T("สินค้า", "Product")}</th><th class="w-num">${T("สั่ง", "Ordered")}</th>
+          <th class="w-num">${T("ชั่งจริง (kg)", "Actual (kg)")}</th><th class="w-num">${T("จำนวนที่เลื่อน", "Quantity to move")}</th>
+          <th class="w-num">${T("กก. ที่เลื่อน", "Kg moved")}</th></tr></thead>
+        <tbody>${rowsHtml}</tbody></table></div>
+      <fieldset class="ws-pl-mode">
+        <legend>${T("สินค้านี้", "These products are")} *</legend>
+        <label><input type="radio" name="ws-pl-mode" value="later" data-pl="mode"${later ? " checked" : ""}>
+          ${T("ผลิตแล้ว — ส่งทีหลัง (น้ำหนักที่ยืนยันแล้วย้ายไปด้วย)", "Produced — delivered later (their confirmed weights move with them)")}</label>
+        <label><input type="radio" name="ws-pl-mode" value="production" data-pl="mode"${f.mode === "production" ? " checked" : ""}>
+          ${T("ยังไม่ได้ผลิต — กลับไปผลิตใหม่ (ใบงานใหม่รอผลิตในวันที่เลือก)", "Not produced — back to production (a new paper waits for production on the chosen day)")}</label>
+      </fieldset>
+      <div class="w-pp-fields">
+        ${f.mode === "production" ? `<label>${T("วันผลิตใหม่", "New production day")} *
+          <input type="date" id="ws-pl-work" min="${escapeAttr(today)}" value="${escapeAttr(f.work || "")}" required></label>` : ""}
+        <label>${T("วันส่งใหม่", "New delivery date")} *
+          <input type="date" id="ws-pl-date" min="${escapeAttr(minDate)}" value="${escapeAttr(f.date || "")}" required></label>
+        <label class="w-pp-wide">${T("สาเหตุ", "Reason")} *
+          <select id="ws-pl-reason" required>
+            <option value="">${T("เลือกสาเหตุ", "Choose a reason")}</option>
+            ${PP_REASONS.map(([k, lab]) => `<option value="${k}"${f.reason === k ? " selected" : ""}>${escapeHtml(lab())}</option>`).join("")}
+          </select></label>
+        <label class="w-pp-full">${ppNoteLabel()}
+          <input type="text" id="ws-pl-note" value="${escapeAttr(f.note || "")}" maxlength="300"></label>
+      </div>
+      <div class="w-pp-actions">
+        <button type="submit" class="w-btn w-btn-violet" id="ws-pl-save"${v.ok && !f.busy ? "" : " disabled"}>${T("เลื่อนสินค้า", "Postpone the products")}</button>
+        <button type="button" class="w-btn w-btn-outline" data-ws="pl-cancel">${T("ยกเลิก", "Cancel")}</button>
+        <span class="w-small w-pp-hint" id="ws-pl-hint" role="status">${escapeHtml(v.ok ? v.summary : v.missing)}</span>
+      </div>
+    </form>
+  </td></tr>`;
+}
+
+// What is still missing (shown next to the button), or a summary when ready.
+function wsSplitCheck() {
+  const f = WS.plForm;
+  if (!f) return { ok: false, missing: "" };
+  const row = WS.rows.find((r) => r.paper_id === f.paper);
+  const lines = wsPaperLines(f.paper);
+  const chosen = lines.filter((l) => (f.sel[l.line_id] || {}).on);
+  const current = row ? row.delivery_date || row.work_date : null;
+  const today = weighBangkokToday();
+  let missing = null;
+  let whole = 0;
+  for (const l of chosen) {
+    const s = f.sel[l.line_id];
+    const q = s.qty === "" || s.qty === undefined ? null : Number(s.qty);
+    if (q !== null && !(q > 0)) { missing = T(`ใส่จำนวนที่มากกว่า 0 (${l.description})`, `Type a quantity above 0 (${l.description})`); break; }
+    if (q === null || q >= Number(l.ordered_qty)) whole++;
+    else if (f.mode === "later" && s.kg !== "" && s.kg !== undefined && !(Number(s.kg) > 0 && Number(s.kg) < Number(l.actual_kg))) {
+      missing = T(`กก. ที่เลื่อนต้องน้อยกว่า ${weighFmt(l.actual_kg)} (${l.description})`, `Kg moved must be less than ${weighFmt(l.actual_kg)} (${l.description})`); break;
+    }
+  }
+  if (!missing && !chosen.length) missing = T("เลือกสินค้าที่จะเลื่อน", "Choose the products to move");
+  else if (!missing && whole >= lines.length) missing = T("เลือกทุกสินค้า: ใช้ปุ่ม “เลื่อนส่ง” เพื่อเลื่อนทั้งออเดอร์", "Every product is chosen: use “Postpone” for the whole order");
+  else if (!missing && !f.mode) missing = T("เลือก: ผลิตแล้ว หรือ ยังไม่ได้ผลิต", "Choose: produced, or not produced");
+  else if (!missing && f.mode === "production" && !f.work) missing = T("เลือกวันผลิตใหม่", "Choose the new production day");
+  else if (!missing && f.mode === "production" && f.work < today) missing = T("วันผลิตต้องเป็นวันนี้หรือหลังจากนี้", "The production day must be today or later");
+  else if (!missing && f.mode === "production" && row && f.work === row.work_date) missing = T("เลือกวันผลิตอื่น", "Choose another production day");
+  else if (!missing && !f.date) missing = T("เลือกวันส่งใหม่", "Choose the new delivery date");
+  else if (!missing && current && f.date <= current) missing = T("วันส่งใหม่ต้องหลังวันส่งเดิม", "The new delivery date must be after the current one");
+  else if (!missing && f.date < today) missing = T("วันส่งใหม่ต้องเป็นวันนี้หรือหลังจากนี้", "The new delivery date must be today or later");
+  else if (!missing && f.mode === "production" && f.work > f.date) missing = T("วันส่งต้องไม่ก่อนวันผลิต", "The delivery date must be on or after the production day");
+  else if (!missing && !ppReasonOk(f.reason, f.note)) missing = !f.reason ? T("เลือกสาเหตุ", "Choose a reason") : T("สาเหตุ “อื่น ๆ” ต้องมีหมายเหตุ", "Add a comment when the reason is Other");
+  if (missing) return { ok: false, missing };
+  const n = chosen.length;
+  return { ok: true, summary: T(
+    `${n} สินค้า → ส่วนที่ 2 · ส่ง ${weighShortDate(f.date)}`,
+    `${n} product${n === 1 ? "" : "s"} → part 2 · delivery ${weighShortDate(f.date)}`) };
+}
+
+// Keeps the open form's values; redraws only the hint and the button unless
+// the layout changes (mode, a product ticked, part of a quantity).
+function wsPlField(t) {
+  const f = WS.plForm;
+  if (!f || !t || !t.closest || !t.closest("#ws-pl-form")) return false;
+  let redraw = false;
+  if (t.dataset.pl === "mode") { f.mode = t.value; redraw = true; }
+  else if (t.dataset.plLine) {
+    const s = f.sel[t.dataset.plLine] = f.sel[t.dataset.plLine] || {};
+    if (t.dataset.pl === "on") { s.on = t.checked; redraw = true; }
+    else if (t.dataset.pl === "qty") {
+      const before = s.qty;
+      s.qty = t.value;
+      const l = WS.rows.find((r) => r.line_id === t.dataset.plLine);
+      const wasPartial = before !== undefined && before !== "" && l && Number(before) < Number(l.ordered_qty);
+      const isPartial = t.value !== "" && l && Number(t.value) < Number(l.ordered_qty);
+      redraw = f.mode === "later" && wasPartial !== isPartial;
+    } else if (t.dataset.pl === "kg") s.kg = t.value;
+  }
+  else if (t.id === "ws-pl-work") f.work = t.value;
+  else if (t.id === "ws-pl-date") f.date = t.value;
+  else if (t.id === "ws-pl-reason") f.reason = t.value;
+  else if (t.id === "ws-pl-note") f.note = t.value.trim();
+  if (redraw) {
+    const focusId = t.id, focusLine = t.dataset.plLine, focusPl = t.dataset.pl;
+    wsRenderResults();
+    const again = focusId ? document.getElementById(focusId)
+      : wsSection.querySelector(`[data-pl-line="${CSS.escape(focusLine || "")}"][data-pl="${focusPl}"]`);
+    if (again) again.focus();
+  } else {
+    const v = wsSplitCheck();
+    const btn = document.getElementById("ws-pl-save");
+    const hint = document.getElementById("ws-pl-hint");
+    if (btn) btn.disabled = !v.ok || f.busy;
+    if (hint) hint.textContent = v.ok ? v.summary : v.missing;
+  }
+  return true;
+}
+
+async function wsSplitSave() {
+  const f = WS.plForm;
+  if (!f || f.busy) return;
+  const v = wsSplitCheck();
+  if (!v.ok) { f.error = v.missing; wsRenderResults(); return; }
+  const row = WS.rows.find((r) => r.paper_id === f.paper);
+  const moves = wsPaperLines(f.paper).filter((l) => (f.sel[l.line_id] || {}).on).map((l) => {
+    const s = f.sel[l.line_id];
+    const q = s.qty === "" || s.qty === undefined ? null : Number(s.qty);
+    const partial = q !== null && q < Number(l.ordered_qty);
+    return { line_id: l.line_id, qty: partial ? q : null,
+             actual_kg: partial && f.mode === "later" && s.kg !== "" && s.kg !== undefined ? Number(s.kg) : null };
+  });
+  f.busy = true; f.error = null;
+  wsRenderResults();
+  const { data, error } = await sb.rpc("weighing_postpone_lines", {
+    p_paper: f.paper, p_moves: moves, p_mode: f.mode, p_delivery_date: f.date,
+    p_work_date: f.mode === "production" ? f.work : null, p_reason: f.reason, p_note: f.note || null });
+  f.busy = false;
+  if (error) {
+    f.error = /weighing_postpone_lines|schema cache|does not exist/i.test(error.message || "")
+      ? T("ยังเลื่อนสินค้าไม่ได้: กรุณารัน Migration 040 ใน Supabase", "Postponing a product is not available yet: run Migration 040 in Supabase.")
+      : T("เลื่อนไม่สำเร็จ: ", "Could not postpone: ") + error.message;
+    wsRenderResults();
+    return;
+  }
+  const label = row && row.po_number ? "PO " + row.po_number : (row && row.customer_name) || T("ใบงาน", "The paper");
+  const part = data && data.part ? data.part : 2;
+  WS.plForm = null;
+  WS.message = { kind: "info", text: f.mode === "later"
+    ? T(`${label}: สินค้าที่เลือกเป็นส่วนที่ ${part} ส่งวันที่ ${weighShortDate(f.date)} — ที่เหลือยังอยู่ในใบงานนี้`,
+        `${label}: the chosen products are now part ${part}, delivered ${weighShortDate(f.date)} — the rest stays on this paper`)
+    : T(`${label}: สินค้าที่เลือกกลับไปผลิตวันที่ ${weighShortDate(f.work)} เป็นส่วนที่ ${part} ส่งวันที่ ${weighShortDate(f.date)}`,
+        `${label}: the chosen products go back to production on ${weighShortDate(f.work)} as part ${part}, delivered ${weighShortDate(f.date)}`) };
+  WS.sig = "";
+  await wsLoad({ keepMessage: true });
+}
+
 async function wsPostponeSave() {
   const f = WS.ppForm;
   if (!f || f.busy) return;
@@ -605,12 +850,22 @@ wsSection.addEventListener("click", async (e) => {
   if (act === "refresh") { await wsLoad(); return; }
   if (act === "pp-open") {
     WS.ppForm = { paper: el.dataset.paper, date: "", reason: "", note: "", error: null };
+    WS.plForm = null;
     wsRenderResults();
     const sel = document.getElementById("ws-pp-reason");
     if (sel) { sel.closest("tr").scrollIntoView({ block: "nearest" }); }
     return;
   }
   if (act === "pp-cancel") { WS.ppForm = null; wsRenderResults(); return; }
+  if (act === "pl-open") {
+    WS.plForm = { paper: el.dataset.paper, mode: "", work: "", date: "", reason: "", note: "", sel: {}, error: null };
+    WS.ppForm = null;
+    wsRenderResults();
+    const form = document.getElementById("ws-pl-form");
+    if (form) { form.scrollIntoView({ block: "nearest" }); const first = form.querySelector("input[type=checkbox]"); if (first) first.focus(); }
+    return;
+  }
+  if (act === "pl-cancel") { WS.plForm = null; wsRenderResults(); return; }
   // No Excel export for a company director (Clément, 17 Nov 2026): the data stays on screen.
   if (act === "export") { if (!paceReadOnly()) wsExport(); return; }
   if (act === "inv-mark") {
@@ -667,6 +922,7 @@ wsSection.addEventListener("keydown", async (e) => {
 
 wsSection.addEventListener("change", async (e) => {
   if (wsPpField(e.target)) return;
+  if (wsPlField(e.target)) return;
   if (e.target.dataset.wsInvNo) return;
   if (e.target.dataset.wsCheck) { await wsMark(e.target.dataset.wsCheck, e.target.checked); return; }
   const f = e.target.dataset.wsField;
@@ -684,6 +940,7 @@ wsSection.addEventListener("change", async (e) => {
 // Search filters as you type, redrawing only the results (the box keeps focus).
 wsSection.addEventListener("input", (e) => {
   if (wsPpField(e.target)) return;
+  if (e.target.type !== "checkbox" && e.target.type !== "radio" && wsPlField(e.target)) return;
   if (e.target.dataset.wsInvNo) { WS.invDraft[e.target.dataset.wsInvNo] = e.target.value; return; }
   if (e.target.dataset.wsField !== "q") return;
   WS.q = e.target.value;
@@ -701,6 +958,7 @@ function wsPpField(t) {
 }
 
 wsSection.addEventListener("submit", async (e) => {
+  if (e.target.id === "ws-pl-form") { e.preventDefault(); await wsSplitSave(); return; }
   if (e.target.id !== "ws-pp-form") return;
   e.preventDefault();
   const v = (id) => (document.getElementById(id) || {}).value || "";
