@@ -8,6 +8,10 @@
 // Their clients' orders of the day come from the delivery team's board.
 // Export to Excel for their reporting.
 //
+//   Sales › My day      (Migration 039) the 10 calls worth the most today,
+//                       call-backs due, today's orders needing attention,
+//                       new clients, alerts (postponed / moved / delivery
+//                       problem on my clients), my headline KPIs.
 //   Sales › Clients     status tiles (Call now, At risk, Lost, New, On track),
 //                       one table, "Called" log in one click, the client's
 //                       page (12 months, invoices, orders, calls), Excel.
@@ -18,7 +22,12 @@
 //                       moved to another day (new date only, never the reason).
 //
 // Refresh: the PACE header's Refresh button (app.js refreshPaceView).
-// Data: sales_me(), sales_clients(), sales_client_detail(code),
+//   Sales › My KPIs     (039) ratios in % for my portfolio, with the team.
+//   Management › Sales KPIs (039, admin: Clément, Khun Kirana) every
+//                       salesperson side by side with rank, biggest clients
+//                       at stake, House clients to assign, Excel.
+// Data: sales_me(), sales_clients(), sales_my_day(rep), sales_alerts(),
+// sales_alerts_seen(), sales_kpis(from, to), sales_client_detail(code),
 // sales_log_call(code, outcome, note), sales_deliveries(day),
 // sales_unmatched_names(), sales_link_name(name, code),
 // sales_assign(code, rep, portfolio).
@@ -32,7 +41,12 @@
 const slSection = document.getElementById("sales-section");
 
 const SL = {
-  view: "clients",       // clients | deliveries
+  view: "clients",       // day | clients | deliveries | kpis | mgkpis
+  dayRep: null,          // My day for admin / director: a salesperson code, or null = team
+  dayData: null,
+  alerts: null,
+  kpi: null,
+  kpiPeriod: "30d",      // 7d | 30d | month | lastmonth
   me: null,
   data: null,            // sales_clients()
   error: null,
@@ -41,6 +55,7 @@ const SL = {
   q: "",
   callFor: null,         // client code whose call form is open
   callOutcome: null,
+  callDate: null,
   detail: null,          // { code, data, error }
   day: null,
   deliv: null,
@@ -75,7 +90,8 @@ const SL_PORTFOLIO = {
 
 // ----------------------------------------------------------- open / close
 async function openSales(view) {
-  SL.view = view === "sales-deliveries" ? "deliveries" : "clients";
+  SL.view = { "sales-day": "day", "sales-deliveries": "deliveries", "sales-kpis": "kpis",
+              "mg-sales-kpis": "mgkpis" }[view] || "clients";
   slSection.classList.remove("hidden");
   if (!SL.me) {
     const { data, error } = await sb.rpc("sales_me");
@@ -98,6 +114,13 @@ async function openSales(view) {
     if (!SL.day) SL.day = weighBangkokToday();
     slSection.innerHTML = `<p class="mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
     await slLoadDeliveries();
+  } else if (SL.view === "day") {
+    if (!SL.dayData) slSection.innerHTML = `<p class="mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
+    await slLoadDay();
+  } else if (SL.view === "kpis" || SL.view === "mgkpis") {
+    slSection.innerHTML = `<p class="mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
+    SL.kpi = null;
+    await slLoadKpis();
   } else {
     if (!SL.data) slSection.innerHTML = `<p class="mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
     await slLoadClients();
@@ -282,11 +305,15 @@ function slTilesHtml(list) {
   }).join("")}</div>`;
 }
 
-function slCallFormHtml(c) {
-  return `<tr class="sl-callrow"><td colspan="${slAll() ? 8 : 7}">
+function slCallFormHtml(c, colspan) {
+  const needDate = SL.callOutcome === "call_back" || SL.callOutcome === "no_answer";
+  const today = weighBangkokToday();
+  return `<tr class="sl-callrow"><td colspan="${colspan || (slAll() ? 8 : 7)}">
     <div class="sl-callform">
       <span class="sl-callform-k">${T("ผลการโทร", "Call result")} — ${escapeHtml(c.name)}</span>
       <div class="sl-outcomes">${SL_OUTCOMES.map(o => `<button type="button" class="ws-chip ${SL.callOutcome === o.key ? "on" : ""}" data-act="outcome" data-outcome="${o.key}" aria-pressed="${SL.callOutcome === o.key}">${T(o.th, o.en)}</button>`).join("")}</div>
+      ${needDate ? `<label class="sl-cb-date">${T("โทรอีกครั้ง", "Call again on")}
+        <input type="date" id="sl-call-date" min="${today}" max="${weighAddDays(today, 90)}" value="${escapeAttr(SL.callDate || weighAddDays(today, SL.callOutcome === "no_answer" ? 1 : 2))}"></label>` : ""}
       <input type="text" id="sl-call-note" class="sl-note" maxlength="300" placeholder="${T("บันทึก (ต้องกรอกเมื่อมีปัญหา)", "Note (needed for a problem)")}">
       <button type="button" class="btn-primary" data-act="save-call" data-code="${escapeAttr(c.code)}" ${SL.callOutcome && !SL.busy ? "" : "disabled"}>${T("บันทึก", "Save")}</button>
       <button type="button" class="btn-secondary" data-act="cancel-call">${T("ยกเลิก", "Cancel")}</button>
@@ -422,6 +449,10 @@ function slDetailHtml() {
 async function slOpenDetail(code) {
   SL.detail = { code, data: null, error: null };
   slDraw();
+  if (!SL.data) {                       // the 12 months and the status come from the list
+    const r = await sb.rpc("sales_clients");
+    if (!r.error) SL.data = r.data;
+  }
   const { data, error } = await sb.rpc("sales_client_detail", { p_code: code });
   if (!SL.detail || SL.detail.code !== code) return;
   SL.detail = { code, data: error ? null : data, error: error ? error.message : null };
@@ -483,10 +514,15 @@ function slDraw() {
   if (!slOpen()) return;
   const focus = document.activeElement && document.activeElement.id;
   const pos = focus === "sl-q" ? document.activeElement.selectionStart : null;
-  if (SL.error && SL.view === "clients" && !SL.data) {
+  if (SL.error && ((SL.view === "clients" && !SL.data) || (SL.view === "day" && !SL.dayData)
+                   || ((SL.view === "kpis" || SL.view === "mgkpis") && !SL.kpi))) {
     slSection.innerHTML = `<div class="mg-msg" id="sl-error">${escapeHtml(SL.error)}</div>`;
   } else {
-    slSection.innerHTML = (SL.view === "deliveries" ? slDeliveriesHtml() : slClientsHtml()) + slDetailHtml();
+    const body = SL.view === "deliveries" ? slDeliveriesHtml()
+      : SL.view === "day" ? slDayHtml()
+      : SL.view === "kpis" || SL.view === "mgkpis" ? slKpiHtml()
+      : slClientsHtml();
+    slSection.innerHTML = body + slDetailHtml();
   }
   if (focus) {
     const el = document.getElementById(focus);
@@ -537,6 +573,8 @@ slSection.addEventListener("click", async e => {
   if (act === "lang") { weighSetLang(b.dataset.lang); slDraw(); }
   else if (act === "filter") { SL.filter = b.dataset.filter; SL.callFor = null; SL.msg = null; slDraw(); }
   else if (act === "export") slExport();
+  else if (act === "kpi-export") slKpiExport();
+  else if (act === "period") { SL.kpiPeriod = b.dataset.period; SL.kpi = null; slDraw(); await slLoadKpis(); }
   else if (act === "detail") await slOpenDetail(b.dataset.code);
   else if (act === "close-detail") { SL.detail = null; slDraw(); }
   else if (act === "call") { SL.callFor = SL.callFor === b.dataset.code ? null : b.dataset.code; SL.callOutcome = null; SL.msg = null; slDraw(); }
@@ -545,6 +583,8 @@ slSection.addEventListener("click", async e => {
     SL.callOutcome = b.dataset.outcome;
     const note = document.getElementById("sl-call-note");
     const keep = note ? note.value : "";
+    const dEl = document.getElementById("sl-call-date");
+    if (dEl && dEl.value) SL.callDate = dEl.value;
     slDraw();
     const n2 = document.getElementById("sl-call-note");
     if (n2) { n2.value = keep; n2.focus(); }
@@ -555,12 +595,14 @@ slSection.addEventListener("click", async e => {
       SL.msg = { kind: "err", text: T("กรุณาเขียนว่ามีปัญหาอะไร", "Write what the problem is.") }; slDraw(); return;
     }
     SL.busy = true;
-    const { error } = await sb.rpc("sales_log_call", { p_code: b.dataset.code, p_outcome: SL.callOutcome, p_note: note });
+    const dateEl = document.getElementById("sl-call-date");
+    const { error } = await sb.rpc("sales_log_call", { p_code: b.dataset.code, p_outcome: SL.callOutcome, p_note: note,
+                                                         p_callback: dateEl && dateEl.value ? dateEl.value : null });
     SL.busy = false;
     if (error) { SL.msg = { kind: "err", text: T("บันทึกไม่สำเร็จ: ", "Could not save: ") + error.message }; slDraw(); return; }
     SL.msg = { kind: "ok", text: T("บันทึกการโทรแล้ว", "Call saved.") };
-    SL.callFor = null; SL.callOutcome = null;
-    await slLoadClients();
+    SL.callFor = null; SL.callOutcome = null; SL.callDate = null;
+    if (SL.view === "day") await slLoadDay(); else await slLoadClients();
   }
   else if (act === "day") {
     const s = Number(b.dataset.shift);
@@ -595,7 +637,8 @@ slSection.addEventListener("click", async e => {
     if (error) { SL.msg = { kind: "err", text: error.message }; SL.detail = null; slDraw(); return; }
     SL.msg = { kind: "ok", text: T("ย้ายลูกค้าแล้ว", "Client moved.") };
     const code = b.dataset.code;
-    await slLoadClients();
+    SL.data = null;
+    if (SL.view === "mgkpis") await slLoadKpis(); else await slLoadClients();
     await slOpenDetail(code);
   }
 });
@@ -605,8 +648,334 @@ slSection.addEventListener("input", e => {
 });
 slSection.addEventListener("change", async e => {
   if (e.target.id === "sl-rep") { SL.rep = e.target.value; SL.callFor = null; slDraw(); }
+  else if (e.target.id === "sl-day-rep") { SL.dayRep = e.target.value || null; SL.dayData = null; slDraw(); await slLoadDay(); }
   else if (e.target.id === "sl-day" && e.target.value) { SL.day = e.target.value; SL.deliv = null; slDraw(); await slLoadDeliveries(); }
 });
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && SL.detail && slOpen()) { SL.detail = null; slDraw(); }
 });
+
+
+// ============================================================================
+// My day (Migration 039)
+// ============================================================================
+async function slLoadDay() {
+  const rep = slAll() ? (SL.dayRep || null) : null;
+  const [day, al] = await Promise.all([
+    sb.rpc("sales_my_day", { p_rep: rep }),
+    sb.rpc("sales_alerts", { p_days: 7 }),
+  ]);
+  if (!slOpen() || SL.view !== "day") return;
+  SL.error = day.error ? T("โหลดไม่สำเร็จ: ", "Could not load: ") + day.error.message : null;
+  if (!day.error) SL.dayData = day.data;
+  if (!al.error) SL.alerts = al.data;
+  slDraw();
+  // Opening My day = the alerts are seen; the badge goes back to 0.
+  if (!al.error && al.data && al.data.unseen > 0) {
+    await sb.rpc("sales_alerts_seen");
+    slSetBadge(0);
+  }
+}
+
+function slMoneyCell(c) {
+  return `${slBaht(c.month_value)}<small class="sl-sub">${T("ต่อเดือน", "a month")}</small>`;
+}
+
+function slDayCallRow(c, i) {
+  return `<tr class="sl-row" data-code="${escapeAttr(c.code)}">
+    <td class="sl-rank">${i + 1}</td>
+    <td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button>
+      <small class="sl-sub">${escapeHtml(c.code)}${c.zone ? " · " + escapeHtml(c.zone) : ""}${slAll() && !SL.dayRep ? " · " + escapeHtml(slRepName(c.salesperson)) : ""}</small></td>
+    <td>${slStatusPill(c.status)}</td>
+    <td class="sl-why">${escapeHtml(slReason(c))}${c.call ? `<small class="sl-sub">${T("โทรล่าสุด", "Last call")}: ${escapeHtml(T((SL_OUTCOMES.find(o => o.key === c.call.outcome) || {}).th || "", (SL_OUTCOMES.find(o => o.key === c.call.outcome) || {}).en || ""))} · ${slAgo(c.call.at)}${c.call.note ? " — " + escapeHtml(c.call.note) : ""}</small>` : ""}</td>
+    <td class="num">${slMoneyCell(c)}</td>
+    <td><button type="button" class="sl-callbtn" data-act="call" data-code="${escapeAttr(c.code)}">${T("☎ โทรแล้ว", "☎ Called")}</button></td>
+  </tr>${SL.callFor === c.code ? slCallFormHtml(c, 6) : ""}`;
+}
+
+function slAlertsHtml() {
+  const a = SL.alerts;
+  if (!a || !(a.events || []).length) return "";
+  const kind = e => e.kind === "problem"
+    ? `<span class="dl-pill dl-red">⚠ ${T("ปัญหาการส่ง", "Delivery problem")}</span>`
+    : `<span class="dl-pill dl-violet">↷ ${T("เลื่อน", "Postponed")}</span>`;
+  return `<section class="mg-card sl-alerts">
+    <div class="mg-card-head"><h3>${T("แจ้งเตือน 7 วันล่าสุด", "Alerts, last 7 days")}</h3>
+      <span class="mg-small mg-muted">${T("โทรหาลูกค้าก่อนลูกค้าโทรมา", "Call the client before the client calls you")}</span></div>
+    <ul class="sl-alert-list">${a.events.slice(0, 12).map(e => `<li class="${e.new ? "sl-alert-new" : ""}">
+      ${kind(e)} <button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(e.code)}">${escapeHtml(e.client)}</button>
+      <span class="mg-muted">${escapeHtml(e.po_number || "")}</span>
+      ${e.kind === "problem"
+        ? `— ${escapeHtml(e.note || "")} <span class="mg-muted">(${slDate(e.from_date)})</span>`
+        : `— ${slDate(e.from_date)} → <strong>${e.new_date ? slDate(e.new_date, { weekday: "short", day: "numeric", month: "short" }) : T("ยังไม่มีวันใหม่", "no new date yet")}</strong>`}
+      <small class="sl-sub">${slAgo(e.at)}${slAll() && e.salesperson ? " · " + escapeHtml(slRepName(e.salesperson)) : ""}</small></li>`).join("")}</ul>
+  </section>`;
+}
+
+function slDayHtml() {
+  const d = SL.dayData;
+  const repSel = slAll() ? `<select id="sl-day-rep" class="sl-select" aria-label="${T("เซลส์", "Salesperson")}">
+      <option value="" ${!SL.dayRep ? "selected" : ""}>${T("ทั้งทีม", "Whole team")}</option>
+      ${(SL.me.reps || []).map(r => `<option value="${escapeAttr(r.code)}" ${SL.dayRep === r.code ? "selected" : ""}>${escapeHtml(r.code + " · " + r.name)}</option>`).join("")}
+    </select>` : "";
+  const head = `<div class="mg-bar"><div class="sl-bar-left">${repSel}
+      <strong class="sl-dayname">${slDate(weighBangkokToday(), { weekday: "long", day: "numeric", month: "long" })}</strong></div>
+    <div class="mg-bar-right">${weighLangHtml()}</div></div>
+    ${SL.msg ? `<div class="${SL.msg.kind === "ok" ? "ov-ok" : "mg-msg"}" role="status">${escapeHtml(SL.msg.text)}</div>` : ""}`;
+  if (!d) return head + `<p class="mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
+
+  // the headline KPIs: the salesperson shown, or the team when admin / director look at the whole team
+  const k = d.kpis && (d.rep ? (d.kpis.reps || []).find(r => r.code === d.rep) : d.kpis.team);
+  const tile = (key) => {
+    const def = SL_KPI.find(x => x.key === key);
+    return `<div class="sl-ktile ${slKpiClass(def, k ? k[key] : null)}"><span class="sl-tile-k">${T(def.th, def.en)}</span>
+      <span class="sl-tile-v">${slKpiValue(def, k ? k[key] : null)}</span><span class="sl-tile-s">${slKpiSub(def, k ? k[key] : null)}</span></div>`;
+  };
+  const kpiStrip = k ? `<div class="sl-ktiles">${["active30", "call_now", "coverage", "call_to_order", "target_ytd"].map(tile).join("")}</div>
+    <p class="mg-small mg-muted">${T("30 วันล่าสุด · ดูทั้งหมดที่ KPI ของฉัน", "Last 30 days · all of them in My KPIs")}</p>` : "";
+
+  const top = d.top_calls || [];
+  const calls = top.length ? `<div class="mg-table-wrap"><table class="mg-table sl-table"><thead><tr>
+      <th>#</th><th>${T("ลูกค้า", "Client")}</th><th>${T("สถานะ", "Status")}</th><th>${T("เหตุผล", "Why")}</th>
+      <th class="num">${T("มูลค่า", "Worth")}</th><th></th></tr></thead>
+      <tbody>${top.map(slDayCallRow).join("")}</tbody></table></div>`
+    : `<p class="mg-muted">${T("ไม่มีลูกค้าที่ต้องโทรวันนี้", "Nobody to call today.")}</p>`;
+
+  const cb = d.callbacks || [];
+  const cbHtml = cb.length ? `<section class="mg-card"><div class="mg-card-head"><h3>${T("นัดโทรกลับวันนี้", "Call-backs due")} (${cb.length})</h3></div>
+    <div class="mg-table-wrap"><table class="mg-table sl-table"><tbody>${cb.map(c => `<tr class="sl-row">
+      <td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button><small class="sl-sub">${escapeHtml(c.code)}</small></td>
+      <td>${T("นัดไว้", "Due")} ${slDate(c.call.callback_on)}${c.call.note ? `<small class="sl-sub">${escapeHtml(c.call.note)}</small>` : ""}</td>
+      <td class="num">${slMoneyCell(c)}</td>
+      <td><button type="button" class="sl-callbtn" data-act="call" data-code="${escapeAttr(c.code)}">${T("☎ โทรแล้ว", "☎ Called")}</button></td></tr>
+      ${SL.callFor === c.code ? slCallFormHtml(c, 4) : ""}`).join("")}</tbody></table></div></section>` : "";
+
+  // Today's orders: the ones that need the salesperson first
+  const orders = (d.today_orders || []).slice().sort((a, b) => {
+    const w = p => ({ problem: 0, notready: 1 }[slOrderState(p)] ?? 2);
+    return w(a) - w(b);
+  });
+  const attention = orders.filter(p => ["problem", "notready"].includes(slOrderState(p)));
+  const moved = d.today_moved || [];
+  const todayHtml = `<section class="mg-card"><div class="mg-card-head"><h3>${T("ออเดอร์วันนี้", "Today's orders")}</h3>
+      <span class="mg-small mg-muted">${T(`${orders.length} ออเดอร์ · ต้องดู ${attention.length} · เลื่อนไปวันอื่น ${moved.length}`, `${orders.length} orders · ${attention.length} need a look · ${moved.length} moved away`)}</span></div>
+    ${orders.length || moved.length ? `<div class="mg-table-wrap"><table class="mg-table sl-table"><tbody>
+      ${orders.map(p => `<tr><td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(p.code)}">${escapeHtml(p.client_name || "—")}</button><small class="sl-sub">${escapeHtml(p.po_number || "")}</small></td>
+        <td>${slOrderPill(p)}${p.mark && p.mark.status === "problem" && p.mark.note ? `<small class="sl-sub">${escapeHtml(p.mark.note)}</small>` : ""}</td></tr>`).join("")}
+      ${moved.map(m => `<tr><td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(m.code)}">${escapeHtml(m.client_name)}</button><small class="sl-sub">${escapeHtml(m.po_number || "")}</small></td>
+        <td><span class="dl-pill dl-violet">↷ ${m.new_date ? slDate(m.new_date, { weekday: "short", day: "numeric", month: "short" }) : T("ยังไม่มีวันใหม่", "No new date yet")}</span></td></tr>`).join("")}
+    </tbody></table></div>` : `<p class="mg-muted">${T("ยังไม่มีออเดอร์วันนี้ (ออเดอร์จะปรากฏเมื่อถ่ายรูปใบงาน)", "No order today yet (orders appear once their working paper is photographed).")}</p>`}
+  </section>`;
+
+  const nc = d.new_clients || [];
+  const newHtml = nc.length ? `<section class="mg-card"><div class="mg-card-head"><h3>${T("ลูกค้าใหม่ — รอออเดอร์ที่สอง", "New clients — waiting for the second order")} (${nc.length})</h3></div>
+    <ul class="sl-plain">${nc.map(c => `<li><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button>
+      <span class="mg-muted">${c.last_order ? T("สั่งล่าสุด ", "last order ") + slDate(c.last_order) : ""}</span></li>`).join("")}</ul></section>` : "";
+
+  return head + slAlertsHtml() + kpiStrip
+    + `<section class="mg-card"><div class="mg-card-head"><h3>${T("โทรหาลูกค้าเหล่านี้ก่อน", "Call these first")}</h3>
+         <span class="mg-small mg-muted">${T(`เรียงตามมูลค่าที่เสี่ยง — จากลูกค้าที่ต้องโทรทั้งหมด ${d.call_now_total} ราย`, `Ranked by money at stake — out of ${d.call_now_total} clients to call`)}</span></div>${calls}</section>`
+    + cbHtml + todayHtml + newHtml
+    + `<p class="mg-small mg-muted">${T("มูลค่า = ยอดเฉลี่ยต่อเดือน (6 เดือนล่าสุดของรายงาน) × ช้ากว่ารอบปกติกี่เท่า (สูงสุด 4) · ลูกค้าที่โทรไปแล้วใน 2 วันจะไม่อยู่ในรายการ",
+        "Worth = the client's average month (last 6 report months) × how many times late against their rhythm (at most 4) · a client called in the last 2 days waits.")}</p>`;
+}
+
+// ---- alert badge on "My day" ---------------------------------------------------
+let slAlertTimer = null;
+function slSetBadge(n) {
+  const b = document.getElementById("sl-day-badge");
+  if (!b) return;
+  b.textContent = n > 9 ? "9+" : String(n);
+  b.classList.toggle("hidden", !n);
+}
+async function slPollAlerts() {
+  const { data, error } = await sb.rpc("sales_alerts", { p_days: 7 });
+  if (!error && data) slSetBadge(data.unseen || 0);
+}
+function slStartAlertPoll() {
+  if (slAlertTimer) return;
+  slPollAlerts();
+  slAlertTimer = setInterval(() => { if (!document.hidden) slPollAlerts(); }, 180000);
+}
+
+
+// ============================================================================
+// KPIs (Migration 039): Sales › My KPIs and Management › Sales KPIs
+// ============================================================================
+// better: "high" (more is better) or "low"; green / amber: the thresholds.
+// kind: pct (a ratio n/d), growth, count.
+const SL_KPI = [
+  { key: "active30", group: "p", better: "high", green: 60, amber: 40, th: "ลูกค้าที่สั่งใน 30 วัน", en: "Active, last 30 days",
+    hth: "ลูกค้าที่สั่งใน 30 วัน ÷ ฐานลูกค้า", hen: "Clients with an order in 30 days ÷ client base" },
+  { key: "on_track", group: "p", better: "high", green: 60, amber: 40, th: "สั่งตามรอบ", en: "On track",
+    hth: "ปกติ + ใหม่ ÷ ฐานลูกค้า", hen: "On track + new ÷ client base" },
+  { key: "call_now", group: "p", better: "low", green: 15, amber: 30, th: "ต้องโทรเลย", en: "Call now",
+    hth: "ช้ากว่ารอบปกติ ÷ ฐานลูกค้า", hen: "Late against their rhythm ÷ client base" },
+  { key: "at_risk", group: "p", better: "low", green: 10, amber: 20, th: "เสี่ยง", en: "At risk",
+    hth: "ยอดลดลง 40%+ หรือถูกเลื่อน 2 ครั้ง", hen: "Buying 40 %+ less, or 2 postponements" },
+  { key: "lost", group: "p", better: "low", green: 10, amber: 20, th: "หายไป", en: "Lost",
+    hth: "ไม่สั่งเกิน 120 วัน ÷ ฐานลูกค้า", hen: "Nothing for 120+ days ÷ client base" },
+  { key: "growth", kind: "growth", group: "r", better: "high", green: 0, amber: -10, th: "ยอด 3 เดือนล่าสุด เทียบ 3 เดือนก่อน", en: "Last 3 months vs the 3 before",
+    hth: "จากรายงานยอดขายรายเดือน", hen: "From the monthly sales report" },
+  { key: "target_ytd", group: "r", better: "high", green: 100, amber: 90, th: "ทำได้ตามเป้า (ตั้งแต่ต้นปี)", en: "Target achieved, year to date",
+    hth: "ยอดจริง ÷ เป้าตามสัญญา ถึงเดือนล่าสุดของรายงาน", hen: "Actual ÷ agreement target, to the report's last month" },
+  { key: "top10", group: "r", better: "low", green: 50, amber: 65, th: "สัดส่วนลูกค้า 10 อันดับแรก", en: "Top 10 clients' share",
+    hth: "ยิ่งต่ำ ยิ่งพึ่งพาลูกค้าน้อยราย", hen: "Lower = less dependent on a few clients" },
+  { key: "food", group: "r", better: "high", green: 15, amber: 5, th: "สัดส่วน Prosun Food", en: "Prosun Food share",
+    hth: "ยอด Food ÷ ยอดรวม 12 เดือน (ขายข้าม)", hen: "Food ÷ total, 12 months (cross-selling)" },
+  { key: "calls", kind: "count", group: "a", th: "จำนวนการโทร", en: "Calls logged", hth: "ในช่วงเวลาที่เลือก", hen: "In the period" },
+  { key: "coverage", group: "a", better: "high", green: 80, amber: 50, th: "ลูกค้า 'โทรเลย' ที่โทรแล้ว", en: "Call now clients called",
+    hth: "โทรใน 7 วันล่าสุด ÷ ลูกค้าที่ต้องโทรเลย", hen: "Called in the last 7 days ÷ Call now clients" },
+  { key: "call_to_order", group: "a", better: "high", green: 40, amber: 20, th: "โทรแล้วได้ออเดอร์", en: "Calls followed by an order",
+    hth: "มีออเดอร์ภายใน 7 วันหลังโทร ÷ การโทร", hen: "An order within 7 days of the call ÷ calls" },
+  { key: "reactivated", kind: "count", group: "a", th: "ลูกค้ากลับมาสั่ง", en: "Clients reactivated",
+    hth: "สั่งหลังจากหายไป 30 วัน+", hen: "Ordered after 30+ days without an order" },
+  { key: "orders", kind: "count", group: "s", th: "ออเดอร์ (ใบงาน)", en: "Orders (working papers)", hth: "ตามวันส่งเดิม", hen: "By their first delivery day" },
+  { key: "postponed", group: "s", better: "low", green: 5, amber: 10, th: "ออเดอร์ที่ถูกเลื่อน", en: "Orders postponed",
+    hth: "ถูกเลื่อน ÷ ออเดอร์", hen: "Postponed ÷ orders" },
+  { key: "problem", group: "s", better: "low", green: 2, amber: 5, th: "ปัญหาการส่ง", en: "Delivery problems",
+    hth: "ทีมจัดส่งแจ้งปัญหา ÷ ออเดอร์", hen: "Marked 'problem' by the delivery team ÷ orders" },
+  { key: "weight_ok", group: "s", better: "high", green: 90, amber: 80, th: "น้ำหนักตรง ±5%", en: "Weight within ±5 %",
+    hth: "รายการ kg ที่น้ำหนักจริงอยู่ใน ±5%", hen: "Lines in kg delivered within ±5 % of the order" },
+];
+const SL_KPI_GROUPS = { p: { th: "พอร์ตลูกค้า (วันนี้)", en: "Portfolio (today)" }, r: { th: "ยอดขาย (รายงาน)", en: "Revenue (report)" },
+                        a: { th: "การโทร (ช่วงเวลา)", en: "Activity (period)" }, s: { th: "บริการ (ช่วงเวลา)", en: "Service (period)" } };
+
+function slKpiPct(def, v) {
+  if (!v) return null;
+  if (def.kind === "count") return null;
+  return v.pct === null || v.pct === undefined ? null : Number(v.pct);
+}
+function slKpiClass(def, v) {
+  const p = slKpiPct(def, v);
+  if (p === null || !def.better) return "sl-kn";
+  if (def.better === "high") return p >= def.green ? "sl-kg" : p >= def.amber ? "sl-ka" : "sl-kr";
+  return p <= def.green ? "sl-kg" : p <= def.amber ? "sl-ka" : "sl-kr";
+}
+function slKpiValue(def, v) {
+  if (v === null || v === undefined) return "—";
+  if (def.kind === "count") return mgN(Number(v));
+  const p = slKpiPct(def, v);
+  if (p === null) return "—";
+  return (def.kind === "growth" && p > 0 ? "+" : "") + mgN(p, 1) + "%";
+}
+function slKpiSub(def, v) {
+  if (!v || def.kind === "count") return "";
+  if (def.kind === "growth") return `${slBaht(v.last3)} / ${slBaht(v.prev3)}`;
+  if (def.key === "target_ytd" || def.key === "top10" || def.key === "food") return v.d ? `${slBaht(v.n)} / ${slBaht(v.d)}` : "";
+  return v.d ? `${mgN(Number(v.n))} / ${mgN(Number(v.d))}` : "";
+}
+
+function slPeriodRange() {
+  const today = weighBangkokToday();
+  if (SL.kpiPeriod === "7d") return [weighAddDays(today, -6), today];
+  if (SL.kpiPeriod === "month") return [today.slice(0, 8) + "01", today];
+  if (SL.kpiPeriod === "lastmonth") {
+    const first = today.slice(0, 8) + "01";
+    const lastEnd = weighAddDays(first, -1);
+    return [lastEnd.slice(0, 8) + "01", lastEnd];
+  }
+  return [weighAddDays(today, -29), today];
+}
+
+async function slLoadKpis() {
+  const [from, to] = slPeriodRange();
+  const period = SL.kpiPeriod;
+  const { data, error } = await sb.rpc("sales_kpis", { p_from: from, p_to: to });
+  if (!slOpen() || (SL.view !== "kpis" && SL.view !== "mgkpis") || period !== SL.kpiPeriod) return;
+  SL.error = error ? T("โหลด KPI ไม่สำเร็จ: ", "Could not load the KPIs: ") + error.message : null;
+  SL.kpi = error ? null : data;
+  slDraw();
+}
+
+// Rank among the salespeople (1 = best) for a ratio KPI.
+function slKpiRank(def, code, reps) {
+  if (!def.better || def.kind === "count") return null;
+  const vals = reps.map(r => ({ code: r.code, p: slKpiPct(def, r[def.key]) })).filter(x => x.p !== null);
+  if (vals.length < 2) return null;
+  vals.sort((a, b) => def.better === "high" ? b.p - a.p : a.p - b.p);
+  const i = vals.findIndex(x => x.code === code);
+  return i < 0 ? null : { rank: i + 1, of: vals.length };
+}
+
+function slKpiHtml() {
+  const k = SL.kpi;
+  const mg = SL.view === "mgkpis";
+  const periods = [["7d", "7 วัน", "7 days"], ["30d", "30 วัน", "30 days"], ["month", "เดือนนี้", "This month"], ["lastmonth", "เดือนที่แล้ว", "Last month"]];
+  const head = `<div class="mg-bar"><div class="sl-bar-left">
+      ${periods.map(([key, th, en]) => `<button type="button" class="ws-chip ${SL.kpiPeriod === key ? "on" : ""}" data-act="period" data-period="${key}" aria-pressed="${SL.kpiPeriod === key}">${T(th, en)}</button>`).join("")}
+    </div><div class="mg-bar-right">
+      <button type="button" class="ws-chip" data-act="kpi-export" ${k ? "" : "disabled"}>${T("ส่งออก Excel", "Export to Excel")}</button>${weighLangHtml()}</div></div>
+    ${SL.msg ? `<div class="${SL.msg.kind === "ok" ? "ov-ok" : "mg-msg"}" role="status">${escapeHtml(SL.msg.text)}</div>` : ""}`;
+  if (SL.error) return head + `<div class="mg-msg">${escapeHtml(SL.error)}</div>`;
+  if (!k) return head + `<p class="mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
+
+  const reps = k.reps || [];
+  const cols = mg ? [...reps, k.team] : [...reps, k.team].filter(Boolean);
+  const colName = c => c.code === "team" ? T("ทั้งทีม", "Team") : (mg ? `${escapeHtml(c.code)} · ${escapeHtml(c.name)}` : T("ของฉัน", "Mine") + ` <small class="sl-sub">${escapeHtml(c.name)}</small>`);
+  const note = T(`ช่วงเวลา ${slDate(k.from)} – ${slDate(k.to, { day: "numeric", month: "short", year: "numeric" })} · ยอดขายถึง ${k.report_to ? slMonth(k.report_to, true) : "—"} · ใบงานตั้งแต่ ${k.papers_from ? slDate(k.papers_from) : "—"}`,
+                 `Period ${slDate(k.from)} – ${slDate(k.to, { day: "numeric", month: "short", year: "numeric" })} · sales report to ${k.report_to ? slMonth(k.report_to, true) : "—"} · working papers since ${k.papers_from ? slDate(k.papers_from) : "—"}`);
+
+  let body = "";
+  Object.keys(SL_KPI_GROUPS).forEach(g => {
+    body += `<tr class="sl-kgroup"><th colspan="${cols.length + 1}">${T(SL_KPI_GROUPS[g].th, SL_KPI_GROUPS[g].en)}</th></tr>`;
+    SL_KPI.filter(d => d.group === g).forEach(def => {
+      body += `<tr><th scope="row" class="sl-kname">${T(def.th, def.en)}<small class="sl-sub">${T(def.hth, def.hen)}</small></th>
+        ${cols.map(c => {
+          const v = c[def.key];
+          const rk = mg && c.code !== "team" ? slKpiRank(def, c.code, reps) : null;
+          return `<td class="sl-kcell ${slKpiClass(def, v)}" data-col="${escapeAttr(c.code === "team" ? T("ทั้งทีม", "Team") : (mg ? c.code + " · " + c.name : T("ของฉัน", "Mine")))}"><span class="sl-kval">${slKpiValue(def, v)}</span>
+            ${rk ? `<span class="sl-krank" title="${T("อันดับในทีม", "Rank in the team")}">${rk.rank}/${rk.of}</span>` : ""}
+            <small class="sl-sub">${slKpiSub(def, v)}</small></td>`;
+        }).join("")}</tr>`;
+    });
+  });
+  const table = `<div class="mg-card sl-kcard"><div class="mg-table-wrap"><table class="mg-table sl-ktable">
+    <thead><tr><th>KPI</th>${cols.map(c => `<th class="${c.code === "team" ? "sl-kteam" : ""}">${colName(c)}<small class="sl-sub">${T(`${c.base} ลูกค้า`, `${c.base} clients`)}</small></th>`).join("")}</tr></thead>
+    <tbody>${body}</tbody></table></div>
+    <p class="mg-small mg-muted">${T("เขียว / เหลือง / แดง ตามเกณฑ์ในแต่ละ KPI · ฐานลูกค้า = มียอดใน 12 เดือนของรายงาน หรือมีออเดอร์ใน 180 วัน",
+      "Green / amber / red against each KPI's threshold · client base = sales in the report's 12 months or an order in the last 180 days")}${mg ? T(" · อันดับ = เทียบกับเซลส์คนอื่น (1 = ดีที่สุด)", " · rank = against the other salespeople (1 = best)") : ""}</p></div>`;
+
+  let extra = "";
+  if (mg) {
+    const st = k.at_stake || [];
+    extra += `<section class="mg-card"><div class="mg-card-head"><h3>${T("ลูกค้าที่มีมูลค่าเสี่ยงมากที่สุด", "Biggest clients at stake")}</h3>
+        <span class="mg-small mg-muted">${T("ทั้งทีม — คุยในประชุมฝ่ายขายวันจันทร์", "Whole team — for the Monday sales meeting")}</span></div>
+      ${st.length ? `<div class="mg-table-wrap"><table class="mg-table sl-table"><thead><tr><th>${T("ลูกค้า", "Client")}</th><th>${T("เซลส์", "Sales")}</th><th>${T("สถานะ", "Status")}</th><th>${T("เหตุผล", "Why")}</th><th class="num">${T("ต่อเดือน", "A month")}</th><th>${T("โทรล่าสุด", "Last call")}</th></tr></thead>
+        <tbody>${st.map(c => `<tr><td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button><small class="sl-sub">${escapeHtml(c.code)}${c.zone ? " · " + escapeHtml(c.zone) : ""}</small></td>
+          <td>${escapeHtml(slRepName(c.salesperson))}</td><td>${slStatusPill(c.status)}</td><td class="sl-why">${escapeHtml(slReason(c))}</td>
+          <td class="num">${slBaht(c.month_value)}</td>
+          <td>${c.call ? `${escapeHtml(T((SL_OUTCOMES.find(o => o.key === c.call.outcome) || {}).th || "", (SL_OUTCOMES.find(o => o.key === c.call.outcome) || {}).en || ""))}<small class="sl-sub">${slAgo(c.call.at)}</small>` : `<span class="sl-down">${T("ยังไม่ได้โทร", "Not called")}</span>`}</td></tr>`).join("")}</tbody></table></div>`
+        : `<p class="mg-muted">${T("ไม่มี", "None.")}</p>`}</section>`;
+    const hs = k.house_to_assign || [];
+    extra += `<section class="mg-card"><div class="mg-card-head"><h3>${T("ลูกค้าบริษัทที่สั่งใน 60 วัน แต่ยังไม่มีเซลส์", "House clients ordering in the last 60 days, with no salesperson")} (${hs.length})</h3>
+        <span class="mg-small mg-muted">${T("กดชื่อเพื่อมอบให้เซลส์", "Click a name to give it to a salesperson")}</span></div>
+      ${hs.length ? `<div class="mg-table-wrap sl-scroll"><table class="mg-table sl-table"><thead><tr><th>${T("ลูกค้า", "Client")}</th><th>Odoo</th><th>${T("สั่งล่าสุด", "Last order")}</th><th class="num">${T("12 เดือน", "12 months")}</th></tr></thead>
+        <tbody>${hs.map(c => `<tr><td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button><small class="sl-sub">${escapeHtml(c.code)}</small></td>
+          <td>${escapeHtml(c.odoo_salesperson || "—")}</td><td>${slDate(c.last_order)}<small class="sl-sub">${T(`${c.days_missing} วัน`, `${c.days_missing} days`)}</small></td>
+          <td class="num">${Number(c.total12) ? slBaht(c.total12) : `<span class="mg-muted" title="${escapeAttr(T("ไม่อยู่ในรายงานของเซลส์", "Not in a salesperson's report sheet"))}">—</span>`}</td></tr>`).join("")}</tbody></table></div>` : `<p class="mg-muted">${T("ไม่มี", "None.")}</p>`}</section>`;
+  }
+  return head + `<p class="mg-small mg-muted">${note}</p>` + table + extra;
+}
+
+function slKpiExport() {
+  const k = SL.kpi;
+  if (!k) return;
+  const cols = [...(k.reps || []), k.team].filter(Boolean);
+  const rows = [[T("กลุ่ม", "Group"), "KPI", T("นิยาม", "Definition"),
+    ...cols.flatMap(c => {
+      const n = c.code === "team" ? T("ทั้งทีม", "Team") : `${c.code} ${c.name}`;
+      return [n + " %", n + " " + T("ตัวตั้ง", "numerator"), n + " " + T("ตัวหาร", "denominator")];
+    })]];
+  SL_KPI.forEach(def => {
+    rows.push([T(SL_KPI_GROUPS[def.group].th, SL_KPI_GROUPS[def.group].en), T(def.th, def.en), T(def.hth, def.hen),
+      ...cols.flatMap(c => {
+        const v = c[def.key];
+        if (def.kind === "count") return [v === null || v === undefined ? "" : Number(v), "", ""];
+        if (def.kind === "growth") return [v && v.pct !== null ? Number(v.pct) : "", v ? Number(v.last3) : "", v ? Number(v.prev3) : ""];
+        return [v && v.pct !== null ? Number(v.pct) : "", v ? Number(v.n) : "", v ? Number(v.d) : ""];
+      })]);
+  });
+  const [from, to] = [k.from, k.to];
+  downloadXlsx(`Sales KPIs ${from} to ${to}.xlsx`, "KPIs", rows, [16, 30, 44, ...cols.flatMap(() => [12, 14, 14])]);
+}
