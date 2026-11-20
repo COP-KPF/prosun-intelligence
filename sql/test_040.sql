@@ -146,14 +146,7 @@ do $$ begin
   exception when sqlstate '42501' then perform pg_temp.ok(true, 'accounting cannot postpone products'); end;
 end $$;
 reset role;
-select pg_temp.as_user('00000000-0000-0000-0000-0000000000f1'); set role authenticated;
-do $$ begin
-  begin perform public.weighing_postpone_lines('40000000-0000-0000-0000-00000000000a',
-      '[{"line_id":"40000000-0000-0000-0000-0000000000a1","qty":1}]', 'later', '2026-11-22', null, 'client', null);
-    raise exception 'FAIL production';
-  exception when sqlstate '42501' then perform pg_temp.ok(true, 'production cannot postpone products here'); end;
-end $$;
-reset role;
+-- (production postponing products came with Migration 041: see test_041.sql)
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000a1'); set role authenticated;
 do $$ begin
   begin update public.weighing_lines set actual_kg = 1 where id = '40000000-0000-0000-0000-0000000000a1'; raise exception 'FAIL guard';

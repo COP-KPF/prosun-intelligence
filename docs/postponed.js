@@ -153,6 +153,7 @@ function ppLastUpdate(o) {
 async function openPostponed() {
   if (!WEIGH_LANG) WEIGH_LANG = myProfile.role === "admin" ? "en" : "th";
   ppSection.classList.remove("hidden");
+  paceLiveStart();   // live updates (041)
   ppSection.innerHTML = `<p class="mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
   PP.message = null;
   PP.editing = null;
@@ -214,6 +215,7 @@ function ppLateCheck(force) {
 // Count of open postponed orders on the menu item (red when some are late).
 async function ppRefreshBadge() {
   if (!myProfile || !["admin", "sale_support", "company_director"].includes(myProfile.role)) return;
+  paceLiveStart();   // live updates (041)
   ppLateCheck(false);
   const { data, error } = await sb.rpc("postponed_orders_tracker", { p_closed_days: 0 });
   if (error) return;
@@ -289,9 +291,10 @@ function ppEventHtml(e) {
   switch (e.kind) {
     case "moved":
       cls = "pp-ev-moved";
-      if (e.split_mode) {      // Migration 040: products moved to part 2, 3 …
-        text = T(`มิดเดิลออฟฟิศเลื่อนสินค้า: ${escapeHtml(ppMovedLines(e.lines))} · ส่ง ${d(e.from_date)} → ${d(e.to_date)} · `,
-                 `Products postponed by the middle office: ${escapeHtml(ppMovedLines(e.lines))} · delivery ${d(e.from_date)} → ${d(e.to_date)} · `)
+      if (e.split_mode) {      // Migrations 040, 041: products moved to part 2, 3 …
+        const prod = e.by_dept === "production";
+        text = T(`${prod ? "ฝ่ายผลิต" : "มิดเดิลออฟฟิศ"}เลื่อนสินค้า: ${escapeHtml(ppMovedLines(e.lines))} · ส่ง ${d(e.from_date)} → ${d(e.to_date)} · `,
+                 `Products postponed by ${prod ? "production" : "the middle office"}: ${escapeHtml(ppMovedLines(e.lines))} · delivery ${d(e.from_date)} → ${d(e.to_date)} · `)
           + (e.split_mode === "production"
             ? T(`ยังไม่ได้ผลิต — กลับไปผลิต ${d(e.to_work_date)}`, `not produced — back to production on ${d(e.to_work_date)}`)
             : T("ผลิตแล้ว — ส่งทีหลัง", "produced — delivered later"));
@@ -628,4 +631,16 @@ ppSection.addEventListener("submit", async e => {
   PP.formOpen = false;
   PP.timelines = {};
   await ppLoad();
+});
+
+
+// Live (Migration 041): production's and the middle office's changes show at
+// once — the list (unless someone is typing in its forms) and the menu count.
+paceLiveOn(() => {
+  if (!myProfile || !["admin", "sale_support", "company_director"].includes(myProfile.role)) return;
+  const open = !ppSection.classList.contains("hidden");
+  const typing = document.activeElement && ppSection.contains(document.activeElement)
+    && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName) && document.activeElement.id !== "pp-q";
+  if (open && !PP.formOpen && !PP.editing && !PP.closing && !typing) ppLoad();
+  else if (!open) ppRefreshBadge();
 });

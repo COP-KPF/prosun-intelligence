@@ -133,6 +133,7 @@ function dlDayLabel(iso) {
 
 // ----------------------------------------------------------- open / close
 async function openDelivery() {
+  paceLiveStart();   // live updates (041)
   dlSection.classList.remove("hidden");
   if (!DL.day) DL.day = weighBangkokToday();
   DL.message = null;
@@ -704,4 +705,11 @@ dlSection.addEventListener("change", async e => {
     if (t.checked) work.forEach(it => DL.sel.add(it.p.id)); else work.forEach(it => DL.sel.delete(it.p.id));
     dlDrawBoard();
   }
+});
+
+
+// Live (Migration 041): a paper confirmed, postponed or marked anywhere shows
+// on the board at once (not while a step, a problem note or a paper is open).
+paceLiveOn(() => {
+  if (dlIsOpen() && !document.hidden && !DL.loading && !DL.busy && !DL.problemFor && !DL.paper) dlLoad({ silent: true });
 });

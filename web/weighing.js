@@ -40,6 +40,7 @@ const W = {
   movedOut: [],        // papers postponed away from the day on screen
   linkCands: {},       // paper id → postponed papers with the same PO (undefined = not looked up yet)
   postponeForm: null,  // { paperId, deliveryTouched, error } while the Postpone form is open
+  split: {},           // paper id → its parts, if the order was split (Migrations 040, 041; split-form.js)
 };
 
 const WEIGH_TOLERANCE = 0.05;   // ±5% → orange in the "ต่าง" column
@@ -232,6 +233,7 @@ async function openWeighing() {
     document.getElementById("who-role").textContent = T("ผู้ดูแลโรงงาน", "Factory admin");
   }
   weighSection.classList.remove("hidden");
+  paceLiveStart();   // live updates (041)
   // From a notification (notifications.js): that paper's day, opened on it.
   const pend = W.pendingOpen;
   W.pendingOpen = null;
@@ -309,6 +311,7 @@ async function weighLoadPostponements() {
   ]);
   W.postponements = {};
   inc.forEach((r) => { (W.postponements[r.paper_id] = W.postponements[r.paper_id] || []).push(r); });
+  W.split = typeof sfLoadMarks === "function" ? await sfLoadMarks(ids) : {};
   const here = new Set(ids);
   W.movedOut = out.filter((r) => r.stage !== "delivery" && (!here.has(r.paper_id) || r.to_work_date !== W.date));
   W.movedOut = W.movedOut.filter((r) => !(here.has(r.paper_id) && weighPaper(r.paper_id) && weighPaper(r.paper_id).work_date === W.date));
@@ -415,6 +418,11 @@ function weighOnRemote() {
   }, 700);
 }
 
+// Live (Migration 041): papers and products already arrive through the
+// realtime channel above; this also brings what the middle office and the
+// delivery team change (postponements, parts, delivery marks) at once.
+paceLiveOn(() => { if (!weighSection.classList.contains("hidden") && !document.hidden) weighOnRemote(); });
+
 weighSection.addEventListener("focusout", () => {
   setTimeout(() => {
     if (W.pendingRefresh && !weighTyping() && !W.saving) { W.pendingRefresh = false; weighLoad(); }
@@ -449,6 +457,7 @@ function weighRender() {
 // as the form is complete.
 weighSection.addEventListener("input", (e) => {
   const t = e.target;
+  if (t.type !== "checkbox" && t.type !== "radio" && sfField(t, weighRender)) return;   // Postpone a product (041)
   if (t.id !== "pp-note" && t.id !== "pp-reason") return;
   if (W.postponeForm) {
     if (t.id === "pp-note") W.postponeForm.note = t.value.trim(); else W.postponeForm.reason = t.value;
@@ -508,7 +517,7 @@ function weighPaperCardHtml(p) {
   return `<button type="button" class="w-card" data-act="open" data-id="${p.id}">
     <span class="w-thumb">${img ? `<img src="${escapeAttr(img)}" alt="" loading="lazy">` : ""}</span>
     <span class="w-card-body">
-      <span class="w-card-po">${escapeHtml(p.po_number || "—")}</span>
+      <span class="w-card-po">${escapeHtml(p.po_number || "—")}${weighPartTag(p)}</span>
       <span class="w-card-cust">${escapeHtml(p.customer_name || (WEIGH_IN_PROGRESS.includes(p.status) ? T("กำลังอ่าน…", "Reading…") : T("ไม่ทราบลูกค้า", "Unknown customer")))}</span>
       <span class="w-card-meta">${escapeHtml(weighCompanyShort(p.company))}${n ? " · " + n + T(" รายการ", n === 1 ? " line" : " lines") : ""} · ${escapeHtml(weighTime(p.uploaded_at))}</span>
       <span class="w-pill ${st.cls}">${st.label}</span>${weighMovedTag(p)}
@@ -524,6 +533,22 @@ function weighMovedTag(p) {
   if (!h || !h.length) return "";
   const why = ppReasonText(h[h.length - 1]);
   return ` <span class="w-moved"${why ? ` title="${escapeAttr(why)}"` : ""}>↻ ${escapeHtml(ppMovedText(h))}</span>`;
+}
+
+// "Part 2" of an order split into several deliveries (Migrations 040, 041).
+function weighPartTag(p) {
+  const m = W.split[p.id];
+  return m && m.part > 1 ? " " + sfPartTag(m) : "";
+}
+
+// Postpone a product (Migration 041): production, on the paper being checked.
+function weighOpenSplit(p) {
+  sfOpen("weighing", p, weighLines(p).map((l) => ({ id: l.id, description: l.description, ordered_text: l.ordered_text,
+    ordered_qty: l.ordered_qty, ordered_unit: l.ordered_unit, actual_kg: l.actual_kg })));
+}
+function weighSplitButton(p) {
+  if (!sfCanSplit(weighLines(p))) return "";
+  return `<button type="button" class="w-btn w-btn-outline" data-act="split-open" aria-expanded="${sfIsOpen(p.id) ? "true" : "false"}">${T("เลื่อนสินค้า", "Postpone a product")}</button>`;
 }
 
 function weighTableRows() {
@@ -630,7 +655,7 @@ function weighRenderDay() {
           return `<tr class="${r.first ? "w-first" : ""}">
             <td>${r.first ? escapeHtml(weighShortDate(r.p.delivery_date)) : ""}</td>
             <td>${r.first ? escapeHtml(weighCompanyShort(r.p.company)) : ""}</td>
-            <td class="w-mono">${r.first ? escapeHtml(r.p.po_number || "") : ""}</td>
+            <td class="w-mono">${r.first ? escapeHtml(r.p.po_number || "") + weighPartTag(r.p) : ""}</td>
             <td>${r.first ? escapeHtml(r.p.customer_name || "") : ""}</td>
             <td class="w-wrap">${r.l ? escapeHtml(r.l.description) : `<span class="w-muted">${escapeHtml(r.p.status === "failed" ? T("อ่านไม่ได้ — เปิดเพื่ออ่านใหม่", "Not readable — open to read again") : WEIGH_IN_PROGRESS.includes(r.p.status) ? T("กำลังอ่าน…", "Reading…") : T("ไม่พบรายการ", "No lines found"))}</span>`}</td>
             <td class="w-num">${r.l ? escapeHtml(r.l.ordered_text || "") : ""}</td>
@@ -711,6 +736,11 @@ function weighRenderCheck() {
         "When it is produced, photograph the filled paper with the phone as usual — the screen offers to link it to this one. Or type the weights here and confirm.")}</span>` : ""}
     </div>`);
   }
+  if (W.split[p.id]) {
+    notes.push(`<div class="w-note w-note-violet" id="weigh-parts"><strong>${W.split[p.id].part > 1
+      ? T(`ส่วนที่ ${W.split[p.id].part} ของ PO นี้`, `Part ${W.split[p.id].part} of this PO`)
+      : T("ออเดอร์นี้ถูกแยกส่ง", "This order is delivered in several parts")}</strong><div>${sfFamilyHtml(W.split[p.id], p.id)}</div></div>`);
+  }
   const cands = (W.linkCands[p.id] || []).filter((o) => o.id !== p.id);
   if (cands.length && (p.status === "read" || p.status === "failed")) {
     notes.push(`<div class="w-note w-note-violet" id="weigh-link">
@@ -789,19 +819,23 @@ function weighRenderCheck() {
       </div>
 
       ${locked ? `
+      ${sfIsOpen(p.id) ? sfFormHtml() : ""}
       <div class="w-panel w-confirmed">
         <strong>✓ ${T("ยืนยันแล้ว", "Confirmed")} · ${escapeHtml(W.names[p.confirmed_by] || "")} ${escapeHtml(weighTime(p.confirmed_at))}</strong>
         <span class="w-actions">
+          ${weighSplitButton(p)}
           ${myProfile.role === "admin" ? `<button type="button" class="w-btn w-btn-danger-outline" data-act="delete">${T("ลบใบงาน", "Delete paper")}</button>` : ""}
           <button type="button" class="w-btn w-btn-outline" data-act="unconfirm">${T("แก้ไข", "Edit")}</button>
           ${idx < W.papers.length - 1 ? `<button type="button" class="w-btn" data-act="step" data-delta="1">${T("ใบถัดไป", "Next paper")} ›</button>` : `<button type="button" class="w-btn" data-act="back">${T("กลับไปตาราง", "Back to the table")}</button>`}
         </span>
       </div>` : `
       ${W.postponeForm && W.postponeForm.paperId === p.id ? weighPostponeFormHtml(p) : ""}
+      ${sfIsOpen(p.id) ? sfFormHtml() : ""}
       <div class="w-panel w-confirm-bar">
         <span class="w-small" id="weigh-helper"></span>
         <span class="w-actions">
           <button type="button" class="w-btn w-btn-danger-outline" data-act="delete">${T("ลบรูปนี้", "Delete photo")}</button>
+          ${busy ? "" : weighSplitButton(p)}
           ${busy ? "" : `<button type="button" class="w-btn w-btn-violet" data-act="postpone-open" aria-expanded="${W.postponeForm && W.postponeForm.paperId === p.id ? "true" : "false"}">${p.status === "postponed" ? T("เลื่อนอีกครั้ง", "Postpone again") : T("เลื่อนผลิต", "Postpone")}</button>`}
           <button type="button" class="w-btn w-btn-big" id="weigh-confirm" data-act="confirm">${T("ยืนยันน้ำหนัก", "Confirm weights")}</button>
         </span>
@@ -1006,6 +1040,7 @@ function weighRefreshCheckDerived() {
 
 // --------------------------------------------------------------- actions
 weighSection.addEventListener("click", async (e) => {
+  if (e.target.closest('[data-sf-act="cancel"]')) { sfClose(); weighRender(); return; }
   const el = e.target.closest("[data-act]");
   if (!el || !weighSection.contains(el)) return;
   const act = el.dataset.act;
@@ -1022,8 +1057,17 @@ weighSection.addEventListener("click", async (e) => {
   }
   if (act === "today") { W.date = weighBangkokToday(); W.view = "day"; await weighLoad(); return; }
   if (act === "new-link") { await weighEnsureLink(true); weighRender(); return; }
-  if (act === "open") { W.openId = el.dataset.id; W.view = "check"; W.zoom = false; W.postponeForm = null; weighRender(); window.scrollTo(0, 0); weighFetchLinkCands(weighPaper(W.openId)); return; }
+  if (act === "open") { W.openId = el.dataset.id; W.view = "check"; W.zoom = false; W.postponeForm = null; sfClose(); weighRender(); window.scrollTo(0, 0); weighFetchLinkCands(weighPaper(W.openId)); return; }
+  if (act === "split-open") {
+    const p = weighPaper(W.openId);
+    if (sfIsOpen(W.openId)) sfClose(); else if (p) { weighOpenSplit(p); W.postponeForm = null; }
+    weighRender();
+    const first = document.querySelector("#sf-form input[type=checkbox]");
+    if (first) { first.scrollIntoView({ block: "nearest" }); first.focus(); }
+    return;
+  }
   if (act === "postpone-open") {
+    sfClose();
     W.postponeForm = W.postponeForm && W.postponeForm.paperId === W.openId ? null : { paperId: W.openId, deliveryTouched: false, error: null };
     weighRender();
     const f = document.getElementById("pp-prod");
@@ -1040,10 +1084,10 @@ weighSection.addEventListener("click", async (e) => {
     if (weighPaper(el.dataset.id)) { W.openId = el.dataset.id; W.view = "check"; weighRender(); window.scrollTo(0, 0); }
     return;
   }
-  if (act === "back") { W.view = "day"; W.openId = null; W.postponeForm = null; weighRender(); return; }
+  if (act === "back") { W.view = "day"; W.openId = null; W.postponeForm = null; sfClose(); weighRender(); return; }
   if (act === "step") {
     const i = W.papers.findIndex((p) => p.id === W.openId) + Number(el.dataset.delta);
-    if (W.papers[i]) { W.openId = W.papers[i].id; W.zoom = false; W.postponeForm = null; weighRender(); window.scrollTo(0, 0); weighFetchLinkCands(W.papers[i]); }
+    if (W.papers[i]) { W.openId = W.papers[i].id; W.zoom = false; W.postponeForm = null; sfClose(); weighRender(); window.scrollTo(0, 0); weighFetchLinkCands(W.papers[i]); }
     return;
   }
   if (act === "zoom") { W.zoom = !W.zoom; weighRender(); return; }
@@ -1072,6 +1116,12 @@ weighSection.addEventListener("click", async (e) => {
 });
 
 weighSection.addEventListener("submit", async (e) => {
+  if (e.target.id === "sf-form") {   // Postpone a product (041)
+    e.preventDefault();
+    const r = await sfSave(weighRender);
+    if (r.ok) { W.message = { kind: "info", text: r.text }; await weighLoad(); }
+    return;
+  }
   if (e.target.id !== "weigh-pp-form") return;
   e.preventDefault();
   await weighPostponeSave();
@@ -1079,6 +1129,7 @@ weighSection.addEventListener("submit", async (e) => {
 
 weighSection.addEventListener("change", async (e) => {
   const t = e.target;
+  if (sfField(t, weighRender)) return;   // Postpone a product (041)
   if (t.id === "pp-prod" || t.id === "pp-del" || t.id === "pp-reason" || t.id === "pp-note") {
     const f = W.postponeForm;
     const p = weighPaper(W.openId);
