@@ -271,13 +271,25 @@ function sfPartTag(mark) {
 function sfFamilyHtml(mark, paperId) {
   if (!mark || !mark.family || !mark.family.length) return "";
   const items = mark.family.filter((f) => f.paper_id !== paperId).map((f) => {
-    const what = (f.lines || []).map((l) => `${l.description} ${l.whole ? (l.ordered_text || sfQty(l.qty, l.unit))
-      : sfQty(l.qty, l.unit) + T(" จาก ", " of ") + (l.ordered_text || sfQty(l.of_qty, l.unit))}`).join(", ");
+    const what = sfLinesText(f.lines);
     const how = f.mode === "production" ? T("กลับไปผลิต", "back to production") : T("ผลิตแล้ว ส่งทีหลัง", "produced, delivered later");
     return `<span class="ws-split-item">✂ ${T("ส่วนที่", "Part")} ${f.part} → ${escapeHtml(weighShortDate(f.delivery_date))}${what ? ": " + escapeHtml(what) : ""} · ${how}</span>`;
   });
   if (mark.part > 1) items.unshift(`<span class="ws-split-item">${T("แยกจากออเดอร์เดิม (ส่วนที่ 1)", "Split from the original order (part 1)")}</span>`);
   return items.join("");
+}
+
+// "Chicken breast 8 kg of 20 Kg, Chicken wings 6 Kg" — the products a part holds.
+function sfLinesText(lines) {
+  return (lines || []).map((l) => `${l.description} ${l.whole ? (l.ordered_text || sfQty(l.qty, l.unit))
+    : sfQty(l.qty, l.unit) + T(" จาก ", " of ") + (l.ordered_text || sfQty(l.of_qty, l.unit))}`).join(", ");
+}
+
+// The products held by one part (paper) of a split order, or "" if it is not a part.
+function sfPartLines(mark, paperId) {
+  if (!mark || mark.part < 2 || !mark.family) return "";
+  const f = mark.family.find((x) => x.paper_id === paperId);
+  return f ? sfLinesText(f.lines) : "";
 }
 
 // The parts of the papers on a screen (quietly empty before Migration 040).

@@ -1961,6 +1961,9 @@ header.app-header .notif-panel .n-mark { color: var(--muted); font-weight: 400; 
 #weights-section .ws-pp-form { background: var(--panel); border-radius: 12px; padding: 16px; max-width: 760px; }
 #weights-section .ws-pp-form h3 { white-space: normal; }
 #weights-section .w-moved { margin-left: 0; }
+/* the "Postponed · delivery from … to …" mark wraps inside cards and table cells instead of running past them */
+#weighing-section .w-card .w-moved { white-space: normal; margin-left: 0; }
+#weighing-section td .w-moved { display: block; white-space: normal; min-width: 170px; margin: 3px 0 0; }
 @media (max-width: 700px) {
   #weights-table tr.ws-pp-row { display: block; padding: 0 0 10px; border-top: 0; }
   #weights-table tr.ws-pp-row > td { display: block; width: 100%; padding: 8px; }

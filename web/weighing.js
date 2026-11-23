@@ -311,10 +311,12 @@ async function weighLoadPostponements() {
   ]);
   W.postponements = {};
   inc.forEach((r) => { (W.postponements[r.paper_id] = W.postponements[r.paper_id] || []).push(r); });
-  W.split = typeof sfLoadMarks === "function" ? await sfLoadMarks(ids) : {};
   const here = new Set(ids);
   W.movedOut = out.filter((r) => r.stage !== "delivery" && (!here.has(r.paper_id) || r.to_work_date !== W.date));
   W.movedOut = W.movedOut.filter((r) => !(here.has(r.paper_id) && weighPaper(r.paper_id) && weighPaper(r.paper_id).work_date === W.date));
+  // parts of split orders: the papers on screen and the parts moved away from this day
+  W.split = typeof sfLoadMarks === "function"
+    ? await sfLoadMarks(ids.concat(W.movedOut.map((r) => r.paper_id).filter(Boolean))) : {};
 }
 
 async function weighLoadNames() {
@@ -684,8 +686,9 @@ function weighMovedOutHtml() {
     <div class="table-scroll"><table class="w-table">
       <thead><tr><th>PO</th><th>${T("ลูกค้า", "Customer")}</th><th>${T("ผลิตใหม่", "New production day")}</th><th>${T("ส่งใหม่", "New delivery")}</th>${why ? `<th>${T("สาเหตุ", "Reason")}</th>` : ""}<th>${T("โดย", "By")}</th><th></th></tr></thead>
       <tbody>${W.movedOut.map((r) => `<tr>
-        <td class="w-mono">${escapeHtml(r.po_number || "—")}</td>
-        <td>${escapeHtml(r.customer_name || "—")}</td>
+        <td class="w-mono">${escapeHtml(r.po_number || "—")}${r.paper_id ? weighPartTag({ id: r.paper_id }) : ""}</td>
+        <td>${escapeHtml(r.customer_name || "—")}${r.paper_id && typeof sfPartLines === "function" && sfPartLines(W.split[r.paper_id], r.paper_id)
+          ? `<br><small class="w-muted">${escapeHtml(sfPartLines(W.split[r.paper_id], r.paper_id))}</small>` : ""}</td>
         <td>${escapeHtml(weighThaiDate(r.to_work_date, { weekday: "short", day: "numeric", month: "short" }))}</td>
         <td>${escapeHtml(weighDayShort(r.to_delivery_date))}${r.from_delivery_date ? ` <span class="w-muted w-small">(${T("เดิม", "was")} ${escapeHtml(weighDayShort(r.from_delivery_date))})</span>` : ""}</td>
         ${why ? `<td>${escapeHtml(ppReasonLabel(r.reason))}${r.note ? `<br><small class="w-muted">${escapeHtml(r.note)}</small>` : ""}</td>` : ""}
@@ -930,10 +933,13 @@ async function weighFetchLinkCands(p) {
   if (!p || !p.po_number || W.linkCands[p.id] !== undefined || !(p.status === "read" || p.status === "failed")) return;
   W.linkCands[p.id] = [];
   const { data, error } = await sb.from("weighing_papers")
-    .select("id, work_date, delivery_date, customer_name, po_number, company")
+    .select("id, work_date, delivery_date, customer_name, po_number, company, split_from")
     .eq("status", "postponed").eq("po_number", p.po_number).neq("id", p.id).limit(5);
   if (error) return;
-  W.linkCands[p.id] = (data || []).filter((o) => !p.company || !o.company || o.company === p.company);
+  // A part split off this paper (or its sibling parts) is not a new photo of
+  // the same order: never offer to link those.
+  W.linkCands[p.id] = (data || []).filter((o) => (!p.company || !o.company || o.company === p.company)
+    && o.split_from !== p.id && !(p.split_from && (o.id === p.split_from || o.split_from === p.split_from)));
   if (W.linkCands[p.id].length && W.view === "check" && W.openId === p.id) weighRender();
 }
 
