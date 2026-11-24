@@ -39,6 +39,12 @@
 // database leaves them out for everyone else). Company director (032): his
 // company only, no marks.
 //
+// 24 Nov (042): section 0 "Postponed orders — deliver first" above the
+// summary: every postponed order not yet delivered, all days together (late,
+// due today, coming, waiting production), with the same step buttons; the
+// menu item shows how many are late or due today. Data:
+// delivery_postponed_open(); marks: delivery_mark as everywhere else.
+//
 // Data: delivery_board(day), delivery_mark(paper, status, note),
 // delivery_mark_many(papers, status). "At factory" = no mark (status null).
 // Refreshes itself every 20 s and when the tab comes back; never while a
@@ -60,6 +66,10 @@ const DL = {
   q: "",              // search
   sel: new Set(),     // ticked orders in section 2
   problemFor: null,   // paper id whose problem comment is open
+  problemWhere: null, // "pp" (section 0) or "day" (section 2): where that form shows
+  pp: null,           // last delivery_postponed_open() result (042); null = not loaded / not run
+  ppMissing: false,   // Migration 042 not run yet
+  ppF: "open",        // section 0 filter: open | late | today | coming | waiting
   paper: null,        // open working paper: { id, no, url, error, loading, opener }
   busy: false,
   loading: false,
@@ -154,7 +164,8 @@ function dlIsOpen() { return !dlSection.classList.contains("hidden"); }
 document.getElementById("switch-system-btn").addEventListener("click", closeDelivery);
 document.getElementById("sign-out-btn").addEventListener("click", () => {
   closeDelivery();
-  Object.assign(DL, { day: null, data: null, sig: "", company: "all", q: "", problemFor: null, paper: null, message: null });
+  Object.assign(DL, { day: null, data: null, sig: "", company: "all", q: "", problemFor: null, problemWhere: null, paper: null, message: null, pp: null, ppF: "open" });
+  dlSetBadge(null);
   DL.sel.clear();
 });
 
@@ -166,8 +177,19 @@ async function dlLoad(opts = {}) {
   const silent = !!opts.silent;
   DL.loading = true;
   const day = DL.day;
-  const { data, error } = await sb.rpc("delivery_board", { p_date: day });
+  const [{ data, error }, pp] = await Promise.all([
+    sb.rpc("delivery_board", { p_date: day }),
+    sb.rpc("delivery_postponed_open"),
+  ]);
   DL.loading = false;
+  if (pp.error) {
+    DL.ppMissing = /delivery_postponed_open|schema cache|does not exist|Could not find/i.test(pp.error.message || "");
+    if (!silent || !DL.pp) DL.pp = null;   // a failed silent refresh keeps what is on screen
+  } else {
+    DL.pp = pp.data;
+    DL.ppMissing = false;
+    dlSetBadge(pp.data);
+  }
   if (day !== DL.day || !dlIsOpen()) return;          // the day changed meanwhile
   if (error) {
     if (silent && DL.data) { dlSchedule(); return; }
@@ -185,7 +207,7 @@ async function dlLoad(opts = {}) {
     DL.message = { kind: "err", text: dlBi("กรุณารัน Migration 033 ใน Supabase", "Run Migration 033 in Supabase") };
     data.pickups = [];
   }
-  const sig = JSON.stringify([data.papers, data.moved, data.register, data.pickups]);
+  const sig = JSON.stringify([data.papers, data.moved, data.register, data.pickups, DL.pp]);
   const changed = sig !== DL.sig;
   DL.data = data;
   DL.sig = sig;
@@ -237,6 +259,7 @@ async function dlMark(paperId, mark, note) {
   } else {
     DL.message = null;
     DL.problemFor = null;
+    DL.problemWhere = null;
   }
   await dlLoad({ silent: true });
   dlDrawBoard();
@@ -459,6 +482,150 @@ function dlProblemFormHtml(p) {
   </form>`;
 }
 
+// ----------------------------------------------------------- 0 · postponed orders first (042)
+const DL_PP_GROUPS = [
+  { id: "open",    th: "ยังไม่ส่ง",      en: "Not delivered",      cls: "dl-ppf-open" },
+  { id: "late",    th: "เลยกำหนด",      en: "Late",               cls: "dl-ppf-late" },
+  { id: "today",   th: "ต้องส่งวันนี้",   en: "Due today",          cls: "dl-ppf-today" },
+  { id: "coming",  th: "วันต่อไป",       en: "Coming days",        cls: "dl-ppf-coming" },
+  { id: "waiting", th: "รอผลิต",        en: "Waiting production", cls: "dl-ppf-waiting" },
+];
+
+// "21/11" — the same in Thai and English.
+function dlDm(iso) {
+  if (!iso) return "—";
+  const [, m, d] = iso.split("-");
+  return `${Number(d)}/${Number(m)}`;
+}
+
+function dlPpMatches(o) {
+  if (DL.company !== "all" && o.company !== DL.company) return false;
+  if (DL.q && ![o.customer_name, o.po_number].join(" ").toLowerCase().includes(DL.q.toLowerCase())) return false;
+  return true;
+}
+
+// Where it stands now, in words, and what happened last.
+function dlPpNow(o) {
+  if (o.group === "waiting") {
+    if (o.state === "checking") return { pill: `<span class="dl-pill dl-slate">⚖️ ${dlBi("กำลังชั่ง / ตรวจน้ำหนัก", "Being weighed")}</span>`, sub: "" };
+    if (o.state === "no_paper" || o.state === "no_date") {
+      return { pill: `<span class="dl-pill dl-slate">⏳ ${dlBi("รอใบงาน", "Waiting for the paper")}</span>`,
+               sub: o.due_date ? dlBi("วันส่งใหม่ " + dlDm(o.due_date), "new delivery " + dlDm(o.due_date)) : dlBi("ยังไม่มีวันใหม่", "no new date yet") };
+    }
+    return { pill: `<span class="dl-pill dl-slate">⏳ ${dlBi("รอผลิต", "Waiting production")}</span>`,
+             sub: o.work_date ? dlBi("วันผลิต " + dlDm(o.work_date), "production day " + dlDm(o.work_date)) : "" };
+  }
+  const s = DL_STEP[o.state] || DL_STEP.factory;
+  const at = o.mark_at && o.state !== "factory" ? o.mark_at : o.confirmed_at;
+  const when = at ? new Date(at) : null;
+  const whenTxt = when ? `${dlDm(new Date(when.getTime() + 7 * 3600e3).toISOString().slice(0, 10))} ${weighTime(at)}` : "";
+  const sub = o.state === "factory" && whenTxt ? `${dlBi("ยืนยัน", "confirmed")} ${whenTxt}` : whenTxt;
+  return { pill: `<span class="dl-pill ${s.cls}" title="${escapeAttr(dlBi(s.th, s.en))}">${s.icon} ${escapeHtml(dlBi(s.sth, s.sen))}</span>`, sub };
+}
+
+function dlPostponedHtml() {
+  if (DL.ppMissing) {
+    return `<section class="dl-pp dl-pp-missing"><p class="dl-muted">↻ ${dlBi("ออเดอร์ที่ถูกเลื่อน: กรุณารัน Migration 042 ใน Supabase", "Postponed orders: run Migration 042 in Supabase")}</p></section>`;
+  }
+  const d = DL.pp;
+  if (!d) return "";
+  const all = (d.rows || []).filter(dlPpMatches);
+  const count = g => g === "open" ? all.length : all.filter(o => o.group === g).length;
+  const rows = DL.ppF === "open" ? all : all.filter(o => o.group === DL.ppF);
+  const canMark = !!d.can_mark;
+  const dis = DL.busy ? "disabled" : "";
+  const today = d.today;
+
+  const chips = DL_PP_GROUPS.map(g => {
+    const on = DL.ppF === g.id;
+    return `<button type="button" class="dl-ppf ${g.cls} ${on ? "on" : ""} ${count(g.id) ? "" : "zero"}" data-act="pp-filter" data-f="${g.id}" aria-pressed="${on}"><strong>${count(g.id)}</strong> ${g.th} · ${g.en}</button>`;
+  }).join("");
+
+  const body = rows.map((o, i) => {
+    const due = o.group === "late"
+      ? `<span class="dl-ppdue dl-ppdue-late">${dlBi(`เลย ${o.days_late} วัน`, `${o.days_late} d late`)}</span>`
+      : o.due_date === today ? `<span class="dl-ppdue dl-ppdue-today">${dlBi("วันนี้", "Today")}</span>`
+      : o.due_date ? `<span class="dl-ppdue">${escapeHtml(dlDayLabel(o.due_date) || dlBi(`อีก ${weighDaysBetween(today, o.due_date)} วัน`, `in ${weighDaysBetween(today, o.due_date)} d`))}</span>`
+      : `<span class="dl-ppdue">—</span>`;
+    const now = dlPpNow(o);
+    const by = o.source === "production" ? dlBi("ฝ่ายผลิต", "Production")
+      : o.source === "middle" ? dlBi("มิดเดิลออฟฟิศ", "Middle office") : dlBi("บันทึกเลื่อน", "Register");
+    const why = d.reasons && o.reason ? ` · ${escapeHtml(ppReasonLabel(o.reason))}` : "";
+    const times = o.times > 1 ? ` <span class="dl-pp-times">${o.times}×</span>` : "";
+    const note = o.state === "problem" && o.mark_note ? `<div class="dl-sub dl-sub-red">⚠ “${escapeHtml(o.mark_note)}”</div>` : "";
+    let act = "";
+    if (o.can_mark && canMark) {
+      act = `<div class="dl-segs" role="group" aria-label="สถานะ · Status">${DL_STEPS.map(s => {
+        const on = o.state === s.key;
+        return `<button type="button" class="dl-seg ${s.cls} ${on ? "on" : ""}" data-act="pp-step" data-id="${escapeAttr(o.paper_id)}" data-step="${s.key}" aria-pressed="${on}" ${dis}>${s.sth} · ${s.sen}</button>`;
+      }).join("")}</div>`;
+    } else if (o.group === "waiting" && canMark) {
+      act = `<p class="dl-pp-wait">⏳ ${dlBi("ยังไม่ผลิต — ปุ่มจะขึ้นเมื่อโรงงานยืนยันน้ำหนัก", "Not produced yet — buttons appear when the factory confirms the weights")}</p>`;
+    }
+    const form = DL.problemFor === o.paper_id && DL.problemWhere === "pp" ? dlProblemFormHtml({ id: o.paper_id }) : "";
+    return `<div class="dl-pp-row dl-pp-${o.group}" data-key="${escapeAttr(o.key)}">
+      <span class="dl-pp-no">${i + 1}</span>
+      <div class="dl-pp-who">
+        <div class="dl-pp-name"><strong>${escapeHtml(o.customer_name || "—")}</strong> <span class="dl-pp-po">${dlPo(o.po_number, o.part)}</span> ${dlCompanyChip(o.company)}</div>
+        <div class="dl-pp-by">↻ ${by}${why}${times}</div>
+        ${note}
+      </div>
+      <div class="dl-pp-when">
+        <span class="dl-pp-dates" title="${escapeAttr(dlBi("วันส่งเดิม → วันส่งใหม่", "Original → new delivery"))}"><s>${dlDm(o.original_date)}</s> → <strong>${dlDm(o.due_date)}</strong></span>
+        ${due}
+      </div>
+      <div class="dl-pp-now">${now.pill}${now.sub ? `<span class="dl-pp-nowsub">${escapeHtml(now.sub)}</span>` : ""}</div>
+      ${act ? `<div class="dl-pp-act">${act}</div>` : ""}
+      ${form}
+    </div>`;
+  }).join("");
+
+  const empty = all.length
+    ? dlBi("ไม่มีออเดอร์ที่เลื่อนในกลุ่มนี้", "No postponed orders in this group")
+    : dlBi("ไม่มีออเดอร์ที่ถูกเลื่อนค้างส่ง", "No postponed orders waiting for delivery") + " ✓";
+
+  return `<section class="dl-pp" aria-labelledby="dl-pp-title">
+    <div class="dl-pp-head">
+      <span class="dl-pp-n" aria-hidden="true">↻</span>
+      <h3 id="dl-pp-title">${dlBi("ออเดอร์ที่ถูกเลื่อน — ส่งก่อน", "Postponed orders — deliver first")}</h3>
+      <span class="dl-pp-sub">${dlBi("ทุกวัน ไม่ใช่เฉพาะวันนี้", "all days, not only this one")}</span>
+      <span class="dl-pp-done">✓ ${dlBi("ส่งแล้ววันนี้", "Delivered today")}: <strong>${Number(d.delivered_today) || 0}</strong></span>
+    </div>
+    <div class="dl-pp-filters" role="group" aria-label="${escapeAttr(dlBi("กรอง", "Filter"))}">${chips}</div>
+    ${rows.length ? `<div class="dl-pp-list">
+      <div class="dl-pp-row dl-pp-headrow" aria-hidden="true">
+        <span class="dl-pp-no">#</span><span>ลูกค้า · PO · Client</span><span>วันส่ง · Delivery</span><span>ตอนนี้ · Now</span>${canMark ? "<span>กดสถานะ · Tap the status</span>" : ""}
+      </div>${body}</div>` : `<p class="dl-pp-empty">${empty}</p>`}
+    <p class="dl-pp-foot">${dlBi("เรียง: เลยกำหนดก่อน → วันนี้ → วันต่อไป → รอผลิต · ออเดอร์หายจากรายการเมื่อกด \"ส่งแล้ว\"", "Order: late first → today → coming days → waiting production · an order leaves this list when marked Delivered")}</p>
+  </section>`;
+}
+
+// Menu: how many postponed orders are late or due today (042).
+function dlSetBadge(d) {
+  const tab = document.getElementById("tab-delivery");
+  if (!tab) return;
+  let b = tab.querySelector(".dl-nav-badge");
+  const rows = (d && d.rows) || [];
+  const late = rows.filter(o => o.group === "late").length;
+  const n = late + rows.filter(o => o.group === "today").length;
+  if (!n) { if (b) b.remove(); return; }
+  if (!b) {
+    b = document.createElement("span");
+    b.className = "pp-badge dl-nav-badge";
+    tab.insertBefore(b, tab.firstChild.nextSibling);
+  }
+  b.textContent = String(n);
+  b.classList.toggle("pp-badge-late", late > 0);
+  b.title = `${dlBi("ออเดอร์ที่ถูกเลื่อน", "Postponed orders")}: ${late} ${dlBi("เลยกำหนด", "late")}, ${n - late} ${dlBi("ต้องส่งวันนี้", "due today")}`;
+}
+
+async function dlRefreshBadge() {
+  if (!myProfile || !["delivery", "admin", "sale_support", "company_director"].includes(myProfile.role)) return;
+  paceLiveStart();
+  const { data, error } = await sb.rpc("delivery_postponed_open");
+  if (!error) dlSetBadge(data);
+}
+
 function dlDeliveryHtml(due) {
   const work = due.filter(it => it.state !== "notready");
   const dis = DL.busy ? "disabled" : "";
@@ -502,7 +669,7 @@ ${s.sth} · ${s.sen}</button>`;
         </span>
       </label>
       <div class="dl-segs" role="group" aria-label="สถานะ · Status">${segs}</div>
-      ${DL.problemFor === p.id ? dlProblemFormHtml(p) : ""}
+      ${DL.problemFor === p.id && DL.problemWhere !== "pp" ? dlProblemFormHtml(p) : ""}
     </div>`;
   }).join("");
 
@@ -534,7 +701,7 @@ function dlDrawBoard() {
   const noteText = note ? note.value : "";
 
   const { due, pushed } = dlItems();
-  wrap.innerHTML = `${dlMessageHtml()}${dlSummaryHtml(due, pushed)}${dlCanMark() ? dlDeliveryHtml(due) : ""}`;
+  wrap.innerHTML = `${dlMessageHtml()}${dlPostponedHtml()}${dlSummaryHtml(due, pushed)}${dlCanMark() ? dlDeliveryHtml(due) : ""}`;
   dlStamp();
 
   if (typing) {
@@ -664,7 +831,16 @@ dlSection.addEventListener("click", async e => {
     const step = DL_STEP[b.dataset.step];
     const p = (DL.data.papers || []).find(x => x.id === id);
     if (!p || dlStateOf(p) === step.key) return;
-    if (step.key === "problem") { DL.problemFor = id; DL.message = null; dlDrawBoard(); return; }
+    if (step.key === "problem") { DL.problemFor = id; DL.problemWhere = "day"; DL.message = null; dlDrawBoard(); return; }
+    await dlMark(id, step.mark);
+  }
+  else if (act === "pp-filter") { DL.ppF = b.dataset.f; dlDrawBoard(); }
+  else if (act === "pp-step") {
+    const id = b.dataset.id;
+    const step = DL_STEP[b.dataset.step];
+    const o = ((DL.pp && DL.pp.rows) || []).find(x => x.paper_id === id);
+    if (!o || o.state === step.key) return;
+    if (step.key === "problem") { DL.problemFor = id; DL.problemWhere = "pp"; DL.message = null; dlDrawBoard(); return; }
     await dlMark(id, step.mark);
   }
   else if (act === "bulk") {
@@ -673,7 +849,7 @@ dlSection.addEventListener("click", async e => {
     if (!confirm(`${dlBi(`ยืนยัน: ${n} ออเดอร์`, `Confirm: ${n} order${n === 1 ? "" : "s"}`)} → ${dlBi(step.th, step.en)}?`)) return;
     await dlMarkSelected(step.key);
   }
-  else if (act === "problem-cancel") { DL.problemFor = null; dlDrawBoard(); dlSchedule(); }
+  else if (act === "problem-cancel") { DL.problemFor = null; DL.problemWhere = null; dlDrawBoard(); dlSchedule(); }
 });
 
 dlSection.addEventListener("submit", async e => {
@@ -712,4 +888,5 @@ dlSection.addEventListener("change", async e => {
 // on the board at once (not while a step, a problem note or a paper is open).
 paceLiveOn(() => {
   if (dlIsOpen() && !document.hidden && !DL.loading && !DL.busy && !DL.problemFor && !DL.paper) dlLoad({ silent: true });
+  else if (!dlIsOpen()) dlRefreshBadge();   // menu count (042)
 });

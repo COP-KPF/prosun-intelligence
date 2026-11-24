@@ -2011,6 +2011,8 @@ function setPaceTabsForRole() {
   document.getElementById("pace-group-accounting").classList.toggle("hidden", !w || !["accounting", "admin", "company_director"].includes(role));
   // Open postponed orders on the menu item, and the "late again" bell check (postponed.js, Migration 035)
   if (items.includes("postponed") && typeof ppRefreshBadge === "function") ppRefreshBadge();
+  // Postponed orders late or due today, on the Delivery board item (delivery.js, Migration 042)
+  if (items.includes("delivery") && typeof dlRefreshBadge === "function") dlRefreshBadge();
 }
 
 // Desktop (17 Nov 2026, Clément: "we are losing space"): the department menu
