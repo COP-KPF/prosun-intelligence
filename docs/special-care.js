@@ -25,6 +25,7 @@ const SC = {
   missing: false,     // Migration 043 not run yet: every helper stays silent
   // admin page
   list: null, loading: false, message: null, q: "", results: [], searching: false,
+  last: {}, lastMissing: false,  // code → last order (Migration 044)
   edit: null,         // { code, name, no_postpone, exact_quantity, priority_delivery, delivery_window, instructions, isNew }
   saving: false,
 };
@@ -209,8 +210,11 @@ async function scLoad() {
   if (!scPageOpen()) return;
   scReadForm();                          // a half-filled form survives the reload
   SC.loading = true;
-  const { data, error } = await sb.rpc("special_care_list");
+  const [{ data, error }, lo] = await Promise.all([sb.rpc("special_care_list"), sb.rpc("special_care_last_orders")]);
   SC.loading = false;
+  // Last order of each client (Migration 044). Before 044: the column says so.
+  SC.lastMissing = !!lo.error && scIsMissing(lo.error);
+  SC.last = lo.error ? {} : (lo.data || {});
   if (error) {
     SC.list = null;
     SC.message = { kind: "err", text: scIsMissing(error)
@@ -248,23 +252,73 @@ function scDraw() {
     <section class="mg-card">
       <h3>${escapeHtml(T("ลูกค้าดูแลพิเศษ", "Special care clients"))} <span class="mg-muted mg-small">${list.length}</span></h3>
       ${SC.list === null ? "" : list.length ? `<div class="table-scroll"><table class="sc-table">
-        <thead><tr><th>${escapeHtml(T("ลูกค้า", "Client"))}</th><th>${escapeHtml(T("กฎ", "Rules"))}</th>
-          <th>${escapeHtml(T("คำแนะนำการดูแลพิเศษ", "Special care instructions"))}</th>
-          <th>${escapeHtml(T("ชื่อบนใบงาน", "Names on working papers"))}</th>
+        <thead><tr><th>${escapeHtml(T("ลูกค้า", "Client"))}</th>
+          <th>${escapeHtml(T("กฎ · คำแนะนำการดูแลพิเศษ", "Rules · special care instructions"))}</th>
+          <th>${escapeHtml(T("ออเดอร์ล่าสุด", "Last order"))}</th>
           <th>${escapeHtml(T("แก้ไขล่าสุด", "Last change"))}</th><th></th></tr></thead>
         <tbody>${list.map((c) => `<tr data-code="${escapeAttr(c.code)}">
-          <td><strong>${escapeHtml(c.name)}</strong><br><span class="mg-muted mg-small">${escapeHtml(c.code)}</span></td>
-          <td class="sc-rules-cell">${scRulesHtml(c) || `<span class="mg-muted">—</span>`}</td>
-          <td class="sc-instr-cell">${c.instructions ? escapeHtml(c.instructions) : `<span class="mg-muted">—</span>`}</td>
-          <td class="sc-names-cell">${(c.paper_names || []).length
-            ? (c.paper_names || []).map((n) => `<span class="sc-name">${escapeHtml(n)}</span>`).join(" ")
-            : `<span class="sc-nolink">${escapeHtml(T("ยังไม่มีชื่อบนใบงานที่เชื่อมกับรหัสนี้ — ใบงานจะยังไม่ขึ้นป้าย เชื่อมได้ที่ ฝ่ายขาย › ลูกค้า", "No working-paper name linked to this code yet — papers will not be flagged. Link one in Sales › Clients."))}</span>`}</td>
+          <td class="sc-client-cell"><strong>${escapeHtml(c.name)}</strong> <span class="mg-muted mg-small">${escapeHtml(c.code)}</span>
+            <div class="sc-names-cell"><span class="mg-muted mg-small">${escapeHtml(T("ชื่อบนใบงาน:", "Names on papers:"))}</span>
+            ${(c.paper_names || []).length
+              ? (c.paper_names || []).map((n) => `<span class="sc-name">${escapeHtml(n)}</span>`).join(" ")
+              : `<span class="sc-nolink">${escapeHtml(T("ยังไม่มีชื่อบนใบงานที่เชื่อมกับรหัสนี้ — ใบงานจะยังไม่ขึ้นป้าย เชื่อมได้ที่ ฝ่ายขาย › ลูกค้า", "No working-paper name linked to this code yet — papers will not be flagged. Link one in Sales › Clients."))}</span>`}</div></td>
+          <td class="sc-rules-cell">${scRulesHtml(c) || ""}
+            ${c.instructions ? `<div class="sc-instr-cell">${escapeHtml(c.instructions)}</div>` : ""}</td>
+          <td class="sc-last-cell">${scLastHtml(c.code)}</td>
           <td class="mg-small">${escapeHtml(c.updated_by_name || "")}<br><span class="mg-muted">${escapeHtml(scTime(c.updated_at))}</span></td>
           <td class="sc-acts"><button type="button" class="ws-chip" data-sc-act="edit" data-code="${escapeAttr(c.code)}">${escapeHtml(T("แก้ไข", "Edit"))}</button>
             <button type="button" class="ws-chip sc-remove" data-sc-act="remove" data-code="${escapeAttr(c.code)}">${escapeHtml(T("เอาออก", "Remove"))}</button></td>
         </tr>`).join("")}</tbody></table></div>`
       : `<p class="mg-muted">${escapeHtml(T("ยังไม่มีลูกค้าดูแลพิเศษ — ค้นหาลูกค้าด้านบนเพื่อเพิ่ม", "No special care client yet — find a client above to add one."))}</p>`}
     </section>`;
+}
+
+// Last order of a client (Migration 044): date, PO, status, products and
+// quantities; the last Odoo invoice when PACE has no working paper yet.
+const SC_LINES_SHOWN = 4;
+function scLastHtml(code) {
+  if (SC.lastMissing) return `<span class="mg-muted mg-small">${escapeHtml(T("รัน Migration 044 เพื่อดูออเดอร์ล่าสุด", "Run Migration 044 to see the last order"))}</span>`;
+  const x = SC.last[code];
+  if (!x) return `<span class="mg-muted">—</span>`;
+  const n30 = Number(x.orders_30) || 0;
+  const count = `<div class="sc-last-count">${escapeHtml(n30
+    ? T(`${n30} ออเดอร์ใน 30 วัน`, `${n30} order${n30 > 1 ? "s" : ""} in the last 30 days`)
+    : T("ไม่มีออเดอร์ใน 30 วัน", "No order in the last 30 days"))}</div>`;
+  const l = x.last;
+  if (!l) {
+    const inv = x.invoice;
+    if (!inv) return `<span class="mg-muted">${escapeHtml(T("ยังไม่มีออเดอร์ใน PACE", "No order in PACE yet"))}</span>`;
+    return `<div class="sc-last-head"><strong>${escapeHtml(weighThaiDate(inv.invoice_date, { day: "numeric", month: "short", year: "numeric" }))}</strong>
+      <span class="mg-muted">${escapeHtml(scAgo(inv.invoice_date))}</span></div>
+      <div class="mg-small">${escapeHtml(T("ใบแจ้งหนี้ Odoo", "Odoo invoice"))} ${escapeHtml(inv.number || "")}${inv.total != null ? ` · ฿${Number(inv.total).toLocaleString("en-US", { maximumFractionDigits: 0 })}` : ""}</div>
+      <div class="mg-muted mg-small">${escapeHtml(T("ไม่มีรายละเอียดสินค้า (ยังไม่มีใบงานใน PACE)", "No product detail (no working paper in PACE yet)"))}</div>${count}`;
+  }
+  const status = l.status === "confirmed" ? T("ยืนยันน้ำหนักแล้ว", "Weights confirmed")
+    : l.status === "postponed" ? T("ถูกเลื่อน", "Postponed") : T("รอชั่ง / ตรวจ", "Being weighed");
+  const lines = (l.lines || []);
+  const lineHtml = (w) => {
+    const ordered = w.ordered_text || (w.ordered_qty != null ? `${Number(w.ordered_qty)} ${weighUnit(w.ordered_unit)}` : "");
+    const kg = w.actual_kg != null && l.status === "confirmed" ? `<span class="sc-kg">${escapeHtml(weighFmt(w.actual_kg))} kg</span>` : "";
+    return `<li><span class="sc-prod">${escapeHtml(w.description || "—")}</span> <span class="sc-qty">${escapeHtml(ordered)}</span>${kg ? " · " + kg : ""}</li>`;
+  };
+  const shown = lines.slice(0, SC_LINES_SHOWN).map(lineHtml).join("");
+  const more = lines.length > SC_LINES_SHOWN
+    ? `<details class="sc-more"><summary>${escapeHtml(T(`อีก ${lines.length - SC_LINES_SHOWN} รายการ`, `${lines.length - SC_LINES_SHOWN} more`))}</summary><ul class="sc-lines">${lines.slice(SC_LINES_SHOWN).map(lineHtml).join("")}</ul></details>` : "";
+  return `<div class="sc-last-head"><strong>${escapeHtml(weighThaiDate(l.order_date, { weekday: "short", day: "numeric", month: "short" }))}</strong>
+      <span class="mg-muted">${escapeHtml(scAgo(l.order_date))}</span></div>
+    <div class="mg-small">${l.po_number ? escapeHtml(l.po_number) : escapeHtml(T("ไม่มีเลข PO", "no PO"))}${l.part ? ` · ${escapeHtml(T("ส่วนที่", "Part"))} ${Number(l.part)}` : ""} · ${escapeHtml(weighCompanyShort(l.company))} · <span class="sc-last-status sc-last-${escapeAttr(l.status)}">${escapeHtml(status)}</span></div>
+    ${lines.length ? `<ul class="sc-lines">${shown}</ul>${more}` : `<div class="mg-muted mg-small">${escapeHtml(T("ยังไม่มีรายการสินค้า", "No product lines yet"))}</div>`}
+    ${l.status === "confirmed" && l.total_kg != null ? `<div class="mg-small"><strong>${escapeHtml(T("รวม", "Total"))} ${escapeHtml(weighFmt(l.total_kg))} kg</strong></div>` : ""}
+    ${count}`;
+}
+// "today", "3 days ago", "in 2 days"
+function scAgo(iso) {
+  if (!iso) return "";
+  const d = weighDaysBetween(iso, weighBangkokToday());
+  if (d === 0) return T("วันนี้", "today");
+  if (d === 1) return T("เมื่อวาน", "yesterday");
+  if (d === -1) return T("พรุ่งนี้", "tomorrow");
+  return d > 0 ? T(`${d} วันก่อน`, `${d} days ago`) : T(`อีก ${-d} วัน`, `in ${-d} days`);
 }
 
 function scResultsHtml() {

@@ -2378,3 +2378,21 @@ body.pace-readonly #weights-table tr.ws-row { cursor: default; }
 #weighing-section .w-card .sc-tag { margin-left: 0; margin-top: 2px; }
 @media print { .sc-tag, .sc-dl-tag { border-color: #999; } }
 .sc-dl-pill { white-space: nowrap; margin-left: 6px; cursor: help; }
+/* Special care page — last order (Migration 044) */
+.sc-table td.sc-client-cell { min-width: 180px; max-width: 260px; }
+.sc-client-cell .sc-names-cell { margin-top: 4px; }
+.sc-rules-cell { min-width: 200px; max-width: 320px; }
+.sc-rules-cell .sc-instr-cell { margin-top: 6px; min-width: 0; max-width: none; font-size: 0.84rem; color: #5b4a2a; }
+.sc-last-cell { min-width: 260px; max-width: 380px; }
+.sc-last-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.sc-lines { list-style: none; margin: 4px 0 2px; padding: 0; font-size: 0.84rem; }
+.sc-lines li { padding: 2px 0; border-bottom: 1px dotted var(--border); }
+.sc-lines li:last-child { border-bottom: 0; }
+.sc-qty { color: var(--muted); white-space: nowrap; }
+.sc-kg { font-weight: 600; white-space: nowrap; }
+.sc-more summary { cursor: pointer; font-size: 0.8rem; color: var(--accent); }
+.sc-last-count { margin-top: 4px; font-size: 0.78rem; color: var(--muted); }
+.sc-last-status { font-weight: 600; }
+.sc-last-confirmed { color: #1f5c39; }
+.sc-last-postponed { color: #9b2c24; }
+.sc-last-read { color: #7a4b00; }
