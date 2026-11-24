@@ -1250,12 +1250,13 @@ const tabSalesDayBtn     = document.getElementById("tab-sales-day");           /
 const tabSalesKpisBtn    = document.getElementById("tab-sales-kpis");          // Sales › My KPIs (Migration 039)
 const tabMgSalesKpisBtn  = document.getElementById("tab-mg-sales-kpis");       // Management › Sales KPIs (Migration 039, admin)
 const tabSpecialCareBtn  = document.getElementById("tab-special-care");        // Management › Special care (Migration 043, admin)
+const tabPurchasesBtn    = document.getElementById("tab-purchases");           // Purchasing › Purchases (Migration 046)
 // Management › KPI (24 Nov 2026): one menu entry for the Operations dashboard
 // ("management") and the Sales KPIs ("mg-sales-kpis"), shown as two tabs on the
 // page. The last tab opened is remembered in this browser.
 const tabKpiBtn          = document.getElementById("tab-kpi");
 const kpiTabs            = document.getElementById("kpi-tabs");
-const KPI_VIEWS          = ["management", "mg-sales-kpis"];
+const KPI_VIEWS          = ["management", "mg-sales-kpis", "mg-purchases"];   // + Purchases (Migration 047)
 function kpiAllowed() { return KPI_VIEWS.filter(v => (PACE_MENU[myProfile.role] || []).includes(v)); }
 function kpiLastTab() {
   let v = null;
@@ -2014,9 +2015,9 @@ function setupPaceRole() {
 // This is the screen only; the database's RLS still decides what each role
 // can read (purchasing reads orders because the calculator is built on them).
 const PACE_MENU = {
-  admin:         ["overview", "management", "mgsummary", "mgorders", "mg-sales-kpis", "special-care", "sales-day", "sales-clients", "sales-deliveries", "orders", "postponed", "calculator", "weighing", "delivery", "payables", "weights"],
+  admin:         ["overview", "management", "mgsummary", "mgorders", "mg-sales-kpis", "mg-purchases", "special-care", "sales-day", "sales-clients", "sales-deliveries", "orders", "postponed", "calculator", "purchases", "weighing", "delivery", "payables", "weights"],
   sale_support:  ["orders", "confirm-birds", "postponed", "weights", "delivery"],
-  purchasing:    ["calculator", "weights"],
+  purchasing:    ["calculator", "purchases", "weights"],   // + Purchases (Migration 046)
   production:    ["weighing"],
   factory_admin: ["weighing"],
   accounting:    ["payables", "weights"],
@@ -2030,7 +2031,7 @@ const PACE_MENU = {
 // Roles that have both systems and choose at sign-in (admin, and the sales team since Migration 037).
 const CHOOSER_ROLES = ["admin", "sales", "director"];
 const PACE_HOME = { admin: "overview", sale_support: "orders", purchasing: "calculator", production: "weighing", factory_admin: "weighing", accounting: "weights", delivery: "delivery", company_director: "management", sales: "sales-day", director: "sales-day" };
-const PACE_DEPT = { orders: "Middle office", postponed: "Middle office", calculator: "Purchasing", weighing: "Production", weights: "Accounting", payables: "Accounting", management: "Management", mgsummary: "Management", mgorders: "Management", overview: "Management", delivery: "Delivery", "sales-clients": "Sales", "sales-deliveries": "Sales", "sales-day": "Sales", "sales-kpis": "Sales", "mg-sales-kpis": "Management", "special-care": "Management" };
+const PACE_DEPT = { orders: "Middle office", postponed: "Middle office", calculator: "Purchasing", purchases: "Purchasing", weighing: "Production", weights: "Accounting", payables: "Accounting", management: "Management", mgsummary: "Management", mgorders: "Management", overview: "Management", delivery: "Delivery", "sales-clients": "Sales", "sales-deliveries": "Sales", "sales-day": "Sales", "sales-kpis": "Sales", "mg-sales-kpis": "Management", "mg-purchases": "Management", "special-care": "Management" };
 
 function setPaceTabsForRole() {
   const items = PACE_MENU[myProfile && myProfile.role] || [];
@@ -2055,6 +2056,7 @@ function setPaceTabsForRole() {
   tabSalesKpisBtn.classList.toggle("hidden", !items.includes("sales-kpis"));
   tabMgSalesKpisBtn.classList.toggle("hidden", !items.includes("mg-sales-kpis"));
   tabSpecialCareBtn.classList.toggle("hidden", !items.includes("special-care"));
+  tabPurchasesBtn.classList.toggle("hidden", !items.includes("purchases"));
   tabKpiBtn.classList.toggle("hidden", !items.includes("management") && !items.includes("mg-sales-kpis"));
   if (items.includes("sales-day")) slStartAlertPoll();              // sales.js: badge on My day (Migration 039)
   document.getElementById("pace-group-sales").classList.toggle("hidden", !items.includes("sales-clients"));
@@ -2158,6 +2160,7 @@ async function switchPaceView(view) {
   tabSalesKpisBtn.classList.toggle("active", view === "sales-kpis");
   tabMgSalesKpisBtn.classList.toggle("active", view === "mg-sales-kpis");
   tabSpecialCareBtn.classList.toggle("active", view === "special-care");
+  tabPurchasesBtn.classList.toggle("active", view === "purchases");
   tabKpiBtn.classList.toggle("active", KPI_VIEWS.includes(view));
   kpiShowTabs(view);
   if (myProfile.role === "purchasing") paceWeightsDept = "Purchasing";
@@ -2187,6 +2190,7 @@ async function switchPaceView(view) {
   if (view !== "delivery") closeDelivery();          // delivery.js
   if (!SALES_VIEWS.includes(view)) closeSales();      // sales.js
   if (view !== "special-care") scClose();             // special-care.js
+  if (view !== "purchases" && view !== "mg-purchases") puClose();   // purchases.js (Migrations 046, 047)
 
   // Purchasing and production read; only sale support and admin write. Entry
   // also needs one specific channel, since the product list is per channel.
@@ -2259,6 +2263,14 @@ async function switchPaceView(view) {
     document.getElementById("list-title").textContent = "ลูกค้าดูแลพิเศษ — Special care clients";
     await scOpen();                                   // special-care.js (Migration 043)
   }
+  else if (view === "purchases") {
+    document.getElementById("list-title").textContent = "การสั่งซื้อ — Purchases";
+    await puOpen("purchasing");                       // purchases.js (Migration 046)
+  }
+  else if (view === "mg-purchases") {
+    document.getElementById("list-title").textContent = "KPI";
+    await puOpen("mgmt");                             // purchases.js: the full cost ratio (Migration 047)
+  }
 }
 
 tabCalculatorBtn.addEventListener("click", () => switchPaceView("calculator"));
@@ -2289,6 +2301,7 @@ tabSalesDayBtn.addEventListener("click", () => switchPaceView("sales-day"));
 tabSalesKpisBtn.addEventListener("click", () => switchPaceView("sales-kpis"));
 tabMgSalesKpisBtn.addEventListener("click", () => switchPaceView("mg-sales-kpis"));
 tabSpecialCareBtn.addEventListener("click", () => switchPaceView("special-care"));
+tabPurchasesBtn.addEventListener("click", () => switchPaceView("purchases"));
 tabKpiBtn.addEventListener("click", () => switchPaceView(kpiLastTab()));
 kpiTabs.addEventListener("click", e => {
   const b = e.target.closest(".kpi-tab");
@@ -2372,6 +2385,7 @@ async function refreshPaceView() {
     else if (view === "sales-day") await slLoadDay();
     else if (view === "sales-kpis" || view === "mg-sales-kpis") await slLoadKpis();
     else if (view === "special-care") await scLoad();
+    else if (view === "purchases" || view === "mg-purchases") await puLoad();   // purchases.js (Migrations 046, 047)
     restore();
   } catch (e) {
     ok = false;
