@@ -137,8 +137,12 @@ function closeSales() {
 function slOpen() { return !slSection.classList.contains("hidden"); }
 function slAll() { return !!(SL.me && SL.me.scope === "all"); }
 
+// ⭐ Special care client (Migration 043) next to a client's name.
+function slSc(code) { return typeof scForCode === "function" ? scTagHtml(scForCode(code), { short: true }) : ""; }
+function slScLoad() { return typeof scLoadCodes === "function" ? scLoadCodes() : Promise.resolve(); }
+
 async function slLoadClients() {
-  const { data, error } = await sb.rpc("sales_clients");
+  const [{ data, error }] = await Promise.all([sb.rpc("sales_clients"), slScLoad()]);
   if (!slOpen() || SL.view !== "clients") return;
   SL.error = error ? T("โหลดรายชื่อลูกค้าไม่สำเร็จ: ", "Could not load the clients: ") + error.message : null;
   if (!error) SL.data = data;
@@ -147,7 +151,7 @@ async function slLoadClients() {
 
 async function slLoadDeliveries() {
   const day = SL.day;
-  const { data, error } = await sb.rpc("sales_deliveries", { p_date: day });
+  const [{ data, error }] = await Promise.all([sb.rpc("sales_deliveries", { p_date: day }), slScLoad()]);
   if (!slOpen() || SL.view !== "deliveries" || day !== SL.day) return;
   SL.error = error ? T("โหลดออเดอร์ไม่สำเร็จ: ", "Could not load the orders: ") + error.message : null;
   SL.deliv = error ? null : data;
@@ -342,7 +346,7 @@ function slTableHtml(list) {
         `<small class="${c.drop_pct < 0 ? "sl-down" : "sl-up"}">${c.drop_pct >= 0 ? "▲" : "▼"} ${Math.abs(c.drop_pct)}%</small>`;
       return `<tr class="sl-row" data-code="${escapeAttr(c.code)}">
         <td>${slStatusPill(c.status)}</td>
-        <td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button>
+        <td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button>${slSc(c.code)}
           <small class="sl-sub">${escapeHtml(c.code)}${c.zone ? " · " + escapeHtml(c.zone) : ""}${c.portfolio !== "rep" ? " · " + T(SL_PORTFOLIO[c.portfolio].th, SL_PORTFOLIO[c.portfolio].en) : ""}</small></td>
         ${slAll() ? `<td>${c.portfolio === "rep" ? escapeHtml(slRepName(c.salesperson)) : `<span class="mg-muted">${escapeHtml(c.odoo_salesperson || "—")}</span>`}</td>` : ""}
         <td class="nowrap">${c.last_order ? `${slDate(c.last_order)}<small class="sl-sub">${T(`${c.days_missing} วัน`, `${c.days_missing} days`)}</small>`
@@ -431,6 +435,7 @@ function slDetailHtml() {
       ${c.odoo_name && c.odoo_name !== c.name ? `<br>Odoo: ${escapeHtml(c.odoo_name)}` : ""}
       ${c.phone ? `<br>☎ ${escapeHtml(c.phone)}` : ""}${c.email ? ` · ${escapeHtml(c.email)}` : ""}
       ${c.notes ? `<br>${escapeHtml(c.notes)}` : ""}</p>
+    ${typeof scForCode === "function" && scForCode(c.code) ? scBoxHtml(scForCode(c.code)) : ""}
     ${row ? `<p class="sl-why-big">${escapeHtml(slReason(row))}</p>` : ""}
     ${assign}
     <h4>${T("ยอดขาย 12 เดือน", "Sales, 12 months")} <span class="mg-legend"><span><i class="sl-farm"></i>Farm</span><span><i class="sl-food"></i>Food</span></span></h4>
@@ -487,7 +492,7 @@ function slDeliveriesHtml() {
   const rows = orders.map(p => {
     const kgO = (p.lines || []).reduce((a, l) => a + (l.ordered_unit === "kg" ? Number(l.ordered_qty || 0) : 0), 0);
     const kgA = (p.lines || []).reduce((a, l) => a + Number(l.actual_kg || 0), 0);
-    return `<tr><td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(p.code)}">${escapeHtml(p.client_name || p.customer_name || "—")}</button><small class="sl-sub">${escapeHtml(p.code)}${slAll() ? " · " + escapeHtml(slRepName(p.salesperson)) : ""}</small></td>
+    return `<tr><td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(p.code)}">${escapeHtml(p.client_name || p.customer_name || "—")}</button>${slSc(p.code)}<small class="sl-sub">${escapeHtml(p.code)}${slAll() ? " · " + escapeHtml(slRepName(p.salesperson)) : ""}</small></td>
       <td>${escapeHtml(p.po_number || "—")}</td><td>${escapeHtml((p.company || "").replace("Prosun ", ""))}</td>
       <td class="num">${kgO ? mgN(kgO, 1) : "—"}</td><td class="num">${kgA ? mgN(kgA, 1) : "—"}</td>
       <td>${slOrderPill(p)}
@@ -495,7 +500,7 @@ function slDeliveriesHtml() {
         ${p.mark && p.mark.status === "problem" && p.mark.note ? `<small class="sl-sub">${escapeHtml(p.mark.note)}</small>` : ""}
         ${p.moved_from ? `<small class="sl-sub">${T("เลื่อนจาก", "moved from")} ${slDate(p.moved_from)}</small>` : ""}</td></tr>`;
   }).join("");
-  const movedRows = moved.map(m => `<tr><td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(m.code)}">${escapeHtml(m.client_name)}</button></td>
+  const movedRows = moved.map(m => `<tr><td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(m.code)}">${escapeHtml(m.client_name)}</button>${slSc(m.code)}</td>
     <td>${escapeHtml(m.po_number || "—")}</td><td>${escapeHtml((m.company || "").replace("Prosun ", ""))}</td>
     <td><span class="dl-pill dl-violet">↷ ${m.new_date ? slDate(m.new_date, { weekday: "short", day: "numeric", month: "short" }) : T("ยังไม่มีวันใหม่", "No new date yet")}</span></td></tr>`).join("");
   return head + `<div class="sl-chips">${chips}</div>
@@ -664,6 +669,7 @@ async function slLoadDay() {
   const [day, al] = await Promise.all([
     sb.rpc("sales_my_day", { p_rep: rep }),
     sb.rpc("sales_alerts", { p_days: 7 }),
+    slScLoad(),
   ]);
   if (!slOpen() || SL.view !== "day") return;
   SL.error = day.error ? T("โหลดไม่สำเร็จ: ", "Could not load: ") + day.error.message : null;
@@ -684,7 +690,7 @@ function slMoneyCell(c) {
 function slDayCallRow(c, i) {
   return `<tr class="sl-row" data-code="${escapeAttr(c.code)}">
     <td class="sl-rank">${i + 1}</td>
-    <td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button>
+    <td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button>${slSc(c.code)}
       <small class="sl-sub">${escapeHtml(c.code)}${c.zone ? " · " + escapeHtml(c.zone) : ""}${slAll() && !SL.dayRep ? " · " + escapeHtml(slRepName(c.salesperson)) : ""}</small></td>
     <td>${slStatusPill(c.status)}</td>
     <td class="sl-why">${escapeHtml(slReason(c))}${c.call ? `<small class="sl-sub">${T("โทรล่าสุด", "Last call")}: ${escapeHtml(T((SL_OUTCOMES.find(o => o.key === c.call.outcome) || {}).th || "", (SL_OUTCOMES.find(o => o.key === c.call.outcome) || {}).en || ""))} · ${slAgo(c.call.at)}${c.call.note ? " — " + escapeHtml(c.call.note) : ""}</small>` : ""}</td>
@@ -703,7 +709,7 @@ function slAlertsHtml() {
     <div class="mg-card-head"><h3>${T("แจ้งเตือน 7 วันล่าสุด", "Alerts, last 7 days")}</h3>
       <span class="mg-small mg-muted">${T("โทรหาลูกค้าก่อนลูกค้าโทรมา", "Call the client before the client calls you")}</span></div>
     <ul class="sl-alert-list">${a.events.slice(0, 12).map(e => `<li class="${e.new ? "sl-alert-new" : ""}">
-      ${kind(e)} <button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(e.code)}">${escapeHtml(e.client)}</button>
+      ${kind(e)} <button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(e.code)}">${escapeHtml(e.client)}</button>${slSc(e.code)}
       <span class="mg-muted">${escapeHtml(e.po_number || "")}</span>
       ${e.kind === "problem"
         ? `— ${escapeHtml(e.note || "")} <span class="mg-muted">(${slDate(e.from_date)})</span>`
@@ -744,7 +750,7 @@ function slDayHtml() {
   const cb = d.callbacks || [];
   const cbHtml = cb.length ? `<section class="mg-card"><div class="mg-card-head"><h3>${T("นัดโทรกลับวันนี้", "Call-backs due")} (${cb.length})</h3></div>
     <div class="mg-table-wrap"><table class="mg-table sl-table"><tbody>${cb.map(c => `<tr class="sl-row">
-      <td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button><small class="sl-sub">${escapeHtml(c.code)}</small></td>
+      <td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button>${slSc(c.code)}<small class="sl-sub">${escapeHtml(c.code)}</small></td>
       <td>${T("นัดไว้", "Due")} ${slDate(c.call.callback_on)}${c.call.note ? `<small class="sl-sub">${escapeHtml(c.call.note)}</small>` : ""}</td>
       <td class="num">${slMoneyCell(c)}</td>
       <td><button type="button" class="sl-callbtn" data-act="call" data-code="${escapeAttr(c.code)}">${T("☎ โทรแล้ว", "☎ Called")}</button></td></tr>
@@ -760,16 +766,16 @@ function slDayHtml() {
   const todayHtml = `<section class="mg-card"><div class="mg-card-head"><h3>${T("ออเดอร์วันนี้", "Today's orders")}</h3>
       <span class="mg-small mg-muted">${T(`${orders.length} ออเดอร์ · ต้องดู ${attention.length} · เลื่อนไปวันอื่น ${moved.length}`, `${orders.length} orders · ${attention.length} need a look · ${moved.length} moved away`)}</span></div>
     ${orders.length || moved.length ? `<div class="mg-table-wrap"><table class="mg-table sl-table"><tbody>
-      ${orders.map(p => `<tr><td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(p.code)}">${escapeHtml(p.client_name || "—")}</button><small class="sl-sub">${escapeHtml(p.po_number || "")}</small></td>
+      ${orders.map(p => `<tr><td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(p.code)}">${escapeHtml(p.client_name || "—")}</button>${slSc(p.code)}<small class="sl-sub">${escapeHtml(p.po_number || "")}</small></td>
         <td>${slOrderPill(p)}${p.mark && p.mark.status === "problem" && p.mark.note ? `<small class="sl-sub">${escapeHtml(p.mark.note)}</small>` : ""}</td></tr>`).join("")}
-      ${moved.map(m => `<tr><td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(m.code)}">${escapeHtml(m.client_name)}</button><small class="sl-sub">${escapeHtml(m.po_number || "")}</small></td>
+      ${moved.map(m => `<tr><td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(m.code)}">${escapeHtml(m.client_name)}</button>${slSc(m.code)}<small class="sl-sub">${escapeHtml(m.po_number || "")}</small></td>
         <td><span class="dl-pill dl-violet">↷ ${m.new_date ? slDate(m.new_date, { weekday: "short", day: "numeric", month: "short" }) : T("ยังไม่มีวันใหม่", "No new date yet")}</span></td></tr>`).join("")}
     </tbody></table></div>` : `<p class="mg-muted">${T("ยังไม่มีออเดอร์วันนี้ (ออเดอร์จะปรากฏเมื่อถ่ายรูปใบงาน)", "No order today yet (orders appear once their working paper is photographed).")}</p>`}
   </section>`;
 
   const nc = d.new_clients || [];
   const newHtml = nc.length ? `<section class="mg-card"><div class="mg-card-head"><h3>${T("ลูกค้าใหม่ — รอออเดอร์ที่สอง", "New clients — waiting for the second order")} (${nc.length})</h3></div>
-    <ul class="sl-plain">${nc.map(c => `<li><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button>
+    <ul class="sl-plain">${nc.map(c => `<li><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button>${slSc(c.code)}
       <span class="mg-muted">${c.last_order ? T("สั่งล่าสุด ", "last order ") + slDate(c.last_order) : ""}</span></li>`).join("")}</ul></section>` : "";
 
   return head + slAlertsHtml() + kpiStrip
@@ -942,7 +948,7 @@ function slKpiHtml() {
     extra += `<section class="mg-card"><div class="mg-card-head"><h3>${T("ลูกค้าที่มีมูลค่าเสี่ยงมากที่สุด", "Biggest clients at stake")}</h3>
         <span class="mg-small mg-muted">${T("ทั้งทีม — คุยในประชุมฝ่ายขายวันจันทร์", "Whole team — for the Monday sales meeting")}</span></div>
       ${st.length ? `<div class="mg-table-wrap"><table class="mg-table sl-table"><thead><tr><th>${T("ลูกค้า", "Client")}</th><th>${T("เซลส์", "Sales")}</th><th>${T("สถานะ", "Status")}</th><th>${T("เหตุผล", "Why")}</th><th class="num">${T("ต่อเดือน", "A month")}</th><th>${T("โทรล่าสุด", "Last call")}</th></tr></thead>
-        <tbody>${st.map(c => `<tr><td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button><small class="sl-sub">${escapeHtml(c.code)}${c.zone ? " · " + escapeHtml(c.zone) : ""}</small></td>
+        <tbody>${st.map(c => `<tr><td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button>${slSc(c.code)}<small class="sl-sub">${escapeHtml(c.code)}${c.zone ? " · " + escapeHtml(c.zone) : ""}</small></td>
           <td>${escapeHtml(slRepName(c.salesperson))}</td><td>${slStatusPill(c.status)}</td><td class="sl-why">${escapeHtml(slReason(c))}</td>
           <td class="num">${slBaht(c.month_value)}</td>
           <td>${c.call ? `${escapeHtml(T((SL_OUTCOMES.find(o => o.key === c.call.outcome) || {}).th || "", (SL_OUTCOMES.find(o => o.key === c.call.outcome) || {}).en || ""))}<small class="sl-sub">${slAgo(c.call.at)}</small>` : `<span class="sl-down">${T("ยังไม่ได้โทร", "Not called")}</span>`}</td></tr>`).join("")}</tbody></table></div>`
@@ -951,7 +957,7 @@ function slKpiHtml() {
     extra += `<section class="mg-card"><div class="mg-card-head"><h3>${T("ลูกค้าบริษัทที่สั่งใน 60 วัน แต่ยังไม่มีเซลส์", "House clients ordering in the last 60 days, with no salesperson")} (${hs.length})</h3>
         <span class="mg-small mg-muted">${T("กดชื่อเพื่อมอบให้เซลส์", "Click a name to give it to a salesperson")}</span></div>
       ${hs.length ? `<div class="mg-table-wrap sl-scroll"><table class="mg-table sl-table"><thead><tr><th>${T("ลูกค้า", "Client")}</th><th>Odoo</th><th>${T("สั่งล่าสุด", "Last order")}</th><th class="num">${T("12 เดือน", "12 months")}</th></tr></thead>
-        <tbody>${hs.map(c => `<tr><td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button><small class="sl-sub">${escapeHtml(c.code)}</small></td>
+        <tbody>${hs.map(c => `<tr><td><button type="button" class="sl-name" data-act="detail" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button>${slSc(c.code)}<small class="sl-sub">${escapeHtml(c.code)}</small></td>
           <td>${escapeHtml(c.odoo_salesperson || "—")}</td><td>${slDate(c.last_order)}<small class="sl-sub">${T(`${c.days_missing} วัน`, `${c.days_missing} days`)}</small></td>
           <td class="num">${Number(c.total12) ? slBaht(c.total12) : `<span class="mg-muted" title="${escapeAttr(T("ไม่อยู่ในรายงานของเซลส์", "Not in a salesperson's report sheet"))}">—</span>`}</td></tr>`).join("")}</tbody></table></div>` : `<p class="mg-muted">${T("ไม่มี", "None.")}</p>`}</section>`;
   }

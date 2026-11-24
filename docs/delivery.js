@@ -207,7 +207,14 @@ async function dlLoad(opts = {}) {
     DL.message = { kind: "err", text: dlBi("กรุณารัน Migration 033 ใน Supabase", "Run Migration 033 in Supabase") };
     data.pickups = [];
   }
-  const sig = JSON.stringify([data.papers, data.moved, data.register, data.pickups, DL.pp]);
+  // Special care clients (Migration 043): flags of the orders of the day.
+  if (typeof scMatch === "function") {
+    const ppRows = (DL.pp && DL.pp.rows) || [];
+    await scMatch((data.papers || []).map(p => p.id).concat((data.moved || []).map(m => m.paper_id || m.id), ppRows.map(o => o.paper_id)),
+                  (data.moved || []).concat(data.register || [], ppRows).map(r => r.customer_name));
+    if (day !== DL.day || !dlIsOpen()) return;
+  }
+  const sig = JSON.stringify([data.papers, data.moved, data.register, data.pickups, DL.pp, dlScSig(data)]);
   const changed = sig !== DL.sig;
   DL.data = data;
   DL.sig = sig;
@@ -291,6 +298,38 @@ async function dlMarkSelected(stepKey) {
   dlDrawBoard();
 }
 
+
+// ----------------------------------------------------------- special care (043)
+function dlScOf(p) {
+  if (typeof scForPaper !== "function" || !p) return null;
+  return scForPaper({ id: p.id || p.paper_id, customer_name: p.customer_name });
+}
+function dlScSig(data) {
+  if (typeof SC === "undefined") return "";
+  return ((data.papers || []).concat(data.moved || [], data.register || []))
+    .map(p => { const i = dlScOf(p); return i ? [i.code, i.no_postpone, i.exact_quantity, i.priority_delivery, i.delivery_window, i.instructions].join("|") : ""; }).join(",");
+}
+// Priority delivery clients first in the delivery section (the rest keep their order).
+function dlPriority(it) { const i = dlScOf(it.p); return i && i.priority_delivery ? 0 : 1; }
+function dlScTags(p) {
+  const i = dlScOf(p);
+  if (!i) return "";
+  return `<span class="dl-tag sc-dl-tag" title="${escapeAttr(i.instructions || "")}">⭐ ${dlBi("ดูแลพิเศษ", "Special care")}</span>`
+    + scRuleList(i, true).map(r => `<span class="dl-tag sc-rule sc-rule-${r.key}">${r.icon} ${escapeHtml(r.text)}</span>`).join("");
+}
+// Summary table (rows stay compact): one pill — ⭐ 🚫 ⚖ ⚡ 8:00–9:30 — details on hover.
+function dlScPill(p) {
+  const i = dlScOf(p);
+  if (!i) return "";
+  const rules = scRuleList(i, true);
+  const title = [dlBi("ลูกค้าดูแลพิเศษ", "Special care client"), ...rules.map(r => r.icon + " " + r.text), i.instructions || ""].filter(Boolean).join("\n");
+  return ` <span class="dl-tag sc-dl-tag sc-dl-pill" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}">⭐ ${rules.map(r => r.icon).join(" ")}${
+    i.priority_delivery && i.delivery_window ? " " + escapeHtml(i.delivery_window) : ""}</span>`;
+}
+function dlScInstr(p) {
+  const i = dlScOf(p);
+  return i && i.instructions ? `<div class="dl-sub sc-dl-instr">⭐ ${escapeHtml(i.instructions)}</div>` : "";
+}
 
 // ----------------------------------------------------------- items
 function dlMatches(p) {
@@ -431,7 +470,7 @@ function dlSummaryHtml(due, pushed) {
     const note = p.mark && p.mark.status === "problem" && p.mark.note ? `<div class="dl-sub dl-sub-red">“${escapeHtml(p.mark.note)}”</div>` : "";
     return `<tr class="dl-row-${it.state}" data-id="${escapeAttr(p.id || p.paper_id || "")}">
       <td class="dl-no">${i + 1}</td>
-      <td class="dl-client"><strong>${escapeHtml(p.customer_name || dlBi("กำลังอ่านใบงาน…", "Paper being read…"))}</strong>${note}${reason}</td>
+      <td class="dl-client"><strong>${escapeHtml(p.customer_name || dlBi("กำลังอ่านใบงาน…", "Paper being read…"))}</strong>${dlScPill(p)}${note}${reason}</td>
       <td class="dl-po">${dlPo(p.po_number, p.part)}</td>
       <td>${dlCompanyChip(p.company)}</td>
       <td class="dl-kg">${escapeHtml(dlKgText(k))}</td>
@@ -566,7 +605,7 @@ function dlPostponedHtml() {
     return `<div class="dl-pp-row dl-pp-${o.group}" data-key="${escapeAttr(o.key)}">
       <span class="dl-pp-no">${i + 1}</span>
       <div class="dl-pp-who">
-        <div class="dl-pp-name"><strong>${escapeHtml(o.customer_name || "—")}</strong> <span class="dl-pp-po">${dlPo(o.po_number, o.part)}</span> ${dlCompanyChip(o.company)}</div>
+        <div class="dl-pp-name"><strong>${escapeHtml(o.customer_name || "—")}</strong>${dlScPill(o)} <span class="dl-pp-po">${dlPo(o.po_number, o.part)}</span> ${dlCompanyChip(o.company)}</div>
         <div class="dl-pp-by">↻ ${by}${why}${times}</div>
         ${note}
       </div>
@@ -642,6 +681,7 @@ function dlDeliveryHtml(due) {
   const bulk = DL_STEPS.filter(s => s.key !== "problem").map(s =>
     `<button type="button" class="dl-bulk ${s.cls}" data-act="bulk" data-step="${s.key}" ${selCount && !DL.busy ? "" : "disabled"}>${s.icon} ${s.sth} · ${s.sen}</button>`).join("");
 
+  work.sort((a, b) => dlPriority(a) - dlPriority(b));     // ⚡ priority delivery first (043)
   const rows = work.map((it, i) => {
     const p = it.p;
     const k = dlKg(p);
@@ -651,6 +691,7 @@ function dlDeliveryHtml(due) {
 ${s.sth} · ${s.sen}</button>`;
     }).join("");
     const tags = [
+      dlScTags(p),
       p.moved_from && p.moved_from !== DL.day ? `<span class="dl-tag dl-tag-violet">↻ ${dlBi("เลื่อนมาจาก", "moved from")} ${escapeHtml(dlDateBi(p.moved_from))}</span>` : "",
       p.mark && p.mark.carried ? `<span class="dl-tag dl-tag-teal">🏬 ${dlBi("รับมาแล้ว แต่ถูกเลื่อนวันส่ง", "picked up, then postponed")}</span>` : "",
       p.reopened ? `<span class="dl-tag dl-tag-amber">${dlBi("โรงงานกำลังแก้น้ำหนัก", "weights being corrected")}</span>` : "",
@@ -665,7 +706,7 @@ ${s.sth} · ${s.sen}</button>`;
           <strong>${escapeHtml(p.customer_name || "—")}</strong>
           <span class="dl-work-meta">${dlPo(p.po_number, p.part)} · ${dlCompanyChip(p.company)} · <strong>${escapeHtml(dlKgText(k))} kg</strong></span>
           ${tags ? `<span class="dl-tags">${tags}</span>` : ""}
-          ${note}${who}
+          ${dlScInstr(p)}${note}${who}
         </span>
       </label>
       <div class="dl-segs" role="group" aria-label="สถานะ · Status">${segs}</div>

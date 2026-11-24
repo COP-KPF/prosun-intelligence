@@ -236,8 +236,8 @@ async function wsLoad(opts = {}) {
   }
   const rows = lines.data || [];
   const count = pending.error ? WS.pending : Number(pending.data) || 0;
-  await Promise.all([wsLoadHist(rows), wsLoadInv(rows), wsLoadSplit(rows)]);
-  const sig = JSON.stringify([rows, count, WS.hist, WS.inv, WS.split]);
+  await Promise.all([wsLoadHist(rows), wsLoadInv(rows), wsLoadSplit(rows), wsLoadSpecialCare(rows)]);
+  const sig = JSON.stringify([rows, count, WS.hist, WS.inv, WS.split, wsScSig(rows)]);
   WS.updatedAt = new Date();
   if (silent && sig === WS.sig) {
     const st = document.getElementById("ws-updated");
@@ -265,6 +265,31 @@ async function wsLoadHist(rows) {
 // what each part holds. Quietly empty before Migration 040.
 async function wsLoadSplit(rows) {
   WS.split = await sfLoadMarks(rows.map((r) => r.paper_id));
+}
+
+// Special care clients (Migration 043): flags of the papers on screen and
+// production's ticks. Quietly empty before Migration 043.
+async function wsLoadSpecialCare(rows) {
+  if (typeof scMatch === "function") await scMatch(rows.map((r) => r.paper_id), []);
+}
+function wsScOf(paperId) {
+  const r = WS.rows.find((x) => x.paper_id === paperId) || { id: paperId };
+  return typeof scForPaper === "function" ? scForPaper({ id: paperId, customer_name: r.customer_name }) : null;
+}
+function wsScSig(rows) {
+  if (typeof SC === "undefined") return "";
+  const ids = [...new Set(rows.map((r) => r.paper_id))];
+  return ids.map((id) => [SC.papers[id] || "", SC.checks[id] ? 1 : 0].join(":")).join(",")
+    + JSON.stringify(Object.values(SC.clients).map((c) => [c.code, c.no_postpone, c.exact_quantity, c.priority_delivery, c.delivery_window, c.instructions]));
+}
+// Under the client's name: ⭐ Special care, its rules, and production's tick.
+function wsScCellHtml(paperId) {
+  const sc = wsScOf(paperId);
+  if (!sc) return "";
+  const chk = scCheckOf(paperId);
+  return `${scTagHtml(sc)}<br><span class="sc-rules sc-rules-sm">${scRulesHtml(sc)}</span>`
+    + (sc.instructions ? `<br><span class="sc-instr-sm" title="${escapeAttr(sc.instructions)}">${escapeHtml(sc.instructions)}</span>` : "")
+    + (chk ? `<br><span class="sc-checked-sm">✓ ${T("ตรวจการดูแลพิเศษแล้ว", "Special care checked")} · ${escapeHtml(chk.by || "")}</span>` : "");
 }
 
 // Invoice marks of the papers on screen. Quietly empty before Migration 030.
@@ -433,7 +458,7 @@ function wsResultsHtml() {
                 + (sfCanSplit(wsPaperLines(r.paper_id)) ? `<br><button type="button" class="w-btn w-btn-outline w-btn-sm ws-pp-btn ws-pl-btn" data-ws="pl-open" data-paper="${escapeAttr(r.paper_id)}"${sfIsOpen(r.paper_id) ? " disabled" : ""}>${T("เลื่อนสินค้า", "Postpone a product")}</button>` : "") : "") : ""}</td>
             <td>${first ? escapeHtml(weighCompanyShort(r.company)) : ""}</td>
             <td class="w-mono">${first ? escapeHtml(r.po_number || "") + (WS.split[r.paper_id] && WS.split[r.paper_id].part > 1 ? "<br>" + sfPartTag(WS.split[r.paper_id]) : "") : ""}</td>
-            <td>${first ? escapeHtml(r.customer_name || "") : ""}</td>
+            <td>${first ? escapeHtml(r.customer_name || "") + wsScCellHtml(r.paper_id) : ""}</td>
             <td class="w-wrap">${escapeHtml(r.description || "")}${r.edited ? ` <span class="ws-edited" title="${T("แก้ตัวเลขด้วยมือที่โรงงาน", "Corrected by hand at the factory")}">${T("แก้ไข", "corrected")}</span>` : ""}</td>
             <td class="w-num">${escapeHtml(r.ordered_text || "")}</td>
             <td class="w-num w-strong">${r.actual_kg === null ? `<span class="w-muted">—</span>` : weighFmt(r.actual_kg)}</td>
@@ -526,6 +551,7 @@ function wsPostponeRowHtml(r, cols) {
         `ตอนนี้ส่ง ${escapeHtml(weighShortDate(current))} · น้ำหนักที่ยืนยันแล้วไม่เปลี่ยน ใบงานจะย้ายไปอยู่ในวันส่งใหม่ และผู้บริหารจะได้รับแจ้ง`,
         `Delivery now ${escapeHtml(weighShortDate(current))} · the confirmed weights stay as they are; the paper moves to the new delivery date, and management is notified.`)}</p>
       ${f.error ? `<div class="w-msg w-msg-error" role="alert" id="ws-pp-error">${escapeHtml(f.error)}</div>` : ""}
+      ${wsScOf(r.paper_id) ? scPostponeWarnHtml(wsScOf(r.paper_id), "order", { acked: !!f.scAck }) : ""}
       <div class="w-pp-fields">
         <label>${T("วันส่งใหม่", "New delivery date")} *
           <input type="date" id="ws-pp-date" min="${escapeAttr(min)}" value="${escapeAttr(f.date || min)}" required></label>
@@ -538,7 +564,7 @@ function wsPostponeRowHtml(r, cols) {
           <input type="text" id="ws-pp-note" data-pp="note" value="${escapeAttr(f.note || "")}" maxlength="300"></label>
       </div>
       <div class="w-pp-actions">
-        <button type="submit" class="w-btn w-btn-violet" id="ws-pp-save" data-pp="save"${ppReasonOk(f.reason, f.note) && !f.busy ? "" : " disabled"}>${T("เลื่อนส่ง", "Postpone")}</button>
+        <button type="submit" class="w-btn w-btn-violet" id="ws-pp-save" data-pp="save"${ppReasonOk(f.reason, f.note) && !f.busy && (!wsScOf(r.paper_id) || !scPostponeWarnHtml(wsScOf(r.paper_id), "order") || f.scAck) ? "" : " disabled"}>${T("เลื่อนส่ง", "Postpone")}</button>
         <button type="button" class="w-btn w-btn-outline" data-ws="pp-cancel">${T("ยกเลิก", "Cancel")}</button>
         <span class="w-small w-pp-hint" data-pp="hint" role="status"></span>
       </div>
@@ -570,6 +596,7 @@ async function wsPostponeSave() {
   else if (!f.date) problem = T("เลือกวันส่งใหม่", "Choose the new delivery date.");
   else if (f.date <= current) problem = T("วันส่งใหม่ต้องหลังวันส่งเดิม", "The new delivery date must be after the current one.");
   else if (f.date < weighBangkokToday()) problem = T("วันส่งใหม่ต้องเป็นวันนี้หรือหลังจากนี้", "The new delivery date must be today or later.");
+  else if (!scAckOk(document.getElementById("ws-pp-form"))) problem = T("ลูกค้าดูแลพิเศษ: ติ๊กช่องคำเตือนก่อน", "Special care client: tick the warning box first.");
   if (problem) { f.error = problem; wsRenderResults(); return; }
   f.busy = true; f.error = null;
   wsRenderResults();
@@ -744,6 +771,11 @@ wsSection.addEventListener("input", (e) => {
 
 // Keeps the open postpone form's values (the table can be redrawn under it).
 function wsPpField(t) {
+  if (WS.ppForm && t.dataset && t.dataset.scAck && t.form && t.form.id === "ws-pp-form") {   // special care warning (043)
+    WS.ppForm.scAck = t.checked;
+    ppSyncForm(t.form);
+    return true;
+  }
   if (!WS.ppForm || !t.id || !t.id.startsWith("ws-pp-")) return false;
   if (t.id === "ws-pp-date") WS.ppForm.date = t.value;
   if (t.id === "ws-pp-reason") WS.ppForm.reason = t.value;

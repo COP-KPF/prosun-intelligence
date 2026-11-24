@@ -85,13 +85,17 @@ function ppSyncForm(form) {
   const hint = form.querySelector("[data-pp=hint]");
   const star = form.querySelector("[data-pp=note-star]");
   if (!reason || !btn) return;
-  const ok = ppReasonOk(reason.value, note && note.value);
+  const reasonOk = ppReasonOk(reason.value, note && note.value);
+  // Special care client (Migration 043): the warning's box must be ticked too.
+  const ackOk = typeof scAckOk !== "function" || scAckOk(form);
+  const ok = reasonOk && ackOk;
   btn.disabled = !ok;
   if (star) star.hidden = reason.value !== "other";
   if (note) note.required = reason.value === "other";
   if (hint) hint.textContent = ok ? "" : !reason.value
     ? T("เลือกสาเหตุก่อน จึงจะเลื่อนได้", "Choose a reason to postpone.")
-    : T("สาเหตุ “อื่น ๆ”: เขียนหมายเหตุก่อน", "Other: write a comment first.");
+    : !reasonOk ? T("สาเหตุ “อื่น ๆ”: เขียนหมายเหตุก่อน", "Other: write a comment first.")
+    : T("ลูกค้าดูแลพิเศษ: ติ๊กช่องคำเตือนก่อน", "Special care client: tick the warning box first.");
 }
 // "Postponed · delivery from 11 Nov to 13 Nov" — shown to every department.
 // From the first move's original delivery date (or production day if the
@@ -289,6 +293,7 @@ async function weighLoad() {
     }));
   }
   await weighLoadPostponements();
+  await weighLoadSpecialCare();
   await weighLoadNames();
   if (W.date === weighBangkokToday()) {
     if (!W.link || W.link.work_date !== W.date || new Date(W.link.expires_at) < new Date()) {
@@ -318,6 +323,16 @@ async function weighLoadPostponements() {
   W.split = typeof sfLoadMarks === "function"
     ? await sfLoadMarks(ids.concat(W.movedOut.map((r) => r.paper_id).filter(Boolean))) : {};
 }
+
+// Special care clients (Migration 043): which papers on screen (and moved
+// away from this day) belong to one, and production's ticks.
+async function weighLoadSpecialCare() {
+  if (typeof scMatch !== "function") return;
+  await scMatch(W.papers.map((p) => p.id).concat(W.movedOut.map((r) => r.paper_id)),
+                W.movedOut.map((r) => r.customer_name));
+}
+function weighScOf(p) { return typeof scForPaper === "function" ? scForPaper(p) : null; }
+function weighScTag(p, short) { const i = weighScOf(p); return i ? scTagHtml(i, { short }) : ""; }
 
 async function weighLoadNames() {
   const ids = new Set();
@@ -520,7 +535,7 @@ function weighPaperCardHtml(p) {
     <span class="w-thumb">${img ? `<img src="${escapeAttr(img)}" alt="" loading="lazy">` : ""}</span>
     <span class="w-card-body">
       <span class="w-card-po">${escapeHtml(p.po_number || "—")}${weighPartTag(p)}</span>
-      <span class="w-card-cust">${escapeHtml(p.customer_name || (WEIGH_IN_PROGRESS.includes(p.status) ? T("กำลังอ่าน…", "Reading…") : T("ไม่ทราบลูกค้า", "Unknown customer")))}</span>
+      <span class="w-card-cust">${escapeHtml(p.customer_name || (WEIGH_IN_PROGRESS.includes(p.status) ? T("กำลังอ่าน…", "Reading…") : T("ไม่ทราบลูกค้า", "Unknown customer")))}${weighScTag(p)}</span>
       <span class="w-card-meta">${escapeHtml(weighCompanyShort(p.company))}${n ? " · " + n + T(" รายการ", n === 1 ? " line" : " lines") : ""} · ${escapeHtml(weighTime(p.uploaded_at))}</span>
       <span class="w-pill ${st.cls}">${st.label}</span>${weighMovedTag(p)}
     </span>
@@ -658,7 +673,7 @@ function weighRenderDay() {
             <td>${r.first ? escapeHtml(weighShortDate(r.p.delivery_date)) : ""}</td>
             <td>${r.first ? escapeHtml(weighCompanyShort(r.p.company)) : ""}</td>
             <td class="w-mono">${r.first ? escapeHtml(r.p.po_number || "") + weighPartTag(r.p) : ""}</td>
-            <td>${r.first ? escapeHtml(r.p.customer_name || "") : ""}</td>
+            <td>${r.first ? escapeHtml(r.p.customer_name || "") + weighScTag(r.p, true) : ""}</td>
             <td class="w-wrap">${r.l ? escapeHtml(r.l.description) : `<span class="w-muted">${escapeHtml(r.p.status === "failed" ? T("อ่านไม่ได้ — เปิดเพื่ออ่านใหม่", "Not readable — open to read again") : WEIGH_IN_PROGRESS.includes(r.p.status) ? T("กำลังอ่าน…", "Reading…") : T("ไม่พบรายการ", "No lines found"))}</span>`}</td>
             <td class="w-num">${r.l ? escapeHtml(r.l.ordered_text || "") : ""}</td>
             <td class="w-num w-strong">${r.l ? (r.l.actual_kg === null ? `<span class="w-muted">—</span>` : weighFmt(r.l.actual_kg)) : ""}${r.l && weighNeedsLook(r.l) && r.p.status !== "confirmed" ? ` <span class="w-q" title="${T("ต้องตรวจกับรูป", "Check against the photo")}">?</span>` : ""}</td>
@@ -687,7 +702,7 @@ function weighMovedOutHtml() {
       <thead><tr><th>PO</th><th>${T("ลูกค้า", "Customer")}</th><th>${T("ผลิตใหม่", "New production day")}</th><th>${T("ส่งใหม่", "New delivery")}</th>${why ? `<th>${T("สาเหตุ", "Reason")}</th>` : ""}<th>${T("โดย", "By")}</th><th></th></tr></thead>
       <tbody>${W.movedOut.map((r) => `<tr>
         <td class="w-mono">${escapeHtml(r.po_number || "—")}${r.paper_id ? weighPartTag({ id: r.paper_id }) : ""}</td>
-        <td>${escapeHtml(r.customer_name || "—")}${r.paper_id && typeof sfPartLines === "function" && sfPartLines(W.split[r.paper_id], r.paper_id)
+        <td>${escapeHtml(r.customer_name || "—")}${weighScTag({ id: r.paper_id, customer_name: r.customer_name }, true)}${r.paper_id && typeof sfPartLines === "function" && sfPartLines(W.split[r.paper_id], r.paper_id)
           ? `<br><small class="w-muted">${escapeHtml(sfPartLines(W.split[r.paper_id], r.paper_id))}</small>` : ""}</td>
         <td>${escapeHtml(weighThaiDate(r.to_work_date, { weekday: "short", day: "numeric", month: "short" }))}</td>
         <td>${escapeHtml(weighDayShort(r.to_delivery_date))}${r.from_delivery_date ? ` <span class="w-muted w-small">(${T("เดิม", "was")} ${escapeHtml(weighDayShort(r.from_delivery_date))})</span>` : ""}</td>
@@ -712,6 +727,9 @@ function weighRenderCheck() {
   const ro = editable ? "" : " disabled";
 
   const notes = [];
+  const sc = weighScOf(p);
+  if (sc) notes.push(scBoxHtml(sc, { check: { paperId: p.id, locked,
+    can: !busy && ["production", "factory_admin", "admin"].includes(myProfile.role) } }));
   if (busy) notes.push(`<div class="w-note w-note-blue">${T("กำลังอ่านรูปนี้ — ตัวเลขจะขึ้นเองในไม่กี่วินาที", "Reading this photo — the numbers appear by themselves in a few seconds")}</div>`);
   if (p.status === "failed") notes.push(`<div class="w-note w-note-red">${T("อ่านรูปนี้ไม่ได้", "This photo could not be read")}${p.read_error ? ": " + escapeHtml(p.read_error) : ""} — ${T("กด “อ่านใหม่” หรือถ่ายใหม่", "press “Read again” or take a new photo")}</div>`);
   if (p.note) notes.push(`<div class="w-note w-note-amber">${escapeHtml(weighServerText(p.note))}</div>`);
@@ -788,7 +806,7 @@ function weighRenderCheck() {
     <section class="w-side">
       <div class="w-panel">
         <div class="w-panel-head">
-          <h3 class="w-cust">${escapeHtml(p.customer_name || T("ไม่ทราบลูกค้า", "Unknown customer"))}</h3>
+          <h3 class="w-cust">${escapeHtml(p.customer_name || T("ไม่ทราบลูกค้า", "Unknown customer"))}</h3>${weighScTag(p)}
           <span class="w-pill ${st.cls}">${st.label}</span>
         </div>
         <div class="w-fields">
@@ -871,6 +889,7 @@ function weighPostponeFormHtml(p) {
       `ตอนนี้: ผลิต ${weighDayShort(p.work_date)} · ส่ง ${weighDayShort(p.delivery_date)} — ใบนี้จะย้ายไปอยู่ในวันผลิตใหม่ และผู้บริหารจะได้รับแจ้ง`,
       `Now: production ${weighDayShort(p.work_date)} · delivery ${weighDayShort(p.delivery_date)} — the paper moves to the new production day, and management is notified.`)}</p>
     ${f.error ? `<div class="w-msg w-msg-error" role="alert" id="weigh-pp-error">${escapeHtml(f.error)}</div>` : ""}
+    ${weighScOf(p) ? scPostponeWarnHtml(weighScOf(p), "order", { acked: !!f.scAck }) : ""}
     <div class="w-pp-fields">
       <label>${T("วันผลิตใหม่", "New production day")} *
         <input type="date" id="pp-prod" min="${escapeAttr(today)}" value="${escapeAttr(f.prod || d.prod)}" required></label>
@@ -907,6 +926,7 @@ async function weighPostponeSave() {
   else if (f.del < f.prod) problem = T("วันส่งต้องไม่ก่อนวันผลิต", "The delivery date cannot be before the production day.");
   else if (!f.reason) problem = T("เลือกสาเหตุ", "Choose a reason.");
   else if (f.reason === "other" && !f.note) problem = T("สาเหตุ “อื่น ๆ” ต้องมีหมายเหตุ", "Add a comment when the reason is Other.");
+  else if (!scAckOk(document.getElementById("weigh-pp-form"))) problem = T("ลูกค้าดูแลพิเศษ: ติ๊กช่องคำเตือนก่อน", "Special care client: tick the warning box first.");
   if (problem) { f.error = problem; weighRender(); return; }
   const btn = document.getElementById("pp-save");
   if (btn) btn.disabled = true;
@@ -1038,6 +1058,7 @@ function weighRefreshCheckDerived() {
   else if (bad) msg = T("มีช่องน้ำหนักที่ไม่ใช่ตัวเลข", "A weight box contains something that is not a number");
   else if (open) msg = T(`ยังเหลือ ${open} รายการที่ต้องตรวจกับรูปก่อนยืนยัน`, `${open} line${open === 1 ? "" : "s"} still to check against the photo before confirming`);
   else if (W.saving) msg = T("กำลังบันทึก…", "Saving…");
+  else if (weighScOf(p) && !scCheckOf(p.id)) msg = T("ลูกค้าดูแลพิเศษ: ติ๊ก “ตรวจการดูแลพิเศษแล้ว” ก่อนยืนยัน", "Special care client: tick “special care checked” before confirming");
   else { msg = T("ตัวเลขครบแล้ว กดยืนยันเพื่อบันทึกลงตารางวันนี้", "All numbers checked — confirm to record them in today's table"); ready = true; }
   helper.textContent = msg;
   btn.disabled = !ready;
@@ -1135,6 +1156,13 @@ weighSection.addEventListener("submit", async (e) => {
 
 weighSection.addEventListener("change", async (e) => {
   const t = e.target;
+  if (t.dataset && t.dataset.scAct === "check") {   // special care checked (043)
+    const r = await scSetCheck(t.dataset.paper, t.checked);
+    if (!r.ok) W.message = { kind: "error", text: T("บันทึกไม่สำเร็จ: ", "Could not save: ") + r.error };
+    weighRender();
+    return;
+  }
+  if (t.dataset && t.dataset.scAck && t.form && t.form.id === "weigh-pp-form" && W.postponeForm) W.postponeForm.scAck = t.checked;
   if (sfField(t, weighRender)) return;   // Postpone a product (041)
   if (t.id === "pp-prod" || t.id === "pp-del" || t.id === "pp-reason" || t.id === "pp-note") {
     const f = W.postponeForm;
@@ -1224,6 +1252,10 @@ async function weighSavePaperField(field, value) {
     if (field === "customer_name") {
       const h = weighSection.querySelector(".w-cust");
       if (h) h.textContent = value || T("ไม่ทราบลูกค้า", "Unknown customer");
+      // the new name may (or may no longer) be a special care client (043)
+      const had = !!weighScOf(p);
+      if (typeof scMatch === "function") await scMatch([p.id], []);
+      if (had !== !!weighScOf(p)) weighRender();
     }
   });
 }
@@ -1233,7 +1265,13 @@ async function weighSetStatus(status) {
   await weighSaving(async () => {
     const { data, error } = await sb.from("weighing_papers").update({ status }).eq("id", p.id)
       .select("status, confirmed_by, confirmed_at").single();
-    if (error) { W.message = { kind: "error", text: T("บันทึกไม่สำเร็จ: ", "Could not save: ") + error.message }; return; }
+    if (error) {
+      W.message = { kind: "error", text: typeof scIsCheckRequired === "function" && scIsCheckRequired(error)
+        ? T("ลูกค้าดูแลพิเศษ: ติ๊ก “ตรวจการดูแลพิเศษแล้ว” ก่อนยืนยันน้ำหนัก", "Special care client: tick “special care checked” before confirming the weights.")
+        : T("บันทึกไม่สำเร็จ: ", "Could not save: ") + error.message };
+      if (typeof scMatch === "function") await scMatch([p.id], []);   // the flag may be new
+      return;
+    }
     Object.assign(p, data);
     W.message = null;
   });

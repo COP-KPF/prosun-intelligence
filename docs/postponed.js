@@ -196,6 +196,11 @@ async function ppLoad() {
     if (PP.expanded) { delete PP.timelines[PP.expanded]; ppLoadTimeline(PP.expanded); }
   }
   PP.register = reg.error ? [] : reg.data || [];
+  // Special care clients (Migration 043): flags of the orders on the list.
+  if (typeof scMatch === "function" && PP.data) {
+    const os = PP.data.orders || [];
+    await scMatch(os.map(o => o.paper_id), os.map(o => o.customer_name));
+  }
   ppSetBadge();
   ppDraw();
 }
@@ -269,7 +274,7 @@ function ppRowHtml(o) {
   const delay = o.delay_days === null || o.delay_days === undefined ? "—" : `+${o.delay_days}${T(" วัน", " d")}`;
   return `<tr class="pp-row${o.late ? " pp-late" : ""}${o.open ? "" : " pp-closed"}${open ? " pp-open" : ""}" data-key="${escapeAttr(o.key)}">
     <td class="pp-c-client"><button type="button" class="pp-name" data-act="toggle" data-key="${escapeAttr(o.key)}" aria-expanded="${open}" title="${escapeAttr(name)}">
-      <strong>${escapeHtml(o.customer_name || "—")}</strong>${part ? ` <span class="pp-part">${escapeHtml(part)}</span>` : ""}${o.po_number ? ` <span class="pp-po">${escapeHtml(o.po_number)}</span>` : ""}</button></td>
+      <strong>${escapeHtml(o.customer_name || "—")}</strong>${ppScTag(o)}${part ? ` <span class="pp-part">${escapeHtml(part)}</span>` : ""}${o.po_number ? ` <span class="pp-po">${escapeHtml(o.po_number)}</span>` : ""}</button></td>
     <td class="pp-c-co"><span class="pp-co pp-co-${ppCompanyTag(o.company).toLowerCase()}">${ppCompanyTag(o.company)}</span></td>
     <td class="pp-c-by" title="${escapeAttr(by + (reason ? " · " + reason : "") + (o.note ? " — " + o.note : ""))}"><span class="pp-cut">
       <span class="pp-by">${escapeHtml(by)}</span>${o.times > 1 ? `<span class="pp-times" title="${escapeAttr(T(`เลื่อน ${o.times} ครั้ง`, `Postponed ${o.times} times`))}">${o.times}×</span>` : ""}${reason ? `<span class="pp-reason"> · ${escapeHtml(reason)}</span>` : ""}</span></td>
@@ -373,6 +378,22 @@ function ppDetailHtml(o) {
   </div>`;
 }
 
+// ⭐ on a special care client's order (043).
+function ppScOf(o) { return typeof scForPaper === "function" ? scForPaper({ id: o.paper_id, customer_name: o.customer_name }) : null; }
+function ppScTag(o) { const i = ppScOf(o); return i ? scTagHtml(i, { short: true }) : ""; }
+// The register form: warning when the client typed is a No postpone client.
+async function ppScFormCheck() {
+  const slot = document.getElementById("pp-sc-warn");
+  const input = document.getElementById("pp-customer");
+  if (!slot || !input || PP.editing || typeof scMatch !== "function") return;
+  const name = input.value.trim();
+  if (name) await scMatch([], [name]);
+  if (input.value.trim() !== name) return;                  // typed on meanwhile
+  const html = name ? scPostponeWarnHtml(scForName(name), "order") : "";
+  if (slot.dataset.for !== name || !slot.innerHTML !== !html) { slot.innerHTML = html; slot.dataset.for = name; }
+  ppSyncForm(document.getElementById("pp-form"));
+}
+
 function ppFormHtml() {
   const e = PP.editing || {};
   const v = k => escapeAttr(e[k] === null || e[k] === undefined ? "" : String(e[k]));
@@ -405,6 +426,7 @@ function ppFormHtml() {
       </label>
       <label class="pp-full">${ppNoteLabel()}<input id="pp-note" data-pp="note" value="${v("note")}"></label>
     </div>
+    <div id="pp-sc-warn"></div>
     <div class="pp-form-actions">
       <button type="submit" class="ws-chip on" id="pp-save" data-pp="save">${PP.editing ? T("บันทึกการแก้ไข", "Save correction") : T("บันทึก", "Save")}</button>
       <span class="mg-small pp-hint" data-pp="hint" role="status"></span>
@@ -475,6 +497,7 @@ function ppDraw() {
       "Steps: produced → picked up → on the road → delivered · Late again = the new delivery date has passed and it is not delivered · Click a client for the timeline")}</p>` : ""}
     ${showForm ? ppFormHtml() : ""}`;
   ppSyncForm(document.getElementById("pp-form"));
+  if (showForm) ppScFormCheck();
 }
 
 // Search and source redraw only the list, so the search box keeps its focus.
@@ -499,6 +522,7 @@ ppSection.addEventListener("input", e => {
 });
 ppSection.addEventListener("change", e => {
   if (e.target.dataset.pp) ppSyncForm(e.target.form);
+  if (e.target.id === "pp-customer") ppScFormCheck();      // special care client? (043)
   if (e.target.id === "pp-src") { PP.source = e.target.value; ppDrawList(); }
 });
 
@@ -614,6 +638,7 @@ ppSection.addEventListener("submit", async e => {
   else if (!row.reason) problem = T("กรุณาเลือกสาเหตุ", "Choose a reason.");
   else if (row.new_date && row.new_date <= row.original_date) problem = T("วันส่งใหม่ต้องหลังวันส่งเดิม", "The new date must be after the original date.");
   else if (row.reason === "other" && !row.note) problem = T("สาเหตุ “อื่น ๆ” ต้องมีหมายเหตุ", "Add a comment when the reason is Other.");
+  else if (!scAckOk(document.getElementById("pp-form"))) problem = T("ลูกค้าดูแลพิเศษ: ติ๊กช่องคำเตือนก่อน", "Special care client: tick the warning box first.");
   if (problem) { ppFormError(problem); return; }
   const saveBtn = document.getElementById("pp-save");
   saveBtn.disabled = true;

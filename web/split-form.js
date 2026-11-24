@@ -117,6 +117,7 @@ function sfFormHtml() {
         `ตอนนี้ส่ง ${escapeHtml(weighShortDate(current))} · เลือกสินค้าที่จะเลื่อน (ทั้งรายการ หรือใส่จำนวนบางส่วน) สินค้าที่เลือกจะเป็นใบงานใหม่ “ส่วนที่ 2” ของ PO เดียวกัน ส่งและออกใบแจ้งหนี้แยก ที่เหลืออยู่ในใบงานนี้`,
         `Delivery now ${escapeHtml(weighShortDate(current))} · choose the products to move (whole line, or type part of the quantity). They become a new working paper, “part 2” of the same PO, delivered and invoiced on its own; the rest stays on this paper.`)}</p>
       ${f.error ? `<div class="w-msg w-msg-error" role="alert" id="sf-error">${escapeHtml(f.error)}</div>` : ""}
+      ${sfSpecialCareWarn(f)}
       <div class="table-scroll"><table class="w-table sf-table">
         <thead><tr><th><span class="pp-sr">${T("เลือก", "Choose")}</span></th><th>${T("สินค้า", "Product")}</th><th class="w-num">${T("สั่ง", "Ordered")}</th>
           <th class="w-num">${f.confirmed ? T("ชั่งจริง (kg)", "Actual (kg)") : T("ชั่งแล้ว (kg)", "Weighed so far (kg)")}</th><th class="w-num">${T("จำนวนที่เลื่อน", "Quantity to move")}</th>
@@ -142,6 +143,16 @@ function sfFormHtml() {
         <span class="w-small w-pp-hint" id="sf-hint" role="status">${escapeHtml(v.ok ? v.summary : v.missing)}</span>
       </div>
     </form>`;
+}
+
+// Special care client (Migration 043): No postpone or Exact quantity → a
+// warning whose box must be ticked before the products can move.
+function sfSpecialCare(f) {
+  return typeof scForPaper === "function" ? scForPaper(f.paper) : null;
+}
+function sfSpecialCareWarn(f) {
+  const info = sfSpecialCare(f);
+  return info ? scPostponeWarnHtml(info, "product", { acked: !!f.scAck }) : "";
 }
 
 // What is still missing (shown next to the button), or a summary when ready.
@@ -175,6 +186,7 @@ function sfCheck() {
   else if (!missing && f.date < today) missing = T("วันส่งใหม่ต้องเป็นวันนี้หรือหลังจากนี้", "The new delivery date must be today or later");
   else if (!missing && f.mode === "production" && f.work > f.date) missing = T("วันส่งต้องไม่ก่อนวันผลิต", "The delivery date must be on or after the production day");
   else if (!missing && !ppReasonOk(f.reason, f.note)) missing = !f.reason ? T("เลือกสาเหตุ", "Choose a reason") : T("สาเหตุ “อื่น ๆ” ต้องมีหมายเหตุ", "Add a comment when the reason is Other");
+  else if (!missing && sfSpecialCareWarn(f) && !f.scAck) missing = T("ลูกค้าดูแลพิเศษ: ติ๊กช่องคำเตือนก่อน", "Special care client: tick the warning box first");
   if (missing) return { ok: false, missing };
   const n = chosen.length;
   return { ok: true, summary: T(
@@ -189,7 +201,8 @@ function sfField(t, redraw) {
   const f = SF.form;
   if (!f || !t || !t.closest || !t.closest("#sf-form")) return false;
   let again = false;
-  if (t.dataset.sf === "mode") { f.mode = t.value; again = true; }
+  if (t.dataset.scAck) f.scAck = t.checked;          // special care warning (043)
+  else if (t.dataset.sf === "mode") { f.mode = t.value; again = true; }
   else if (t.dataset.sfLine) {
     const s = f.sel[t.dataset.sfLine] = f.sel[t.dataset.sfLine] || {};
     if (t.dataset.sf === "on") { s.on = t.checked; again = true; }
