@@ -1249,6 +1249,32 @@ const tabSalesDelivBtn   = document.getElementById("tab-sales-deliveries");    /
 const tabSalesDayBtn     = document.getElementById("tab-sales-day");           // Sales › My day (Migration 039)
 const tabSalesKpisBtn    = document.getElementById("tab-sales-kpis");          // Sales › My KPIs (Migration 039)
 const tabMgSalesKpisBtn  = document.getElementById("tab-mg-sales-kpis");       // Management › Sales KPIs (Migration 039, admin)
+// Management › KPI (24 Nov 2026): one menu entry for the Operations dashboard
+// ("management") and the Sales KPIs ("mg-sales-kpis"), shown as two tabs on the
+// page. The last tab opened is remembered in this browser.
+const tabKpiBtn          = document.getElementById("tab-kpi");
+const kpiTabs            = document.getElementById("kpi-tabs");
+const KPI_VIEWS          = ["management", "mg-sales-kpis"];
+function kpiAllowed() { return KPI_VIEWS.filter(v => (PACE_MENU[myProfile.role] || []).includes(v)); }
+function kpiLastTab() {
+  let v = null;
+  try { v = localStorage.getItem("pace-kpi-tab"); } catch (e) { /* storage off */ }
+  const ok = kpiAllowed();
+  return ok.includes(v) ? v : ok[0];
+}
+function kpiShowTabs(view) {
+  const ok = KPI_VIEWS.includes(view) ? kpiAllowed() : [];
+  kpiTabs.classList.toggle("hidden", ok.length < 2);
+  kpiTabs.querySelectorAll(".kpi-tab").forEach(b => {
+    const on = b.dataset.view === view;
+    b.classList.toggle("hidden", !ok.includes(b.dataset.view));
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  if (KPI_VIEWS.includes(view)) {
+    try { localStorage.setItem("pace-kpi-tab", view); } catch (e) { /* storage off */ }
+  }
+}
 const SALES_VIEWS = ["sales-day", "sales-clients", "sales-deliveries", "sales-kpis", "mg-sales-kpis"];
 // Admin reaches Confirmed weights from Accounting, Purchasing and the Middle
 // office (30 Oct 2026, Clément); this remembers which entry was used, for the
@@ -1902,6 +1928,7 @@ document.getElementById("o-total-amount").addEventListener("input", (e) => {
 // bleeding into each other when a role — or admin — moves between them.
 function hidePaceSections() {
   document.getElementById("pace-crumb").classList.add("hidden");
+  kpiTabs.classList.add("hidden");                  // KPI tabs belong to PACE only
   ordersSection.classList.add("hidden");
   orderEntrySection.classList.add("hidden");
   calculatorSection.classList.add("hidden");
@@ -2001,6 +2028,7 @@ function setPaceTabsForRole() {
   tabSalesDayBtn.classList.toggle("hidden", !items.includes("sales-day"));
   tabSalesKpisBtn.classList.toggle("hidden", !items.includes("sales-kpis"));
   tabMgSalesKpisBtn.classList.toggle("hidden", !items.includes("mg-sales-kpis"));
+  tabKpiBtn.classList.toggle("hidden", !items.includes("management") && !items.includes("mg-sales-kpis"));
   if (items.includes("sales-day")) slStartAlertPoll();              // sales.js: badge on My day (Migration 039)
   document.getElementById("pace-group-sales").classList.toggle("hidden", !items.includes("sales-clients"));
   document.getElementById("pace-group-delivery").classList.toggle("hidden", !items.includes("delivery"));
@@ -2101,6 +2129,8 @@ async function switchPaceView(view) {
   tabSalesDayBtn.classList.toggle("active", view === "sales-day");
   tabSalesKpisBtn.classList.toggle("active", view === "sales-kpis");
   tabMgSalesKpisBtn.classList.toggle("active", view === "mg-sales-kpis");
+  tabKpiBtn.classList.toggle("active", KPI_VIEWS.includes(view));
+  kpiShowTabs(view);
   if (myProfile.role === "purchasing") paceWeightsDept = "Purchasing";
   else if (myProfile.role === "sale_support") paceWeightsDept = "Middle office";
   else if (myProfile.role !== "admin") paceWeightsDept = "Accounting";
@@ -2151,7 +2181,7 @@ async function switchPaceView(view) {
     await openPayables();                             // payables.js
   }
   else if (view === "management") {
-    document.getElementById("list-title").textContent = "Management dashboard";
+    document.getElementById("list-title").textContent = "KPI";
     await openManagement();                           // management.js
   }
   else if (view === "overview") {
@@ -2187,7 +2217,7 @@ async function switchPaceView(view) {
     await openSales(view);
   }
   else if (view === "mg-sales-kpis") {
-    document.getElementById("list-title").textContent = "KPI ฝ่ายขาย — Sales KPIs";
+    document.getElementById("list-title").textContent = "KPI";
     await openSales(view);
   }
 }
@@ -2206,6 +2236,20 @@ tabSalesDelivBtn.addEventListener("click", () => switchPaceView("sales-deliverie
 tabSalesDayBtn.addEventListener("click", () => switchPaceView("sales-day"));
 tabSalesKpisBtn.addEventListener("click", () => switchPaceView("sales-kpis"));
 tabMgSalesKpisBtn.addEventListener("click", () => switchPaceView("mg-sales-kpis"));
+tabKpiBtn.addEventListener("click", () => switchPaceView(kpiLastTab()));
+kpiTabs.addEventListener("click", e => {
+  const b = e.target.closest(".kpi-tab");
+  if (b && !b.classList.contains("active")) switchPaceView(b.dataset.view);
+});
+kpiTabs.addEventListener("keydown", e => {
+  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+  const tabs = [...kpiTabs.querySelectorAll(".kpi-tab:not(.hidden)")];
+  const i = tabs.indexOf(document.activeElement);
+  if (i < 0) return;
+  const next = tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
+  next.focus();
+  switchPaceView(next.dataset.view);
+});
 tabWeightsBtn.addEventListener("click", () => { paceWeightsDept = "Accounting"; switchPaceView("weights"); });
 tabWeightsBuyBtn.addEventListener("click", () => { paceWeightsDept = "Purchasing"; switchPaceView("weights"); });
 tabWeightsMidBtn.addEventListener("click", () => { paceWeightsDept = "Middle office"; switchPaceView("weights"); });

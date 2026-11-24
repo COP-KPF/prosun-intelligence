@@ -4,20 +4,20 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Klong Phai Farm CRM</title>
-<link rel="icon" href="favicon.ico?v=20261124-1" sizes="48x48" />
-<link rel="icon" type="image/png" href="favicon-32.png?v=20261124-1" sizes="32x32" />
-<link rel="icon" type="image/png" href="icon-192.png?v=20261124-1" sizes="192x192" />
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=20261124-1" />
-<link rel="stylesheet" href="styles.css?v=20261124-1" />
-<link rel="stylesheet" href="delivery.css?v=20261124-1" />
-<link rel="stylesheet" href="sales.css?v=20261124-1" />
+<link rel="icon" href="favicon.ico?v=20261124-2" sizes="48x48" />
+<link rel="icon" type="image/png" href="favicon-32.png?v=20261124-2" sizes="32x32" />
+<link rel="icon" type="image/png" href="icon-192.png?v=20261124-2" sizes="192x192" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=20261124-2" />
+<link rel="stylesheet" href="styles.css?v=20261124-2" />
+<link rel="stylesheet" href="delivery.css?v=20261124-2" />
+<link rel="stylesheet" href="sales.css?v=20261124-2" />
 </head>
 <body>
 
   <!-- ============ LOGIN SCREEN ============ -->
   <div id="login-screen">
     <form class="login-card" id="login-form">
-      <img src="logo.png?v=20261124-1" class="login-logo" alt="Klong Phai Farm" width="160" height="120" />
+      <img src="logo.png?v=20261124-2" class="login-logo" alt="Klong Phai Farm" width="160" height="120" />
       <h1>Klong Phai Farm CRM</h1>
       <p class="subtitle">Sign in with the account your admin created for you.</p>
 
@@ -42,7 +42,7 @@
   <div id="app-screen" class="hidden">
     <header class="app-header">
       <div class="brand-wrap">
-      <img src="logo.png?v=20261124-1" class="brand-logo" alt="Klong Phai Farm" width="64" height="48" />
+      <img src="logo.png?v=20261124-2" class="brand-logo" alt="Klong Phai Farm" width="64" height="48" />
       <div class="brand">
         <strong id="app-title">Klong Phai Farm CRM</strong>
         <span class="brand-sub" id="app-subtitle"></span>
@@ -92,10 +92,13 @@
           <div class="pace-nav-head"><span class="pace-dot" aria-hidden="true"></span>Management<small>ผู้บริหาร</small></div>
           <!-- Overview: top line vs budget, sales team, clients, execution (Migration 036) -->
           <button type="button" class="pace-nav-item" id="tab-overview" data-view="overview">Overview<small class="pace-nav-sub">ภาพรวม</small></button>
-          <button type="button" class="pace-nav-item" id="tab-management" data-view="management">Operations<small class="pace-nav-sub">งานประจำวัน</small></button>
+          <!-- KPI (24 Nov 2026): one menu entry; Operations and Sales are tabs on the page (#kpi-tabs).
+               The two former entries stay in the page, never shown, because other screens open them. -->
+          <button type="button" class="pace-nav-item pace-nav-retired" id="tab-management" data-view="management" tabindex="-1" aria-hidden="true">Operations</button>
           <!-- Summary: kg per day and month, approx. revenue, postponement reasons (Migration 031) -->
           <button type="button" class="pace-nav-item" id="tab-mgsummary" data-view="mgsummary">Summary<small class="pace-nav-sub">สรุปผลและรายได้</small></button>
-          <button type="button" class="pace-nav-item" id="tab-mg-sales-kpis" data-view="mg-sales-kpis">Sales KPIs<small class="pace-nav-sub">KPI ฝ่ายขาย</small></button>
+          <button type="button" class="pace-nav-item" id="tab-kpi" data-view="kpi">KPI<small class="pace-nav-sub">ตัวชี้วัด · Operations · Sales</small></button>
+          <button type="button" class="pace-nav-item pace-nav-retired" id="tab-mg-sales-kpis" data-view="mg-sales-kpis" tabindex="-1" aria-hidden="true">Sales KPIs</button>
         </div>
         <!-- Sales: each salesperson's clients, call now / at risk, orders and deliveries of their clients (Migration 037) -->
         <div class="pace-nav-group" id="pace-group-sales">
@@ -165,6 +168,11 @@
           <!-- PACE only: which department this page belongs to -->
           <div id="pace-crumb" class="pace-crumb hidden"></div>
           <h2 id="list-title">Your pipeline</h2>
+          <!-- Management › KPI: Operations | Sales, like browser tabs (24 Nov 2026) -->
+          <div id="kpi-tabs" class="kpi-tabs hidden" role="tablist" aria-label="KPI">
+            <button type="button" class="kpi-tab" role="tab" id="kpi-tab-ops" data-view="management" aria-selected="false">Operations<small>ปฏิบัติการ</small></button>
+            <button type="button" class="kpi-tab" role="tab" id="kpi-tab-sales" data-view="mg-sales-kpis" aria-selected="false">Sales<small>ฝ่ายขาย</small></button>
+          </div>
           <!-- Director only: their own pipeline vs. the org-wide new-leads feed -->
           <div id="director-tabs" class="tabs hidden">
             <button type="button" class="tab-btn active" id="tab-mine" data-view="mine">My pipeline</button>
@@ -683,23 +691,23 @@
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
   <!-- QR code on the weighing screen, so the phone opens the camera page -->
   <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
-  <script src="config.js?v=20261124-1"></script>
-  <script src="weighing-common.js?v=20261124-1"></script>
-  <script src="pace-live.js?v=20261124-1"></script>
+  <script src="config.js?v=20261124-2"></script>
+  <script src="weighing-common.js?v=20261124-2"></script>
+  <script src="pace-live.js?v=20261124-2"></script>
   <!-- weighing.js before app.js: app.js starts the app as soon as it loads,
        and a signed-in factory admin goes straight to openWeighing(). -->
-  <script src="weighing.js?v=20261124-1"></script>
-  <script src="split-form.js?v=20261124-1"></script>
-  <script src="weights-summary.js?v=20261124-1"></script>
-  <script src="postponed.js?v=20261124-1"></script>
-  <script src="delivery.js?v=20261124-1"></script>
-  <script src="sales.js?v=20261124-1"></script>
-  <script src="management.js?v=20261124-1"></script>
-  <script src="management-summary.js?v=20261124-1"></script>
-  <script src="management-overview.js?v=20261124-1"></script>
-  <script src="payables-common.js?v=20261124-1"></script>
-  <script src="payables.js?v=20261124-1"></script>
-  <script src="notifications.js?v=20261124-1"></script>
-  <script src="app.js?v=20261124-1"></script>
+  <script src="weighing.js?v=20261124-2"></script>
+  <script src="split-form.js?v=20261124-2"></script>
+  <script src="weights-summary.js?v=20261124-2"></script>
+  <script src="postponed.js?v=20261124-2"></script>
+  <script src="delivery.js?v=20261124-2"></script>
+  <script src="sales.js?v=20261124-2"></script>
+  <script src="management.js?v=20261124-2"></script>
+  <script src="management-summary.js?v=20261124-2"></script>
+  <script src="management-overview.js?v=20261124-2"></script>
+  <script src="payables-common.js?v=20261124-2"></script>
+  <script src="payables.js?v=20261124-2"></script>
+  <script src="notifications.js?v=20261124-2"></script>
+  <script src="app.js?v=20261124-2"></script>
 </body>
 </html>
