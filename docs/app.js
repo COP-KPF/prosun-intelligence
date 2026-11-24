@@ -1276,6 +1276,30 @@ function kpiShowTabs(view) {
     try { localStorage.setItem("pace-kpi-tab", view); } catch (e) { /* storage off */ }
   }
 }
+// Management › Summary (24 Nov 2026): Summary ("mgsummary") and Orders
+// ("mgorders", Migration 045) as two tabs on the page, like KPI.
+const sumTabs            = document.getElementById("sum-tabs");
+const SUM_VIEWS          = ["mgsummary", "mgorders"];
+function sumAllowed() { return SUM_VIEWS.filter(v => (PACE_MENU[myProfile.role] || []).includes(v)); }
+function sumLastTab() {
+  let v = null;
+  try { v = localStorage.getItem("pace-sum-tab"); } catch (e) { /* storage off */ }
+  const ok = sumAllowed();
+  return ok.includes(v) ? v : ok[0];
+}
+function sumShowTabs(view) {
+  const ok = SUM_VIEWS.includes(view) ? sumAllowed() : [];
+  sumTabs.classList.toggle("hidden", ok.length < 2);
+  sumTabs.querySelectorAll(".kpi-tab").forEach(b => {
+    const on = b.dataset.view === view;
+    b.classList.toggle("hidden", !ok.includes(b.dataset.view));
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  if (SUM_VIEWS.includes(view)) {
+    try { localStorage.setItem("pace-sum-tab", view); } catch (e) { /* storage off */ }
+  }
+}
 const SALES_VIEWS = ["sales-day", "sales-clients", "sales-deliveries", "sales-kpis", "mg-sales-kpis"];
 // Admin reaches Confirmed weights from Accounting, Purchasing and the Middle
 // office (30 Oct 2026, Clément); this remembers which entry was used, for the
@@ -1930,6 +1954,7 @@ document.getElementById("o-total-amount").addEventListener("input", (e) => {
 function hidePaceSections() {
   document.getElementById("pace-crumb").classList.add("hidden");
   kpiTabs.classList.add("hidden");                  // KPI tabs belong to PACE only
+  sumTabs.classList.add("hidden");                  // so do the Summary tabs
   ordersSection.classList.add("hidden");
   orderEntrySection.classList.add("hidden");
   calculatorSection.classList.add("hidden");
@@ -1989,14 +2014,14 @@ function setupPaceRole() {
 // This is the screen only; the database's RLS still decides what each role
 // can read (purchasing reads orders because the calculator is built on them).
 const PACE_MENU = {
-  admin:         ["overview", "management", "mgsummary", "mg-sales-kpis", "special-care", "sales-day", "sales-clients", "sales-deliveries", "orders", "postponed", "calculator", "weighing", "delivery", "payables", "weights"],
+  admin:         ["overview", "management", "mgsummary", "mgorders", "mg-sales-kpis", "special-care", "sales-day", "sales-clients", "sales-deliveries", "orders", "postponed", "calculator", "weighing", "delivery", "payables", "weights"],
   sale_support:  ["orders", "confirm-birds", "postponed", "weights", "delivery"],
   purchasing:    ["calculator", "weights"],
   production:    ["weighing"],
   factory_admin: ["weighing"],
   accounting:    ["payables", "weights"],
   delivery:      ["delivery"],
-  company_director: ["management", "mgsummary", "postponed", "delivery", "weights"],   // Migration 032, read-only
+  company_director: ["management", "mgsummary", "mgorders", "postponed", "delivery", "weights"],   // Migration 032, read-only
   // Sales (Migration 037, 18 Nov 2026): the salespeople and the sales director
   // reach PACE from the chooser; they keep the CRM until it moves into PACE.
   sales:         ["sales-day", "sales-clients", "sales-deliveries", "sales-kpis"],   // + My day, My KPIs (Migration 039)
@@ -2005,7 +2030,7 @@ const PACE_MENU = {
 // Roles that have both systems and choose at sign-in (admin, and the sales team since Migration 037).
 const CHOOSER_ROLES = ["admin", "sales", "director"];
 const PACE_HOME = { admin: "overview", sale_support: "orders", purchasing: "calculator", production: "weighing", factory_admin: "weighing", accounting: "weights", delivery: "delivery", company_director: "management", sales: "sales-day", director: "sales-day" };
-const PACE_DEPT = { orders: "Middle office", postponed: "Middle office", calculator: "Purchasing", weighing: "Production", weights: "Accounting", payables: "Accounting", management: "Management", mgsummary: "Management", overview: "Management", delivery: "Delivery", "sales-clients": "Sales", "sales-deliveries": "Sales", "sales-day": "Sales", "sales-kpis": "Sales", "mg-sales-kpis": "Management", "special-care": "Management" };
+const PACE_DEPT = { orders: "Middle office", postponed: "Middle office", calculator: "Purchasing", weighing: "Production", weights: "Accounting", payables: "Accounting", management: "Management", mgsummary: "Management", mgorders: "Management", overview: "Management", delivery: "Delivery", "sales-clients": "Sales", "sales-deliveries": "Sales", "sales-day": "Sales", "sales-kpis": "Sales", "mg-sales-kpis": "Management", "special-care": "Management" };
 
 function setPaceTabsForRole() {
   const items = PACE_MENU[myProfile && myProfile.role] || [];
@@ -2122,7 +2147,8 @@ async function switchPaceView(view) {
   tabWeighingBtn.classList.toggle("active", view === "weighing");
   tabPayablesBtn.classList.toggle("active", view === "payables");
   tabManagementBtn.classList.toggle("active", view === "management");
-  tabMgSummaryBtn.classList.toggle("active", view === "mgsummary");
+  tabMgSummaryBtn.classList.toggle("active", SUM_VIEWS.includes(view));
+  sumShowTabs(view);
   tabOverviewBtn.classList.toggle("active", view === "overview");
   tabPostponedBtn.classList.toggle("active", view === "postponed");
   tabDeliveryBtn.classList.toggle("active", view === "delivery");
@@ -2154,6 +2180,7 @@ async function switchPaceView(view) {
   if (view !== "weights") closeWeights();            // weights-summary.js
   if (view !== "management") closeManagement();      // management.js
   if (view !== "mgsummary") closeSummary();          // management-summary.js
+  if (view !== "mgorders") moClose();                // management-orders.js
   if (view !== "overview") closeOverview();          // management-overview.js
   if (view !== "payables") closePayables();          // payables.js
   if (view !== "postponed") closePostponed();        // postponed.js
@@ -2193,8 +2220,12 @@ async function switchPaceView(view) {
     await openOverview();                             // management-overview.js
   }
   else if (view === "mgsummary") {
-    document.getElementById("list-title").textContent = "Summary and revenue";
+    document.getElementById("list-title").textContent = "Summary";
     await openSummary();                              // management-summary.js
+  }
+  else if (view === "mgorders") {
+    document.getElementById("list-title").textContent = "Summary";
+    await moOpenView();                               // management-orders.js (Migration 045)
   }
   else if (view === "postponed") {
     document.getElementById("list-title").textContent = "ออเดอร์ที่ถูกเลื่อน — Postponed orders";
@@ -2234,7 +2265,20 @@ tabCalculatorBtn.addEventListener("click", () => switchPaceView("calculator"));
 tabWeighingBtn.addEventListener("click", () => switchPaceView("weighing"));
 tabConfirmBirdsBtn.addEventListener("click", () => switchPaceView("calculator"));
 tabManagementBtn.addEventListener("click", () => switchPaceView("management"));
-tabMgSummaryBtn.addEventListener("click", () => switchPaceView("mgsummary"));
+tabMgSummaryBtn.addEventListener("click", () => switchPaceView(sumLastTab()));
+sumTabs.addEventListener("click", e => {
+  const b = e.target.closest(".kpi-tab");
+  if (b && !b.classList.contains("active")) switchPaceView(b.dataset.view);
+});
+sumTabs.addEventListener("keydown", e => {
+  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+  const tabs = [...sumTabs.querySelectorAll(".kpi-tab:not(.hidden)")];
+  const i = tabs.indexOf(document.activeElement);
+  if (i < 0) return;
+  const next = tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
+  next.focus();
+  switchPaceView(next.dataset.view);
+});
 tabOverviewBtn.addEventListener("click", () => switchPaceView("overview"));
 tabPayablesBtn.addEventListener("click", () => switchPaceView("payables"));
 tabPostponedBtn.addEventListener("click", () => switchPaceView("postponed"));
@@ -2318,6 +2362,7 @@ async function refreshPaceView() {
     else if (view === "weights") await wsLoad();
     else if (view === "management") await mgLoad();
     else if (view === "mgsummary") await smLoad();
+    else if (view === "mgorders") await moLoad();                     // management-orders.js (Migration 045)
     else if (view === "overview") await ovLoad();
     else if (view === "payables") { await pyFlush(); await pyLoad(); }
     else if (view === "postponed") await ppLoad();

@@ -2396,3 +2396,46 @@ body.pace-readonly #weights-table tr.ws-row { cursor: default; }
 .sc-last-confirmed { color: #1f5c39; }
 .sc-last-postponed { color: #9b2c24; }
 .sc-last-read { color: #7a4b00; }
+
+/* ---------------------------------------------------------------------------
+   Management › Summary › Orders (24 Nov 2026, Migration 045)
+   --------------------------------------------------------------------------- */
+#mgorders-section {
+  --mg-done: #2e7d4f; --mg-open: #c9892b; --mg-alert: #a8262c; --mg-good: #1e6b3a;
+  display: flex; flex-direction: column; gap: 16px;
+  font-family: -apple-system, "Segoe UI", "Noto Sans Thai", "Leelawadee UI", Tahoma, sans-serif;
+}
+#mgorders-section h3 { margin: 0; font-size: 1.02rem; }
+#mgorders-section p { margin: 0; }
+#mgorders-section select { min-height: 38px; width: auto; }
+#mo-body, #mo-figures { display: flex; flex-direction: column; gap: 16px; }
+.mo-table .mo-nowrap { white-space: nowrap; }
+.mo-dates { display: inline-flex; align-items: center; gap: 6px; }
+.mo-dates input[type="date"] { min-height: 38px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 8px; font: inherit; background: #fff; color: var(--text); }
+.mo-tiles { margin-top: 4px; }
+.mo-tools { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px 16px; margin-bottom: 12px; }
+.mo-tools-right { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mo-q { width: 280px; min-height: 38px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px; font: inherit; background: #fff; color: var(--text); }
+.mo-q:focus-visible { outline: 3px solid #d9c8a6; outline-offset: 2px; }
+.mo-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.mo-filter { min-height: 34px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--accent); background: #eef3ef; color: var(--accent); font: inherit; font-size: 0.86rem; font-weight: 600; cursor: pointer; }
+.mo-filter:hover { background: #e2ebe4; }
+.mo-measure { margin-bottom: 4px; }
+.mo-table-head { margin-top: 6px; }
+.mo-link { padding: 0; min-height: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: #cbbf9f; text-underline-offset: 3px; }
+.mo-link:hover { color: var(--accent); text-decoration-color: var(--accent); }
+.mo-tag { display: inline-block; padding: 0 6px; border-radius: 999px; background: #f1ead9; color: var(--muted); font-size: 0.74rem; font-weight: 600; white-space: nowrap; }
+.mo-sub { color: var(--muted); font-size: 0.82rem; }
+.mo-zero { color: #c9bfa8; }
+.mo-wrap { max-height: 70vh; overflow: auto; }
+.mo-table thead th { position: sticky; top: 0; z-index: 2; }
+.mo-table .mo-stick { position: sticky; left: 0; z-index: 1; background: var(--panel); min-width: 180px; max-width: 280px; }
+.mo-table thead .mo-stick { z-index: 3; background: var(--accent); }
+.mo-table .mo-tot { font-weight: 700; background: #f8f3e8; }
+.mo-table thead .mo-tot { background: var(--accent); }
+.mo-table tr.mg-total td { background: #f8f3e8; }
+@media (max-width: 700px) {
+  .mo-q { width: 100%; }
+  .mo-tools-right { width: 100%; }
+  .mo-table .mo-stick { min-width: 130px; }
+}
