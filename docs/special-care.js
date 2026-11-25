@@ -26,6 +26,8 @@ const SC = {
   // admin page
   list: null, loading: false, message: null, q: "", results: [], searching: false,
   last: {}, lastMissing: false,  // code → last order (Migration 044)
+  ov: null, ovMissing: false,    // cards' figures (Migration 049)
+  view: "cards", fileCode: null, files: {}, filter: "all", cq: "", adding: false,
   edit: null,         // { code, name, no_postpone, exact_quantity, priority_delivery, delivery_window, instructions, isNew }
   saving: false,
 };
@@ -185,8 +187,13 @@ function scIsCheckRequired(error) {
 
 
 // ============================================================================
-// Admin page — Management › Special care
+// Admin page — Management › Special care (cards + client file, Migration 049)
 // ============================================================================
+// Clément, 25 Nov 2026: design options A (one card per client) and C (client
+// file) chosen. Cards: stats, filters, one card per client with the rules,
+// instructions, last order and the order days of the last 30 days. A click
+// opens the client file: figures for 30 days, the last orders with ordered and
+// weighed quantities, the usual basket and the postponements.
 async function scOpen() {
   if (!scSection) return;
   if (typeof paceLiveStart === "function") paceLiveStart();
@@ -203,6 +210,9 @@ function scClose() {
   SC.edit = null;
   SC.results = [];
   SC.q = "";
+  SC.adding = false;
+  SC.view = "cards";
+  SC.fileCode = null;
 }
 function scPageOpen() { return scSection && !scSection.classList.contains("hidden"); }
 
@@ -210,11 +220,14 @@ async function scLoad() {
   if (!scPageOpen()) return;
   scReadForm();                          // a half-filled form survives the reload
   SC.loading = true;
-  const [{ data, error }, lo] = await Promise.all([sb.rpc("special_care_list"), sb.rpc("special_care_last_orders")]);
+  const [{ data, error }, lo, ov] = await Promise.all([
+    sb.rpc("special_care_list"), sb.rpc("special_care_last_orders"), sb.rpc("special_care_overview")]);
   SC.loading = false;
-  // Last order of each client (Migration 044). Before 044: the column says so.
   SC.lastMissing = !!lo.error && scIsMissing(lo.error);
   SC.last = lo.error ? {} : (lo.data || {});
+  // Cards' figures (Migration 049). Before 049 the cards show without them.
+  SC.ovMissing = !!ov.error && scIsMissing(ov.error);
+  SC.ov = ov.error ? null : ov.data;
   if (error) {
     SC.list = null;
     SC.message = { kind: "err", text: scIsMissing(error)
@@ -224,93 +237,258 @@ async function scLoad() {
     SC.list = data || [];
     SC.list.forEach((c) => { SC.clients[c.code] = c; });
   }
+  if (SC.view === "file" && SC.fileCode) {
+    if (!(SC.list || []).some((c) => c.code === SC.fileCode)) { SC.view = "cards"; SC.fileCode = null; }
+    else await scLoadFile(SC.fileCode, true);
+  }
   scDraw();
+}
+
+async function scLoadFile(code, quiet) {
+  if (!quiet) { SC.files[code] = SC.files[code] || null; scDraw(); }
+  const { data, error } = await sb.rpc("special_care_client_file", { p_code: code });
+  SC.files[code] = error ? { error: scIsMissing(error)
+    ? T("รัน Migration 049 ใน Supabase เพื่อดูแฟ้มลูกค้า", "Run Migration 049 in Supabase to see the client file.")
+    : T("โหลดไม่สำเร็จ: ", "Could not load: ") + error.message } : data;
+  if (!quiet) scDraw();
+}
+
+function scOv(code) { return (SC.ov && SC.ov.clients && SC.ov.clients[code]) || null; }
+
+// Card filters: all, ordered today / yesterday, quiet, never ordered, one per salesperson.
+function scFilters(list) {
+  const reps = [...new Set(list.map((c) => (scOv(c.code) || {}).rep).filter(Boolean))].sort((a, b) =>
+    (a === "House") - (b === "House") || a.localeCompare(b));
+  const f = [
+    { k: "all", label: T(`ทั้งหมด ${list.length}`, `All ${list.length}`) },
+    { k: "recent", label: T("สั่งวันนี้ / เมื่อวาน", "Ordered today / yesterday") },
+    { k: "quiet", label: T("เงียบเกิน 14 วัน", "Quiet > 14 days") },
+    { k: "none", label: T("ยังไม่มีออเดอร์", "No order yet") },
+  ];
+  if (SC.ov) reps.forEach((r) => f.push({ k: "rep:" + r, label: r }));
+  return f;
+}
+function scMatchFilter(c) {
+  const o = scOv(c.code) || {};
+  const ds = o.days_since;
+  const f = SC.filter || "all";
+  if (f === "recent") return (ds !== null && ds !== undefined && ds <= 1) || !!o.next_order;
+  if (f === "quiet") return ds !== null && ds !== undefined && ds > 14 && !o.next_order;
+  if (f === "none") return ds === null || ds === undefined;
+  if (f.startsWith("rep:")) return o.rep === f.slice(4);
+  return true;
+}
+function scMatchSearch(c) {
+  const q = (SC.cq || "").trim().toLowerCase();
+  if (!q) return true;
+  const l = (SC.last[c.code] || {}).last;
+  const hay = [c.name, c.code, c.instructions, (scOv(c.code) || {}).rep, ...(c.paper_names || []),
+               ...((l && l.lines) || []).map((x) => x.description)].join(" ").toLowerCase();
+  return hay.includes(q);
 }
 
 function scDraw() {
   if (!scPageOpen()) return;
-  const list = SC.list || [];
   const msg = SC.message ? `<div class="${SC.message.kind === "ok" ? "pp-ok" : "mg-msg"}" id="sc-msg" role="status">${escapeHtml(SC.message.text)}</div>` : "";
-  const editing = SC.edit;
-  scSection.innerHTML = `
+  scSection.innerHTML = SC.view === "file" && SC.fileCode ? scFileHtml(msg) : scCardsHtml(msg);
+}
+
+function scCardsHtml(msg) {
+  const list = SC.list || [];
+  const st = (SC.ov && SC.ov.stats) || null;
+  const shown = list.filter((c) => scMatchFilter(c) && scMatchSearch(c))
+    .sort((a, b) => scSortKey(a) - scSortKey(b) || a.name.localeCompare(b.name));
+  const tile = (label, value, sub, cls) => `<div class="sc-stat${cls ? " " + cls : ""}"><span class="sc-stat-l">${escapeHtml(label)}</span>
+    <span class="sc-stat-v">${escapeHtml(String(value))}</span><span class="sc-stat-s">${escapeHtml(sub)}</span></div>`;
+  return `
     <div class="sc-bar">
       <p class="mg-small mg-muted">${escapeHtml(T(
-        "ลูกค้าที่ต้องดูแลพิเศษ — ฝ่ายผลิต มิดเดิลออฟฟิศ ฝ่ายจัดส่ง และฝ่ายขาย เห็นป้าย ⭐ และคำแนะนำบนออเดอร์ของลูกค้ารายนี้ ฝ่ายผลิตต้องติ๊ก “ตรวจการดูแลพิเศษแล้ว” ก่อนยืนยันน้ำหนัก",
-        "Clients who need special care — production, the middle office, delivery and sales see the ⭐ tag and the instructions on this client's orders. Production must tick “special care checked” before confirming the weights."))}</p>
+        "ลูกค้าที่ต้องดูแลพิเศษ — ฝ่ายผลิต มิดเดิลออฟฟิศ ฝ่ายจัดส่ง และฝ่ายขาย เห็นป้าย ⭐ และคำแนะนำบนออเดอร์ของลูกค้ารายนี้ ฝ่ายผลิตต้องติ๊ก “ตรวจการดูแลพิเศษแล้ว” ก่อนยืนยันน้ำหนัก กดที่การ์ดเพื่อเปิดแฟ้มลูกค้า",
+        "Clients who need special care — production, the middle office, delivery and sales see the ⭐ tag and the instructions on this client's orders; production ticks “special care checked” before confirming the weights. Click a card to open the client file."))}</p>
       ${weighLangHtml()}
     </div>
     ${msg}
-    <section class="mg-card sc-add">
+    <div class="sc-tools">
+      <label class="sc-cq"><span class="pp-sr">${escapeHtml(T("ค้นหาในลูกค้าดูแลพิเศษ", "Search the special care clients"))}</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+        <input id="sc-cq" type="search" autocomplete="off" value="${escapeAttr(SC.cq || "")}" placeholder="${escapeAttr(T("ลูกค้า รหัส หรือสินค้า", "Client, code or product"))}"></label>
+      <button type="button" class="w-btn" data-sc-act="add-toggle" aria-expanded="${SC.adding ? "true" : "false"}">${escapeHtml(SC.adding ? T("ปิด", "Close") : T("+ เพิ่มลูกค้า", "+ Add client"))}</button>
+    </div>
+    ${SC.adding ? `<section class="mg-card sc-add">
       <h3>${escapeHtml(T("เพิ่มลูกค้าดูแลพิเศษ", "Add a special care client"))}</h3>
       <div class="sc-search">
         <label for="sc-q" class="pp-sr">${escapeHtml(T("ค้นหาลูกค้า (ชื่อหรือรหัส)", "Find a client (name or code)"))}</label>
         <input id="sc-q" type="search" autocomplete="off" value="${escapeAttr(SC.q)}" placeholder="${escapeAttr(T("ชื่อลูกค้าหรือรหัส เช่น CR010", "Client name or code, e.g. CR010"))}">
       </div>
       <div id="sc-results">${scResultsHtml()}</div>
-    </section>
-    ${editing ? scFormHtml(editing) : ""}
-    <section class="mg-card">
-      <h3>${escapeHtml(T("ลูกค้าดูแลพิเศษ", "Special care clients"))} <span class="mg-muted mg-small">${list.length}</span></h3>
-      ${SC.list === null ? "" : list.length ? `<div class="table-scroll"><table class="sc-table">
-        <thead><tr><th>${escapeHtml(T("ลูกค้า", "Client"))}</th>
-          <th>${escapeHtml(T("กฎ · คำแนะนำการดูแลพิเศษ", "Rules · special care instructions"))}</th>
-          <th>${escapeHtml(T("ออเดอร์ล่าสุด", "Last order"))}</th>
-          <th>${escapeHtml(T("แก้ไขล่าสุด", "Last change"))}</th><th></th></tr></thead>
-        <tbody>${list.map((c) => `<tr data-code="${escapeAttr(c.code)}">
-          <td class="sc-client-cell"><strong>${escapeHtml(c.name)}</strong> <span class="mg-muted mg-small">${escapeHtml(c.code)}</span>
-            <div class="sc-names-cell"><span class="mg-muted mg-small">${escapeHtml(T("ชื่อบนใบงาน:", "Names on papers:"))}</span>
-            ${(c.paper_names || []).length
-              ? (c.paper_names || []).map((n) => `<span class="sc-name">${escapeHtml(n)}</span>`).join(" ")
-              : `<span class="sc-nolink">${escapeHtml(T("ยังไม่มีชื่อบนใบงานที่เชื่อมกับรหัสนี้ — ใบงานจะยังไม่ขึ้นป้าย เชื่อมได้ที่ ฝ่ายขาย › ลูกค้า", "No working-paper name linked to this code yet — papers will not be flagged. Link one in Sales › Clients."))}</span>`}</div></td>
-          <td class="sc-rules-cell">${scRulesHtml(c) || ""}
-            ${c.instructions ? `<div class="sc-instr-cell">${escapeHtml(c.instructions)}</div>` : ""}</td>
-          <td class="sc-last-cell">${scLastHtml(c.code)}</td>
-          <td class="mg-small">${escapeHtml(c.updated_by_name || "")}<br><span class="mg-muted">${escapeHtml(scTime(c.updated_at))}</span></td>
-          <td class="sc-acts"><button type="button" class="ws-chip" data-sc-act="edit" data-code="${escapeAttr(c.code)}">${escapeHtml(T("แก้ไข", "Edit"))}</button>
-            <button type="button" class="ws-chip sc-remove" data-sc-act="remove" data-code="${escapeAttr(c.code)}">${escapeHtml(T("เอาออก", "Remove"))}</button></td>
-        </tr>`).join("")}</tbody></table></div>`
-      : `<p class="mg-muted">${escapeHtml(T("ยังไม่มีลูกค้าดูแลพิเศษ — ค้นหาลูกค้าด้านบนเพื่อเพิ่ม", "No special care client yet — find a client above to add one."))}</p>`}
-    </section>`;
+    </section>` : ""}
+    ${SC.edit && SC.edit.isNew ? scFormHtml(SC.edit) : ""}
+    ${SC.ovMissing ? `<div class="mg-msg" role="status">${escapeHtml(T("รัน Migration 049 ใน Supabase เพื่อดูตัวเลขบนการ์ด", "Run Migration 049 in Supabase to see the figures on the cards."))}</div>` : ""}
+    ${st ? `<div class="sc-stats">
+      ${tile(T("ลูกค้าดูแลพิเศษ", "Special care clients"), st.clients, T(`${list.filter((c) => c.no_postpone).length} ห้ามเลื่อน · ${list.filter((c) => c.priority_delivery).length} ส่งก่อน`, `${list.filter((c) => c.no_postpone).length} No postpone · ${list.filter((c) => c.priority_delivery).length} Priority`))}
+      ${tile(T("มีออเดอร์วันนี้", "Ordering today"), st.ordering_today, T("ใบงานส่งวันนี้", "papers due today"))}
+      ${tile(T("ถูกเลื่อน 7 วัน", "Postponed, last 7 days"), st.postponed_7d, T("ผู้บริหารได้รับแจ้งทุกครั้ง", "management was notified each time"), st.postponed_7d ? "sc-stat-bad" : "")}
+      ${tile(T("เงียบเกิน 14 วัน", "Quiet > 14 days"), st.quiet_14, T(`${st.no_order} รายยังไม่มีออเดอร์ใน PACE`, `${st.no_order} with no order in PACE yet`), st.quiet_14 ? "sc-stat-warn" : "")}
+    </div>` : ""}
+    <div class="sc-filters" role="group" aria-label="${escapeAttr(T("ตัวกรอง", "Filters"))}">
+      ${scFilters(list).map((f) => `<button type="button" class="sc-filter${(SC.filter || "all") === f.k ? " on" : ""}" data-sc-act="filter" data-k="${escapeAttr(f.k)}" aria-pressed="${(SC.filter || "all") === f.k}">${escapeHtml(f.label)}</button>`).join("")}
+    </div>
+    ${SC.list === null ? "" : !list.length
+      ? `<p class="mg-muted">${escapeHtml(T("ยังไม่มีลูกค้าดูแลพิเศษ — กด “+ เพิ่มลูกค้า”", "No special care client yet — use “+ Add client”."))}</p>`
+      : !shown.length ? `<p class="mg-muted">${escapeHtml(T("ไม่มีลูกค้าตรงกับตัวกรองนี้", "No client matches this filter."))}</p>`
+      : `<div class="sc-cards">${shown.map(scCardHtml).join("")}</div>`}`;
 }
 
-// Last order of a client (Migration 044): date, PO, status, products and
-// quantities; the last Odoo invoice when PACE has no working paper yet.
-const SC_LINES_SHOWN = 4;
-function scLastHtml(code) {
-  if (SC.lastMissing) return `<span class="mg-muted mg-small">${escapeHtml(T("รัน Migration 044 เพื่อดูออเดอร์ล่าสุด", "Run Migration 044 to see the last order"))}</span>`;
-  const x = SC.last[code];
-  if (!x) return `<span class="mg-muted">—</span>`;
-  const n30 = Number(x.orders_30) || 0;
-  const count = `<div class="sc-last-count">${escapeHtml(n30
-    ? T(`${n30} ออเดอร์ใน 30 วัน`, `${n30} order${n30 > 1 ? "s" : ""} in the last 30 days`)
-    : T("ไม่มีออเดอร์ใน 30 วัน", "No order in the last 30 days"))}</div>`;
-  const l = x.last;
-  if (!l) {
-    const inv = x.invoice;
-    if (!inv) return `<span class="mg-muted">${escapeHtml(T("ยังไม่มีออเดอร์ใน PACE", "No order in PACE yet"))}</span>`;
-    return `<div class="sc-last-head"><strong>${escapeHtml(weighThaiDate(inv.invoice_date, { day: "numeric", month: "short", year: "numeric" }))}</strong>
-      <span class="mg-muted">${escapeHtml(scAgo(inv.invoice_date))}</span></div>
-      <div class="mg-small">${escapeHtml(T("ใบแจ้งหนี้ Odoo", "Odoo invoice"))} ${escapeHtml(inv.number || "")}${inv.total != null ? ` · ฿${Number(inv.total).toLocaleString("en-US", { maximumFractionDigits: 0 })}` : ""}</div>
-      <div class="mg-muted mg-small">${escapeHtml(T("ไม่มีรายละเอียดสินค้า (ยังไม่มีใบงานใน PACE)", "No product detail (no working paper in PACE yet)"))}</div>${count}`;
-  }
-  const status = l.status === "confirmed" ? T("ยืนยันน้ำหนักแล้ว", "Weights confirmed")
-    : l.status === "postponed" ? T("ถูกเลื่อน", "Postponed") : T("รอชั่ง / ตรวจ", "Being weighed");
-  const lines = (l.lines || []);
-  const lineHtml = (w) => {
-    const ordered = w.ordered_text || (w.ordered_qty != null ? `${Number(w.ordered_qty)} ${weighUnit(w.ordered_unit)}` : "");
-    const kg = w.actual_kg != null && l.status === "confirmed" ? `<span class="sc-kg">${escapeHtml(weighFmt(w.actual_kg))} kg</span>` : "";
-    return `<li><span class="sc-prod">${escapeHtml(w.description || "—")}</span> <span class="sc-qty">${escapeHtml(ordered)}</span>${kg ? " · " + kg : ""}</li>`;
-  };
-  const shown = lines.slice(0, SC_LINES_SHOWN).map(lineHtml).join("");
-  const more = lines.length > SC_LINES_SHOWN
-    ? `<details class="sc-more"><summary>${escapeHtml(T(`อีก ${lines.length - SC_LINES_SHOWN} รายการ`, `${lines.length - SC_LINES_SHOWN} more`))}</summary><ul class="sc-lines">${lines.slice(SC_LINES_SHOWN).map(lineHtml).join("")}</ul></details>` : "";
-  return `<div class="sc-last-head"><strong>${escapeHtml(weighThaiDate(l.order_date, { weekday: "short", day: "numeric", month: "short" }))}</strong>
-      <span class="mg-muted">${escapeHtml(scAgo(l.order_date))}</span></div>
-    <div class="mg-small">${l.po_number ? escapeHtml(l.po_number) : escapeHtml(T("ไม่มีเลข PO", "no PO"))}${l.part ? ` · ${escapeHtml(T("ส่วนที่", "Part"))} ${Number(l.part)}` : ""} · ${escapeHtml(weighCompanyShort(l.company))} · <span class="sc-last-status sc-last-${escapeAttr(l.status)}">${escapeHtml(status)}</span></div>
-    ${lines.length ? `<ul class="sc-lines">${shown}</ul>${more}` : `<div class="mg-muted mg-small">${escapeHtml(T("ยังไม่มีรายการสินค้า", "No product lines yet"))}</div>`}
-    ${l.status === "confirmed" && l.total_kg != null ? `<div class="mg-small"><strong>${escapeHtml(T("รวม", "Total"))} ${escapeHtml(weighFmt(l.total_kg))} kg</strong></div>` : ""}
-    ${count}`;
+// Cards: newest order first, quiet ones after, never ordered last.
+function scSortKey(c) {
+  const o = scOv(c.code);
+  if (o) return o.next_order ? -1 : o.days_since === null || o.days_since === undefined ? 9999 : o.days_since;
+  const l = (SC.last[c.code] || {}).last;
+  return l ? -new Date(l.order_date).getTime() / 864e5 : 9999;
 }
+
+function scAgePill(c) {
+  const o = scOv(c.code);
+  const l = (SC.last[c.code] || {}).last;
+  let d = o ? o.days_since : l ? weighDaysBetween(l.order_date, weighBangkokToday()) : null;
+  if (o && o.next_order) return `<span class="sc-age sc-age-ok">${escapeHtml(T("ถัดไป ", "Next ") + weighDayShort(o.next_order))}</span>`;
+  if (d === null || d === undefined) return `<span class="sc-age sc-age-none">${escapeHtml(T("ยังไม่มีออเดอร์", "No order yet"))}</span>`;
+  if (d < 0) return `<span class="sc-age sc-age-ok">${escapeHtml(scAgo(l.order_date))}</span>`;
+  const cls = d <= 7 ? "sc-age-ok" : d <= 14 ? "sc-age-mid" : "sc-age-bad";
+  const txt = d === 0 ? T("วันนี้", "Today") : d === 1 ? T("เมื่อวาน", "Yesterday") : T(`${d} วันก่อน`, `${d} days ago`);
+  return `<span class="sc-age ${cls}">${escapeHtml(txt)}</span>`;
+}
+
+function scStatusText(status, delivery) {
+  if (delivery) return { delivered: T("ส่งแล้ว", "Delivered"), out: T("ระหว่างส่ง", "On the road"), dispatch: T("ที่ศูนย์กระจาย", "At dispatch"), problem: T("ปัญหาการส่ง", "Delivery problem") }[delivery] || delivery;
+  return status === "confirmed" ? T("ยืนยันน้ำหนักแล้ว", "Weights confirmed")
+    : status === "postponed" ? T("ถูกเลื่อน", "Postponed") : T("รอชั่ง / ตรวจ", "Being weighed");
+}
+function scQty(w) {
+  return w.ordered_text || (w.ordered_qty != null ? `${Number(w.ordered_qty)} ${weighUnit(w.ordered_unit)}` : "");
+}
+
+function scCardHtml(c) {
+  const o = scOv(c.code);
+  const x = SC.last[c.code] || {};
+  const l = x.last;
+  const lines = (l && l.lines) || [];
+  const strip = o ? `<div class="sc-strip-head"><span>${escapeHtml(T("30 วันล่าสุด", "Last 30 days"))}</span>
+      <span><strong>${o.n30}</strong> ${escapeHtml(T("ออเดอร์", o.n30 === 1 ? "order" : "orders"))} · ${escapeHtml(weighFmt(o.kg30, 0))} kg${o.postponed30 ? ` · <span class="sc-bad">${escapeHtml(T(`เลื่อน ${o.postponed30}`, `${o.postponed30} postponed`))}</span>` : ""}</span></div>
+    <div class="sc-strip" role="img" aria-label="${escapeAttr(T(`มีออเดอร์ ${(o.days30 || []).length} วันใน 30 วัน`, `Orders on ${(o.days30 || []).length} of the last 30 days`))}">${
+      Array.from({ length: 30 }, (_, i) => `<span${(o.days30 || []).includes(29 - i) ? ' class="on"' : ""}></span>`).join("")}</div>` : "";
+  let last;
+  if (SC.lastMissing) last = "";
+  else if (l) last = `<div class="sc-card-last-head"><span><strong>${escapeHtml(T("ออเดอร์ล่าสุด", "Last order"))}</strong> · ${escapeHtml(weighDayShort(l.order_date))}${l.po_number ? " · " + escapeHtml(l.po_number) : ""}</span>
+        <span class="sc-last-status sc-last-${escapeAttr(l.status)}">${escapeHtml(scStatusText(l.status))}</span></div>
+      <ul class="sc-lines">${lines.slice(0, 3).map((w) => `<li><span class="sc-prod">${escapeHtml(w.description || "—")}</span>
+        <span class="sc-qty">${escapeHtml(scQty(w))}${w.actual_kg != null && l.status === "confirmed" ? ` · <strong>${escapeHtml(weighFmt(w.actual_kg))} kg</strong>` : ""}</span></li>`).join("")}</ul>
+      ${lines.length > 3 ? `<span class="sc-more-n">${escapeHtml(T(`+ อีก ${lines.length - 3} รายการ`, `+ ${lines.length - 3} more`))}</span>` : ""}`;
+  else if (x.invoice) last = `<div class="sc-card-last-head"><span><strong>${escapeHtml(T("ใบแจ้งหนี้ Odoo ล่าสุด", "Last Odoo invoice"))}</strong> · ${escapeHtml(weighDayShort(x.invoice.invoice_date))}</span></div>
+      <span class="mg-muted mg-small">${escapeHtml(T("ยังไม่มีใบงานใน PACE", "No working paper in PACE yet"))}</span>`;
+  else last = `<span class="mg-muted mg-small">${escapeHtml(T("ยังไม่มีออเดอร์ใน PACE", "No order in PACE yet"))}</span>`;
+  const unlinked = !(c.paper_names || []).length;
+  return `<article class="sc-card" data-sc-open="${escapeAttr(c.code)}">
+    <div class="sc-card-head">
+      <div class="sc-card-id"><h3><button type="button" class="sc-card-name" data-sc-act="open" data-code="${escapeAttr(c.code)}">${escapeHtml(c.name)}</button></h3>
+        <span class="mg-muted mg-small">${escapeHtml(c.code)}${o ? " · " + escapeHtml(o.rep) : ""}</span></div>
+      ${scAgePill(c)}
+    </div>
+    <div class="sc-rules">${scRulesHtml(c)}</div>
+    ${c.instructions ? `<p class="sc-card-instr">${escapeHtml(c.instructions)}</p>` : ""}
+    ${unlinked ? `<p class="sc-nolink">${escapeHtml(T("ยังไม่มีชื่อบนใบงานที่เชื่อมกับรหัสนี้ — ใบงานจะยังไม่ขึ้นป้าย", "No working-paper name linked to this code — papers are not flagged yet."))}</p>` : ""}
+    <div class="sc-card-last">${last}</div>
+    ${strip}
+  </article>`;
+}
+
+// ---------------------------------------------------------------- client file
+function scFileHtml(msg) {
+  const c = (SC.list || []).find((x) => x.code === SC.fileCode);
+  if (!c) return msg;
+  const o = scOv(c.code);
+  const f = SC.files[c.code];
+  const kpi = (label, v, bad) => `<div class="sc-kpi${bad ? " sc-kpi-bad" : ""}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(v))}</strong></div>`;
+  let body;
+  if (f === undefined || f === null) body = `<p class="mg-muted">${escapeHtml(T("กำลังโหลด…", "Loading…"))}</p>`;
+  else if (f.error) body = `<div class="mg-msg" role="status">${escapeHtml(f.error)}</div>`;
+  else {
+    const n30 = Number(f.orders_30) || 0;
+    body = `
+    <section class="mg-card">
+      <h3>${escapeHtml(T("ออเดอร์ล่าสุด", "Last orders"))}</h3>
+      ${f.orders.length ? `<div class="table-scroll"><table class="sc-otable">
+        <thead><tr><th>${escapeHtml(T("วันส่ง", "Delivery"))}</th><th>PO</th>
+          <th>${escapeHtml(T("สินค้า · สั่ง → ชั่งจริง", "Products · ordered → weighed"))}</th>
+          <th class="num">${escapeHtml(T("รวม", "Total"))}</th><th>${escapeHtml(T("สถานะ", "Status"))}</th></tr></thead>
+        <tbody>${f.orders.map((r) => `<tr>
+          <td class="nowrap"><strong>${escapeHtml(weighThaiDate(r.order_date, { weekday: "short", day: "numeric", month: "short" }))}</strong><br><span class="mg-muted mg-small">${escapeHtml(scAgo(r.order_date))}</span></td>
+          <td class="nowrap">${escapeHtml(r.po_number || "—")}${r.part ? `<br><span class="mg-small">${escapeHtml(T("ส่วนที่", "Part"))} ${Number(r.part)}</span>` : ""}<br><span class="mg-muted mg-small">${escapeHtml(weighCompanyShort(r.company))}</span></td>
+          <td><ul class="sc-lines">${(r.lines || []).map((w) => `<li><span class="sc-prod">${escapeHtml(w.description || "—")}</span>
+            <span class="sc-qty">${escapeHtml(scQty(w))}${w.actual_kg != null && r.status === "confirmed" ? ` → <strong>${escapeHtml(weighFmt(w.actual_kg))} kg</strong>` : ""}</span></li>`).join("")}</ul></td>
+          <td class="num nowrap">${r.status === "confirmed" && r.total_kg != null ? `<strong>${escapeHtml(weighFmt(r.total_kg))} kg</strong>` : "—"}</td>
+          <td><span class="sc-last-status sc-last-${escapeAttr(r.delivery === "problem" ? "postponed" : r.status)}">${escapeHtml(scStatusText(r.status, r.delivery))}</span>
+            ${r.postponed ? `<br><span class="sc-bad mg-small">${escapeHtml(T("เลื่อน", "Postponed"))} ${escapeHtml(weighDayShort(r.postponed.from))} → ${escapeHtml(weighDayShort(r.postponed.to))}${typeof ppReasonLabel === "function" ? " · " + escapeHtml(ppReasonLabel(r.postponed.reason)) : ""}</span>` : ""}</td>
+        </tr>`).join("")}</tbody></table></div>`
+      : `<p class="mg-muted">${escapeHtml(T("ยังไม่มีออเดอร์ใน PACE", "No order in PACE yet"))}</p>`}
+    </section>
+    <div class="sc-file-cols">
+      <section class="mg-card">
+        <h3>${escapeHtml(T("สินค้าที่สั่งประจำ (30 วัน)", "Usual basket, last 30 days"))}</h3>
+        ${f.basket.length ? f.basket.map((b) => `<div class="sc-basket">
+          <span class="sc-prod">${escapeHtml(b.description)}</span>
+          <span class="sc-bar-track" aria-hidden="true"><span style="width:${Math.round(100 * b.orders / Math.max(n30, 1))}%"></span></span>
+          <span class="mg-small">${escapeHtml(T(`${b.orders} จาก ${n30} ออเดอร์`, `${b.orders} of ${n30} order${n30 === 1 ? "" : "s"}`))}${b.avg_qty != null ? ` · ~${escapeHtml(String(Number(b.avg_qty)))} ${escapeHtml(weighUnit(b.unit))}` : ""}</span>
+        </div>`).join("") : `<p class="mg-muted">${escapeHtml(T("ไม่มีออเดอร์ใน 30 วัน", "No order in the last 30 days"))}</p>`}
+      </section>
+      <section class="mg-card">
+        <h3>${escapeHtml(T("การเลื่อน (30 วัน)", "Postponements, last 30 days"))}</h3>
+        ${f.postponements.length ? `<ul class="sc-pp">${f.postponements.map((x) => `<li>
+          <strong>${escapeHtml(weighDayShort(x.from))} → ${escapeHtml(x.to ? weighDayShort(x.to) : T("ยังไม่มีวัน", "no date"))}</strong>
+          <span>${escapeHtml({ product: T("เลื่อนสินค้า", "product moved"), delivery: T("เลื่อนส่ง", "delivery moved"), production: T("เลื่อนผลิต", "production moved"), order: T("เลื่อนออเดอร์", "order moved") }[x.what] || x.what)}
+            · ${escapeHtml(x.by === "production" ? T("โดยฝ่ายผลิต", "by production") : T("โดยมิดเดิลออฟฟิศ", "by the middle office"))}${typeof ppReasonLabel === "function" ? " · " + escapeHtml(ppReasonLabel(x.reason)) : ""}${x.po ? " · " + escapeHtml(x.po) : ""}</span>
+        </li>`).join("")}</ul>` : `<p class="mg-muted">${escapeHtml(T("ไม่มีการเลื่อนใน 30 วัน", "No postponement in the last 30 days"))}</p>`}
+      </section>
+    </div>`;
+  }
+  return `
+    <div class="sc-bar">
+      <button type="button" class="w-btn w-btn-outline" data-sc-act="back">← ${escapeHtml(T("ลูกค้าดูแลพิเศษทั้งหมด", "All special care clients"))}</button>
+      ${weighLangHtml()}
+    </div>
+    ${msg}
+    <section class="mg-card sc-file-head">
+      <div class="sc-file-top">
+        <div>
+          <h2>${escapeHtml(c.name)}</h2>
+          <span class="mg-muted mg-small">${escapeHtml(c.code)}${o ? " · " + escapeHtml(T("พนักงานขาย ", "salesperson ") + o.rep) : ""} · ${escapeHtml(T("ชื่อบนใบงาน: ", "names on papers: "))}${(c.paper_names || []).length ? escapeHtml(c.paper_names.join(", ")) : `<span class="sc-nolink">${escapeHtml(T("ยังไม่เชื่อม", "none linked"))}</span>`}</span>
+        </div>
+        <div class="sc-file-acts">
+          <button type="button" class="w-btn w-btn-outline" data-sc-act="edit" data-code="${escapeAttr(c.code)}">${escapeHtml(T("แก้ไขกฎ", "Edit rules"))}</button>
+          <button type="button" class="w-btn w-btn-outline sc-remove" data-sc-act="remove" data-code="${escapeAttr(c.code)}">${escapeHtml(T("เอาออก", "Remove"))}</button>
+        </div>
+      </div>
+      <div class="sc-rules">${scRulesHtml(c)}</div>
+      ${c.instructions ? `<p class="sc-card-instr sc-file-instr">${escapeHtml(c.instructions)}</p>` : ""}
+      ${o ? `<div class="sc-kpis">
+        ${kpi(T("ออเดอร์ 30 วัน", "Orders, 30 days"), o.n30)}
+        ${kpi(T("กก. 30 วัน", "Kg, 30 days"), weighFmt(o.kg30, 0))}
+        ${kpi(T("ถูกเลื่อน 30 วัน", "Postponed, 30 days"), o.postponed30, o.postponed30 > 0)}
+        ${kpi(T("ต่างเกิน ±5% (รายการ)", "Lines off ±5 %"), o.off5_30, o.off5_30 > 0)}
+      </div>` : ""}
+      <span class="mg-muted mg-small">${escapeHtml(T("แก้ไขล่าสุด ", "Last change ") + (c.updated_by_name || "") + " · " + scTime(c.updated_at))}</span>
+    </section>
+    ${SC.edit && !SC.edit.isNew && SC.edit.code === c.code ? scFormHtml(SC.edit) : ""}
+    ${body}`;
+}
+
+async function scOpenFile(code) {
+  SC.view = "file"; SC.fileCode = code; SC.edit = null; SC.message = null;
+  scDraw();
+  window.scrollTo && window.scrollTo(0, 0);
+  await scLoadFile(code);
+}
+
 // "today", "3 days ago", "in 2 days"
 function scAgo(iso) {
   if (!iso) return "";
@@ -338,11 +516,11 @@ function scFormHtml(e) {
     ${e.error ? `<div class="mg-msg" role="alert">${escapeHtml(e.error)}</div>` : ""}
     <fieldset class="sc-rules-pick">
       <legend>${escapeHtml(T("กฎ", "Rules"))}</legend>
-      <label><input type="checkbox" id="sc-np"${e.no_postpone ? " checked" : ""}> 🚫 <strong>${escapeHtml(T("ห้ามเลื่อน", "No postpone"))}</strong>
+      <label><input type="checkbox" id="sc-np"${e.no_postpone ? " checked" : ""}> <strong>${escapeHtml(T("ห้ามเลื่อน", "No postpone"))}</strong>
         <small>${escapeHtml(T("เลื่อนได้ แต่ทุกหน้าจะเตือนก่อน และผู้บริหารได้รับแจ้งทันที", "Postponing stays possible, but every screen warns first and management is notified at once"))}</small></label>
-      <label><input type="checkbox" id="sc-eq"${e.exact_quantity ? " checked" : ""}> ⚖ <strong>${escapeHtml(T("ส่งครบจำนวน", "Exact quantity"))}</strong>
+      <label><input type="checkbox" id="sc-eq"${e.exact_quantity ? " checked" : ""}> <strong>${escapeHtml(T("ส่งครบจำนวน", "Exact quantity"))}</strong>
         <small>${escapeHtml(T("ห้ามส่งขาด: การเลื่อนสินค้าบางรายการจะเตือนก่อน และแจ้งผู้บริหาร", "No short delivery: moving one product to another day warns first and notifies management"))}</small></label>
-      <label><input type="checkbox" id="sc-pd"${e.priority_delivery ? " checked" : ""}> ⚡ <strong>${escapeHtml(T("ส่งก่อน", "Priority delivery"))}</strong>
+      <label><input type="checkbox" id="sc-pd"${e.priority_delivery ? " checked" : ""}> <strong>${escapeHtml(T("ส่งก่อน", "Priority delivery"))}</strong>
         <small>${escapeHtml(T("ขึ้นเป็นลำดับแรกในกระดานจัดส่ง", "First on the delivery board"))}</small></label>
       <label class="sc-window">${escapeHtml(T("ช่วงเวลาส่ง (ไม่บังคับ)", "Delivery time window (optional)"))}
         <input type="text" id="sc-window" maxlength="60" value="${escapeAttr(e.delivery_window || "")}" placeholder="${escapeAttr(T("เช่น ก่อน 10:00", "e.g. before 10:00"))}"></label>
@@ -397,7 +575,7 @@ async function scSave() {
   SC.saving = false;
   if (error) { e.error = T("บันทึกไม่สำเร็จ: ", "Could not save: ") + error.message; scDraw(); return; }
   SC.message = { kind: "ok", text: T(`บันทึกแล้ว — ${e.name} เป็นลูกค้าดูแลพิเศษ`, `Saved — ${e.name} is a special care client`) };
-  SC.edit = null; SC.q = ""; SC.results = [];
+  SC.edit = null; SC.q = ""; SC.results = []; SC.adding = false;
   await scLoad();
 }
 
@@ -411,6 +589,7 @@ async function scRemove(code) {
                      : { kind: "ok", text: T(`เอา ${c.name} ออกแล้ว`, `${c.name} removed from special care`) };
   if (SC.edit && SC.edit.code === code) SC.edit = null;
   delete SC.clients[code];
+  if (!error && SC.fileCode === code) { SC.view = "cards"; SC.fileCode = null; }
   await scLoad();
 }
 
@@ -420,6 +599,12 @@ if (scSection) {
       SC.q = e.target.value;
       clearTimeout(scSearchTimer);
       scSearchTimer = setTimeout(scSearch, 250);
+    } else if (e.target.id === "sc-cq") {
+      SC.cq = e.target.value;
+      const pos = e.target.selectionStart;
+      scDraw();
+      const box = document.getElementById("sc-cq");
+      if (box) { box.focus(); try { box.setSelectionRange(pos, pos); } catch (err) { /* type=search */ } }
     }
   });
   scSection.addEventListener("submit", (e) => {
@@ -429,8 +614,26 @@ if (scSection) {
     const lang = e.target.closest('[data-act="lang"]');
     if (lang) { scReadForm(); weighSetLang(lang.dataset.lang); scDraw(); return; }
     const b = e.target.closest("[data-sc-act]");
-    if (!b) return;
+    if (!b) {
+      // a click anywhere on a card opens the client file
+      const card = e.target.closest("[data-sc-open]");
+      if (card && !e.target.closest("a, input, label")) scOpenFile(card.dataset.scOpen);
+      return;
+    }
     const act = b.dataset.scAct;
+    if (act === "open") { scOpenFile(b.dataset.code); return; }
+    if (act === "back") { SC.view = "cards"; SC.fileCode = null; SC.edit = null; scDraw(); return; }
+    if (act === "filter") { SC.filter = b.dataset.k; scDraw(); return; }
+    if (act === "add-toggle") {
+      SC.adding = !SC.adding; if (!SC.adding) { SC.q = ""; SC.results = []; if (SC.edit && SC.edit.isNew) SC.edit = null; }
+      scDraw();
+      if (SC.adding) { const q = document.getElementById("sc-q"); if (q) q.focus(); }
+      return;
+    }
+    if (act === "pick") {
+      const cur = (SC.list || []).find((x) => x.code === b.dataset.code);
+      if (cur) { SC.adding = false; SC.q = ""; SC.results = []; scOpenFile(cur.code).then(() => { SC.edit = Object.assign({ isNew: false }, cur); scDraw(); }); return; }
+    }
     if (act === "pick") {
       const code = b.dataset.code;
       const cur = (SC.list || []).find((x) => x.code === code);
