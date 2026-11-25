@@ -17,7 +17,8 @@
 //      ("Continue where you left off") cannot bring back an expired login.
 //   5. Watermark: the user's name, email, date and time, faint, over every
 //      screen once signed in. Screenshots and photos show who took them.
-//      (25 Nov: "PROSUN · CONFIDENTIAL" line removed at Clément's request.)
+//      (25 Nov: "PROSUN · CONFIDENTIAL" line removed, then the whole
+//      watermark switched off at Clément's request — hard to read.)
 //   6. Printing is blocked on the sensitive screens (Management, Payables,
 //      Purchases, Sales, the CRM). Working screens still print.
 //
@@ -133,7 +134,9 @@ async function secStart() {
   }
   clearInterval(SEC.timer);
   SEC.timer = setInterval(secTick, 10000);
-  secWatermark(myProfile ? myProfile.full_name : "", email);
+  // Watermark switched off 25 Nov 2026 (Clément: it made PACE hard to read).
+  // secWatermark() is kept below; call it here to turn it back on.
+  document.getElementById("sec-watermark")?.remove();
 }
 
 function secTouch(force) {
