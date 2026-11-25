@@ -83,6 +83,25 @@ type Caller =
   | { kind: "link"; token: string; work_date: string }
   | { kind: "none"; reason: string };
 
+// Migration 050: roles listed in public.mfa_policy (admin, accounting, company
+// director) must have passed the 6-digit authenticator code: the session token
+// then says aal2. getUser() above has already verified the token itself.
+function tokenAal(jwt: string): string {
+  try {
+    const p = JSON.parse(atob(jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof p.aal === "string" ? p.aal : "aal1";
+  } catch {
+    return "aal1";
+  }
+}
+// deno-lint-ignore no-explicit-any
+async function needsCode(db: any, role: string | undefined, jwt: string): Promise<boolean> {
+  if (!role || tokenAal(jwt) === "aal2") return false;
+  const { data, error } = await db.from("mfa_policy").select("role").eq("role", role).maybeSingle();
+  if (error) return false;            // Migration 050 not run yet
+  return !!data;
+}
+
 // deno-lint-ignore no-explicit-any
 async function identify(db: any, req: Request, body: any): Promise<Caller> {
   const auth = req.headers.get("Authorization") ?? "";
@@ -93,6 +112,7 @@ async function identify(db: any, req: Request, body: any): Promise<Caller> {
     const { data, error } = await db.auth.getUser(jwt);
     if (!error && data?.user) {
       const { data: prof } = await db.from("profiles").select("role").eq("id", data.user.id).single();
+      if (await needsCode(db, prof?.role, jwt)) return { kind: "none", reason: "mfa" };
       if (prof && ["factory_admin", "production", "admin"].includes(prof.role)) {
         return { kind: "user", id: data.user.id, role: prof.role };
       }

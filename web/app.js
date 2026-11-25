@@ -47,7 +47,6 @@ const loginScreen  = document.getElementById("login-screen");
 const appScreen    = document.getElementById("app-screen");
 const loginForm    = document.getElementById("login-form");
 const loginError   = document.getElementById("login-error");
-const mfaBlock     = document.getElementById("mfa-block");
 const directorTabs = document.getElementById("director-tabs");
 const tabMineBtn   = document.getElementById("tab-mine");
 const tabLeadsBtn  = document.getElementById("tab-leads");
@@ -106,23 +105,8 @@ loginForm.addEventListener("submit", async (e) => {
     return;
   }
 
-  // If this account has an authenticator app enrolled, Supabase will report
-  // that the session is stuck at "aal1" and needs a TOTP code to reach
-  // "aal2" before it's fully authenticated.
-  const { data: level } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
-  if (level.currentLevel === "aal1" && level.nextLevel === "aal2") {
-    const { data: factors } = await sb.auth.mfa.listFactors();
-    const totp = factors.totp[0];
-    mfaBlock.classList.remove("hidden");
-    const code = prompt("Enter your 6-digit authenticator code:");
-    const { data: challenge, error: chErr } = await sb.auth.mfa.challenge({ factorId: totp.id });
-    if (chErr) { loginError.textContent = chErr.message; return; }
-    const { error: verErr } = await sb.auth.mfa.verify({
-      factorId: totp.id, challengeId: challenge.id, code,
-    });
-    if (verErr) { loginError.textContent = "Wrong code — try again."; return; }
-  }
-
+  // The 6-digit authenticator code (set-up the first time) is asked in
+  // onSignedIn() once the role is known — mfa.js, Migration 050.
   secMarkLogin();   // security.js: starts the 6-hour and idle clocks
   await onSignedIn();
 });
@@ -153,6 +137,11 @@ async function onSignedIn() {
     await sb.auth.signOut();
     return;
   }
+
+  // Two-step verification (mfa.js, Migration 050): admin, accounting and the
+  // company director type the authenticator code (QR set-up the first time)
+  // before anything loads. The database refuses their reads until then.
+  if (!(await mfaGate(profile))) return;
 
   myProfile = profile;
   await secStart();   // security.js: idle timeout for this role, 6-hour limit, watermark

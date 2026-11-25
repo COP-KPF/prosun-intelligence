@@ -2655,3 +2655,22 @@ body.pace-readonly #weights-table tr.ws-row { cursor: default; }
   .sc-file-cols { grid-template-columns: minmax(0, 1fr); }
   .sc-cards { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ==========================================================================
+   Two-step verification (25 Nov 2026, mfa.js, Migration 050)
+   ========================================================================== */
+.mfa-card { max-width: 440px; }
+.mfa-card h1 { font-size: 1.2rem; }
+.mfa-card .subtitle { line-height: 1.5; }
+.mfa-steps { margin: 4px 0 12px; padding-left: 20px; font-size: 0.88rem; line-height: 1.5; }
+.mfa-steps li { margin-bottom: 6px; }
+.mfa-qr { display: flex; justify-content: center; margin: 6px 0 10px; }
+.mfa-qr img { width: 190px; height: 190px; background: #fff; padding: 8px; border: 1px solid #e6dcc6; border-radius: 8px; }
+.mfa-manual { font-size: 0.82rem; margin-bottom: 12px; }
+.mfa-manual summary { cursor: pointer; color: var(--muted, #6b6355); }
+.mfa-secret { display: block; margin-top: 6px; padding: 8px; background: #f6f1e6; border-radius: 6px;
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.9rem; word-break: break-all; user-select: all; }
+.mfa-input { font-size: 1.4rem; letter-spacing: 0.35em; text-align: center; font-variant-numeric: tabular-nums; }
+.mfa-help { font-size: 0.8rem; color: var(--muted, #6b6355); margin: 12px 0 0; line-height: 1.45; }
+.mfa-link { background: none; border: 0; padding: 0; margin-top: 12px; color: var(--muted, #6b6355);
+  text-decoration: underline; cursor: pointer; font: inherit; font-size: 0.85rem; }

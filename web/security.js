@@ -17,6 +17,7 @@
 //      ("Continue where you left off") cannot bring back an expired login.
 //   5. Watermark: the user's name, email, date and time, faint, over every
 //      screen once signed in. Screenshots and photos show who took them.
+//      (25 Nov: "PROSUN · CONFIDENTIAL" line removed at Clément's request.)
 //   6. Printing is blocked on the sensitive screens (Management, Payables,
 //      Purchases, Sales, the CRM). Working screens still print.
 //
@@ -260,8 +261,7 @@ function secWatermark(name, email) {
       const t = esc(text);
       const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="460" height="260">'
         + '<g transform="rotate(-24 230 130)" font-family="Sarabun, Tahoma, Arial, sans-serif" font-size="14" fill="#1d1d1f" fill-opacity="0.085">'
-        + `<text x="230" y="95" text-anchor="middle">${t}</text>`
-        + `<text x="230" y="195" text-anchor="middle">PROSUN · CONFIDENTIAL</text></g></svg>`;
+        + `<text x="230" y="135" text-anchor="middle">${t}</text></g></svg>`;
       SEC.wmUrl = `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}")`;
     }
     // Reset anything changed in the browser's tools (hidden, moved, emptied).
