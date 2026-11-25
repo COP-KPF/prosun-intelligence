@@ -9,7 +9,9 @@
 // the security boundary.
 // ============================================================================
 
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Session security (25 Nov 2026, security.js): the login is kept in
+// sessionStorage, so closing the tab, the browser or the phone app ends it.
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, secAuthOptions());
 
 const STAGE_LABEL = {
   lead: "Lead", qualified: "Qualified", proposal: "Proposal",
@@ -81,6 +83,9 @@ showArchivedToggle.addEventListener("change", renderClientsTable);
 
 async function init() {
   const { data: { session } } = await sb.auth.getSession();
+  // Idle too long or older than 6 hours (e.g. a browser that restored its
+  // tabs): security.js signs out and reloads to the login screen.
+  if (session && !(await secCheckOnStart(session))) return;
   if (session) {
     await onSignedIn();
   } else {
@@ -118,13 +123,14 @@ loginForm.addEventListener("submit", async (e) => {
     if (verErr) { loginError.textContent = "Wrong code — try again."; return; }
   }
 
+  secMarkLogin();   // security.js: starts the 6-hour and idle clocks
   await onSignedIn();
 });
 
 document.getElementById("sign-out-btn").addEventListener("click", async () => {
-  await sb.auth.signOut();
-  myProfile = null;
-  showLogin();
+  // security.js: ends the session on every device (as before), clears the tab
+  // and reloads, so no data stays in the page's memory.
+  await secSignOut("manual", "global");
 });
 
 function showLogin() {
@@ -149,6 +155,7 @@ async function onSignedIn() {
   }
 
   myProfile = profile;
+  await secStart();   // security.js: idle timeout for this role, 6-hour limit, watermark
   loginScreen.classList.add("hidden");
   appScreen.classList.remove("hidden");
   document.getElementById("who-name").textContent = myProfile.full_name;

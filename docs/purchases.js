@@ -41,6 +41,9 @@ const PU = {
   mode: null,            // { kind: "order" | "arrival" | "cancel", o, … }
   msg: null,             // { ok, text }
   saving: false,
+  // Management › KPI › Purchases: "ratio" | "margins" (Migration 048)
+  mview: (() => { try { return localStorage.getItem("pu-mview") === "margins" ? "margins" : "ratio"; } catch (e) { return "ratio"; } })(),
+  mg: { rows: null, err: null, locked: false, section: "all", q: "", edit: null, saving: false, msg: null },
   ratio: { preset: "month", from: null, to: null, company: "Prosun Farm", group: "cycle", data: null, err: null, sig: "" },
 };
 
@@ -190,11 +193,12 @@ function puError(error) {
 // The functions answer "purchases: …" in English; keep the sentence, drop the prefix.
 function puServerText(m) { return String(m || "").replace(/^purchases:\s*/, ""); }
 
-function puTabNow() { return PU.ctx === "mgmt" ? "ratio" : PU.tab; }
+function puTabNow() { return PU.ctx === "mgmt" ? (PU.mview === "margins" ? "margins" : "ratio") : PU.tab; }
 
 async function puLoad() {
   if (!puIsOpen()) return;
   if (puTabNow() === "ratio") return puLoadRatio();
+  if (puTabNow() === "margins") return puLoadMargins();
   puReadForms();                     // a half-filled form survives Refresh
   const from = wsAddDays(PU.week, -7), to = wsAddDays(PU.week, 13);
   const week = PU.week;
@@ -220,7 +224,11 @@ function puDraw() {
   if (PU.ctx === "mgmt") {
     // Management › KPI › Purchases: the KPI tabs are in the toolbar; no inner tabs.
     if (PU.err && PU.err.kind !== "other") { puSection.innerHTML = `<div class="mg-card pu-locked" id="pu-locked"><p>${escapeHtml(PU.err.text)}</p></div>`; return; }
-    puSection.innerHTML = `<div id="pu-body" class="pu-body-mgmt">${puRatioHtml()}</div>`;
+    const views = [["ratio", T("สัดส่วนต้นทุนต่อรายได้", "Cost ratio")], ["margins", T("กำไรขั้นต้นรายสินค้า", "Margins by product")]]
+      .map(([k, label]) => `<button type="button" class="ws-chip ${PU.mview === k ? "on" : ""}" data-act="mview" data-mview="${k}" aria-pressed="${PU.mview === k}">${label}</button>`).join("");
+    puSection.innerHTML = `<div id="pu-body" class="pu-body-mgmt"><div class="ws-presets pu-mviews" role="group" aria-label="${escapeAttr(T("แสดง", "Show"))}">${views}</div>`
+      + (PU.mview === "margins" ? puMarginsHtml() : puRatioHtml()) + `</div>`;
+    if (PU.mview === "margins" && PU.mg.edit) puMarginsFormRefresh();
     return;
   }
   if (PU.err && PU.err.kind !== "other") {
@@ -1016,11 +1024,19 @@ puSection.addEventListener("click", async e => {
     else puDraw();
   } else if (act === "csv-ratio") {
     puCsvRatio();
+  } else if (act === "mview") {
+    if (PU.mview === b.dataset.mview) return;
+    PU.mview = b.dataset.mview; PU.mg.msg = null;
+    try { localStorage.setItem("pu-mview", PU.mview); } catch (err) { /* private mode */ }
+    puDraw(); await puLoad();
+  } else if (act.startsWith("mg-")) {
+    await puMarginsAct(act, b);
   }
 });
 
 puSection.addEventListener("submit", async e => {
   e.preventDefault();
+  if (e.target.id === "pu-mg-form") { await puMarginsSave(); return; }
   if (PU.saving) return;
   if (e.target.id === "pu-form") await puSaveOrder();
   else if (e.target.id === "pu-arrival") await puSaveArrival();
@@ -1028,11 +1044,14 @@ puSection.addEventListener("submit", async e => {
 
 puSection.addEventListener("input", e => {
   if (e.target.closest("#pu-f-lines")) puFormRefresh();
+  if (e.target.id === "pu-mg-q") { PU.mg.q = e.target.value; puMarginsDrawTable(); }
+  if (e.target.closest("#pu-mg-form")) puMarginsFormRefresh();
 });
 
 puSection.addEventListener("change", async e => {
   const id = e.target.id;
   if (e.target.closest("#pu-f-lines")) { puFormRefresh(); return; }
+  if (e.target.closest("#pu-mg-form")) { puMarginsFormRefresh(); return; }
   if (id === "pu-f-order" && PU.mode && PU.mode.kind === "order" && !PU.mode.o.arrivalTouched && e.target.value) {
     document.getElementById("pu-f-arrival").value = wsAddDays(e.target.value, 2);   // Mon → Wed, Wed → Fri, Sat → Mon
   } else if (id === "pu-f-arrival" && PU.mode) {
@@ -1053,5 +1072,272 @@ if (document.getElementById("sign-out-btn")) {
     puClose();
     Object.assign(PU, { board: null, items: {}, err: null, mode: null, msg: null });
     Object.assign(PU.ratio, { data: null, err: null, sig: "" });
+    Object.assign(PU.mg, { rows: null, err: null, locked: false, edit: null, msg: null });
   });
+}
+
+
+// ============================================================================
+// Management › KPI › Purchases › Margins by product (Migration 048)
+// ============================================================================
+// Clément's margin file in PACE: selling price, buying price, margin,
+// multiple, cost as a % of the price, per product. Only the accounts with
+// sees_revenue (Clément, Khun Jum) can read purchase_margins; for cuts the
+// cost is the bird's price per kg ÷ usable yield, one yield per bird.
+
+const PU_MG_SECTIONS = ["Chicken", "Chicken parts (Red Label)", "Duck", "Duck parts", "Special poultry", "Eggs & dairy", "Under Roof (Halal)"];
+
+async function puLoadMargins() {
+  const g = PU.mg;
+  const me = await sb.rpc("purchase_me");
+  if (!puIsOpen() || puTabNow() !== "margins") return;
+  if (me.error) { g.err = puError(me.error).text; g.rows = null; puDraw(); return; }
+  if (!me.data || !me.data.sees_revenue) { g.locked = true; g.rows = null; puDraw(); return; }
+  g.locked = false;
+  const { data, error } = await sb.from("purchase_margins").select("*").order("sort");
+  if (!puIsOpen() || puTabNow() !== "margins") return;
+  if (error) {
+    g.err = /purchase_margins|schema cache|does not exist|Could not find/i.test(error.message || "")
+      ? T("ฐานข้อมูลยังไม่อัปเดต: กรุณารัน Migration 048 ใน Supabase", "The database is not up to date: run Migration 048 in Supabase.")
+      : T("โหลดไม่สำเร็จ: ", "Could not load: ") + error.message;
+    g.rows = null; puDraw(); return;
+  }
+  g.err = null;
+  g.rows = (data || []).map(r => Object.assign({}, r, {
+    sell_price: r.sell_price === null ? null : Number(r.sell_price),
+    buy_price: r.buy_price === null ? null : Number(r.buy_price),
+    yield_pct: r.yield_pct === null ? null : Number(r.yield_pct),
+    unit_cost: r.unit_cost === null ? null : Number(r.unit_cost) }));
+  if (g.edit && g.edit.id) {               // keep the form on the row it edits
+    const fresh = g.rows.find(r => r.id === g.edit.id);
+    if (!fresh) g.edit = null;
+  }
+  puDraw();
+}
+
+function puMgFigures(r) {
+  const cost = r.unit_cost;
+  const sell = r.sell_price;
+  if (cost === null || cost === undefined || sell === null || sell === undefined) return { cost, margin: null, mult: null, pct: null };
+  return { cost, margin: sell - cost, mult: cost > 0 ? sell / cost : null, pct: sell > 0 ? (cost / sell) * 100 : null };
+}
+// Product level: ≤55 % green, 55–60 % amber, above 60 % red (Farm targets).
+function puMgState(pct) { return pct === null ? "" : pct <= 55 ? "good" : pct <= 60 ? "watch" : "alert"; }
+function puMgUnit(u) { return u === "pce" ? T("ชิ้น", "pce") : "kg"; }
+function puMgNum(v, dp) { return v === null || v === undefined ? "—" : mgN(v, dp !== undefined ? dp : (Math.round(v * 100) % 100 ? 2 : 0)); }
+
+function puMgVisible() {
+  const g = PU.mg, q = g.q.trim().toLowerCase();
+  return (g.rows || []).filter(r => r.active && (g.section === "all" || r.section === g.section)
+    && (!q || [r.product, r.size, r.supplier, r.section, r.note].join(" ").toLowerCase().includes(q)));
+}
+
+function puMarginsHtml() {
+  const g = PU.mg;
+  if (g.locked) return `<div class="mg-card pu-locked" id="pu-locked"><p>${escapeHtml(T("ราคาซื้อและกำไรขั้นต้นเห็นเฉพาะคุณเคลมองต์และคุณจุ๋ม", "Buying prices and margins are visible to Clément and Khun Jum only."))}</p></div>`;
+  if (g.err) return `<div class="mg-msg" id="pu-mg-error">${escapeHtml(g.err)}</div>`;
+  if (!g.rows) return `<p class="mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
+  const sections = [...new Set([...PU_MG_SECTIONS, ...g.rows.map(r => r.section)])].filter(sec => g.rows.some(r => r.active && r.section === sec));
+  const chips = [["all", T("ทั้งหมด", "All")], ...sections.map(sec => [sec, sec])].map(([k, label]) =>
+    `<button type="button" class="ws-chip ${g.section === k ? "on" : ""}" data-act="mg-section" data-section="${escapeAttr(k)}" aria-pressed="${g.section === k}">${escapeHtml(label)}</button>`).join("");
+  const msg = g.msg ? `<div class="${g.msg.ok ? "pp-ok" : "mg-msg"}" id="pu-mg-msg" role="status">${escapeHtml(g.msg.text)}</div>` : "";
+  return `<div class="mg-bar">
+      <div class="ws-presets">${chips}</div>
+      <div class="mg-bar-right">
+        <input type="search" id="pu-mg-q" class="mo-q" value="${escapeAttr(g.q)}" placeholder="${escapeAttr(T("ค้นหาสินค้าหรือผู้ขาย", "Search a product or supplier"))}" aria-label="${escapeAttr(T("ค้นหา", "Search"))}">
+        <button type="button" class="ws-chip" data-act="mg-add">+ ${T("เพิ่มสินค้า", "Add a product")}</button>
+        <button type="button" class="ws-chip" data-act="mg-csv" id="pu-mg-csv">${T("ดาวน์โหลด CSV (Excel)", "Download CSV (Excel)")}</button>
+        ${weighLangHtml()}
+      </div>
+    </div>
+    ${msg}
+    ${puMgTilesHtml()}
+    ${puMgYieldsHtml()}
+    ${g.edit ? puMgFormHtml(g.edit) : ""}
+    <div class="mg-card" id="pu-mg-table-card"><div id="pu-mg-table-box">${puMgTableHtml()}</div></div>
+    <div class="mg-card mg-small mg-muted" id="pu-mg-note">${T(
+      "ต้นทุนของชิ้นส่วน = ราคาซื้อสัตว์ปีกต่อกก. ÷ สัดส่วนที่ใช้ได้ (yield) — แทนสูตรเดิม 1000×83/1450 ที่ทำให้ต้นทุนชิ้นส่วนต่ำเกินจริง ผลพลอยได้ (โครง คอ) จึงแสดงขาดทุน ต้นทุนเป็น % ของราคาขาย: ≤55% เขียว 55–60% เหลือง เกิน 60% แดง ราคาขายตามไฟล์ของคุณเคลมองต์ (สัตว์ปีกพิเศษ: ราคา 11 ชิ้นขึ้นไป) ราคาซื้อจากรายการต้นทุนวันที่ 24/02/25 ข้อมูลนี้เห็นเฉพาะคุณเคลมองต์และคุณจุ๋ม",
+      "Cost of a cut = the bird's buying price per kg ÷ usable yield — instead of the file's 1000×83/1450, which understated every cut's cost. By-products (carcass, neck) therefore show a loss. Cost as a % of the price: ≤55 % green, 55–60 % amber, above 60 % red. Selling prices from Clément's file (special poultry: the price for 11 pieces and more); buying prices from the cost list of 24/02/25. Visible to Clément and Khun Jum only.")}</div>`;
+}
+
+function puMgTilesHtml() {
+  const rows = (PU.mg.rows || []).filter(r => r.active);
+  const priced = rows.filter(r => puMgFigures(r).pct !== null);
+  const high = priced.filter(r => puMgFigures(r).pct > 60);
+  const missing = rows.filter(r => r.unit_cost === null || r.sell_price === null);
+  const check = rows.filter(r => /to check/i.test(r.note || ""));
+  return `<div class="mg-tiles pu-tiles" id="pu-mg-tiles">
+    ${mgTile({ id: "pu-mg-t-count", label: T("สินค้าที่มีราคาซื้อ", "Products with a buying price"), value: mgN(priced.length), sub: T(`จาก ${mgN(rows.length)} สินค้า`, `of ${mgN(rows.length)} products`) })}
+    ${mgTile({ id: "pu-mg-t-high", label: T("ต้นทุนเกิน 60% ของราคา", "Cost above 60 % of the price"), value: mgN(high.length), state: high.length ? "alert" : "good",
+      sub: high.slice(0, 4).map(r => r.product).join(", ") + (high.length > 4 ? "…" : "") })}
+    ${mgTile({ id: "pu-mg-t-missing", label: T("ไม่มีราคาซื้อหรือราคาขาย", "No buying or selling price"), value: mgN(missing.length), state: missing.length ? "alert" : "good",
+      sub: missing.slice(0, 4).map(r => r.product).join(", ") + (missing.length > 4 ? "…" : "") })}
+    ${mgTile({ id: "pu-mg-t-check", label: T("ต้องตรวจสอบ", "To check in the file"), value: mgN(check.length), state: check.length ? "alert" : "good",
+      sub: T("ดูหมายเหตุใต้สินค้า", "See the note under each product") })}
+  </div>`;
+}
+
+function puMgYieldsHtml() {
+  const groups = new Map();
+  for (const r of PU.mg.rows || []) {
+    if (!r.active || r.basis !== "yield" || !r.yield_group) continue;
+    const x = groups.get(r.yield_group) || { n: 0, pcts: new Set(), base: new Set() };
+    x.n++; x.pcts.add(r.yield_pct); x.base.add(r.buy_price);
+    groups.set(r.yield_group, x);
+  }
+  if (!groups.size) return "";
+  const rows = [...groups.entries()].map(([name, x]) => {
+    const pct = x.pcts.size === 1 ? [...x.pcts][0] : "";
+    return `<div class="pu-yield" data-group="${escapeAttr(name)}">
+      <span><strong>${escapeHtml(name)}</strong> <span class="mg-muted mg-small">${escapeHtml(T(`${x.n} ชิ้นส่วน · ราคาซื้อ ${[...x.base].join(" / ")} บาท/กก.`, `${x.n} cuts · bought at ${[...x.base].join(" / ")} THB/kg`))}</span></span>
+      <label class="pu-yield-in">${T("Yield", "Yield")} <input type="number" min="1" max="100" step="0.5" class="pu-num pu-yield-pct" value="${escapeAttr(pct)}" placeholder="${x.pcts.size > 1 ? escapeAttr(T("หลายค่า", "mixed")) : ""}"> %</label>
+      <button type="button" class="ws-chip" data-act="mg-yield" data-group="${escapeAttr(name)}"${PU.mg.saving ? " disabled" : ""}>${T("ใช้กับทุกชิ้นส่วน", "Apply to all its cuts")}</button>
+    </div>`;
+  }).join("");
+  return `<div class="mg-card" id="pu-mg-yields">
+    <div class="mg-card-head"><h3>${T("Yield ของชิ้นส่วน", "Yield of the cuts")}</h3>
+      <span class="mg-small pu-warn">${T("เริ่มต้นที่ 75% — รอคุณเคลมองต์ยืนยัน", "Starts at 75 % — to be confirmed by Clément")}</span></div>
+    ${rows}
+  </div>`;
+}
+
+function puMgTableHtml() {
+  const rows = puMgVisible();
+  if (!rows.length) return `<p class="mg-small mg-muted" id="pu-mg-none">${T("ไม่พบสินค้า", "No product found.")}</p>`;
+  const bySec = new Map();
+  rows.forEach(r => { if (!bySec.has(r.section)) bySec.set(r.section, []); bySec.get(r.section).push(r); });
+  const body = [...bySec.entries()].map(([sec, list]) => `<tr class="pu-mg-sec"><td colspan="11">${escapeHtml(sec)}</td></tr>` + list.map(r => {
+    const f = puMgFigures(r);
+    const st = puMgState(f.pct);
+    const basis = r.basis === "yield"
+      ? `${puMgNum(r.buy_price)} ÷ ${puMgNum(r.yield_pct, r.yield_pct % 1 ? 1 : 0)}%`
+      : (r.buy_price === null ? "—" : T("ราคาซื้อตรง", "direct"));
+    return `<tr data-id="${r.id}">
+      <td><strong>${escapeHtml(r.product)}</strong>${r.note ? `<div class="mg-small ${/to check/i.test(r.note) ? "pu-warn" : "mg-muted"}">${escapeHtml(r.note)}</div>` : ""}</td>
+      <td class="mg-small">${escapeHtml(r.size || "")}</td>
+      <td class="mg-n">${puMgNum(r.sell_price)}<span class="mg-muted">/${puMgUnit(r.sell_unit)}</span></td>
+      <td class="mg-n mg-small">${basis}</td>
+      <td class="mg-n">${puMgNum(f.cost)}</td>
+      <td class="mg-n ${f.margin !== null && f.margin < 0 ? "pu-bad" : ""}">${f.margin === null ? "—" : (f.margin < 0 ? "−" : "") + puMgNum(Math.abs(f.margin))}</td>
+      <td class="mg-n">${f.mult === null ? "—" : mgN(f.mult, 2) + "×"}</td>
+      <td class="mg-n mg-strong ${st ? "pu-st-" + st : ""}">${f.pct === null ? "—" : mgN(f.pct, 0) + "%"}</td>
+      <td class="mg-small">${escapeHtml(r.supplier || "—")}</td>
+      <td class="mg-small mo-nowrap">${r.price_date ? escapeHtml(smDayLabel(r.price_date)) : "—"}</td>
+      <td><button type="button" class="ws-chip pu-mg-edit" data-act="mg-edit" data-id="${r.id}">${T("แก้ไข", "Edit")}</button></td>
+    </tr>`;
+  }).join("")).join("");
+  return `<div class="mg-table-wrap"><table class="mg-table" id="pu-mg-table">
+    <thead><tr><th>${T("สินค้า", "Product")}</th><th>${T("ขนาด", "Size")}</th><th class="mg-n">${T("ราคาขาย", "Selling price")}</th>
+      <th class="mg-n">${T("ฐานต้นทุน", "Cost basis")}</th><th class="mg-n">${T("ต้นทุน", "Cost")}</th><th class="mg-n">${T("กำไร", "Margin")}</th>
+      <th class="mg-n">${T("เท่า", "Multiple")}</th><th class="mg-n">${T("ต้นทุน % ของราคา", "Cost % of price")}</th>
+      <th>${T("ผู้ขาย", "Supplier")}</th><th>${T("วันที่ราคา", "Price date")}</th><th></th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+function puMarginsDrawTable() {
+  const box = document.getElementById("pu-mg-table-box");
+  if (box) box.innerHTML = puMgTableHtml();
+}
+
+function puMgFormHtml(e) {
+  const groups = [...new Set((PU.mg.rows || []).filter(r => r.yield_group).map(r => r.yield_group))];
+  const secs = [...new Set([...PU_MG_SECTIONS, ...(PU.mg.rows || []).map(r => r.section)])];
+  return `<form class="mg-card pu-form" id="pu-mg-form" novalidate>
+    <h3>${e.id ? T("แก้ไขสินค้า", "Edit product") + " — " + escapeHtml(e.product) : T("เพิ่มสินค้า", "Add a product")}</h3>
+    <div class="pu-grid">
+      <label>${T("หมวด", "Section")}<input id="pu-mg-section" list="pu-mg-sections" value="${escapeAttr(e.section || "")}"></label>
+      <label>${T("สินค้า", "Product")}<input id="pu-mg-product" value="${escapeAttr(e.product || "")}"></label>
+      <label>${T("ขนาด", "Size")}<input id="pu-mg-size" value="${escapeAttr(e.size || "")}"></label>
+      <label>${T("ราคาขาย (บาท)", "Selling price (THB)")}<input id="pu-mg-sell" type="number" min="0" step="any" class="pu-num" value="${escapeAttr(e.sell_price ?? "")}"></label>
+      <label>${T("ขายต่อ", "Sold per")}<select id="pu-mg-unit"><option value="kg"${e.sell_unit !== "pce" ? " selected" : ""}>kg</option><option value="pce"${e.sell_unit === "pce" ? " selected" : ""}>${T("ชิ้น", "piece")}</option></select></label>
+      <label>${T("ฐานต้นทุน", "Cost basis")}<select id="pu-mg-basis"><option value="direct"${e.basis !== "yield" ? " selected" : ""}>${T("ราคาซื้อตรง", "Direct buying price")}</option><option value="yield"${e.basis === "yield" ? " selected" : ""}>${T("ราคาสัตว์ปีก ÷ yield", "Bird price ÷ yield")}</option></select></label>
+      <label><span id="pu-mg-buy-label"></span><input id="pu-mg-buy" type="number" min="0" step="any" class="pu-num" value="${escapeAttr(e.buy_price ?? "")}"></label>
+      <label class="pu-mg-y">${T("สัตว์ปีก", "Bird")}<input id="pu-mg-group" list="pu-mg-groups" value="${escapeAttr(e.yield_group || "")}"></label>
+      <label class="pu-mg-y">Yield %<input id="pu-mg-yield" type="number" min="1" max="100" step="0.5" class="pu-num" value="${escapeAttr(e.yield_pct ?? 75)}"></label>
+      <label>${T("ผู้ขาย", "Supplier")}<input id="pu-mg-supplier" value="${escapeAttr(e.supplier || "")}"></label>
+      <label>${T("วันที่ราคา", "Price date")}<input id="pu-mg-date" type="date" value="${escapeAttr(e.price_date || "")}"></label>
+    </div>
+    <datalist id="pu-mg-sections">${secs.map(x => `<option value="${escapeAttr(x)}"></option>`).join("")}</datalist>
+    <datalist id="pu-mg-groups">${groups.map(x => `<option value="${escapeAttr(x)}"></option>`).join("")}</datalist>
+    <label class="pu-wide">${T("หมายเหตุ", "Note")}<textarea id="pu-mg-note-in" rows="2">${escapeHtml(e.note || "")}</textarea></label>
+    <p class="mg-small" id="pu-mg-preview"></p>
+    <div class="pu-form-acts">
+      <button type="submit" class="btn-primary" id="pu-mg-save"${PU.mg.saving ? " disabled" : ""}>${PU.mg.saving ? T("กำลังบันทึก…", "Saving…") : T("บันทึก", "Save")}</button>
+      <button type="button" class="btn-secondary" data-act="mg-close">${T("ยกเลิก", "Cancel")}</button>
+      ${e.id ? `<button type="button" class="btn-secondary pu-mg-retire" data-act="mg-retire"${PU.mg.saving ? " disabled" : ""}>${T("เลิกขายสินค้านี้", "Retire this product")}</button>` : ""}
+    </div>
+  </form>`;
+}
+
+function puMgReadForm() {
+  const f = document.getElementById("pu-mg-form");
+  if (!f || !PU.mg.edit) return null;
+  const v = id => f.querySelector("#" + id).value;
+  const num = id => v(id) === "" ? null : Number(v(id));
+  Object.assign(PU.mg.edit, {
+    section: v("pu-mg-section").trim(), product: v("pu-mg-product").trim(), size: v("pu-mg-size").trim(),
+    sell_price: num("pu-mg-sell"), sell_unit: v("pu-mg-unit"), basis: v("pu-mg-basis"), buy_price: num("pu-mg-buy"),
+    yield_group: v("pu-mg-group").trim(), yield_pct: num("pu-mg-yield"), supplier: v("pu-mg-supplier").trim(),
+    price_date: v("pu-mg-date") || null, note: v("pu-mg-note-in").trim() });
+  return PU.mg.edit;
+}
+
+function puMarginsFormRefresh() {
+  const f = document.getElementById("pu-mg-form");
+  if (!f) return;
+  const e = puMgReadForm();
+  const y = e.basis === "yield";
+  f.querySelectorAll(".pu-mg-y").forEach(el => el.classList.toggle("hidden", !y));
+  f.querySelector("#pu-mg-buy-label").textContent = y ? T("ราคาซื้อสัตว์ปีก (บาท/กก.)", "Bird buying price (THB/kg)")
+    : T(`ราคาซื้อ (บาท/${puMgUnit(e.sell_unit)})`, `Buying price (THB/${puMgUnit(e.sell_unit)})`);
+  const cost = e.buy_price === null ? null : y ? (e.yield_pct > 0 ? e.buy_price / (e.yield_pct / 100) : null) : e.buy_price;
+  const fig = puMgFigures({ unit_cost: cost === null ? null : Math.round(cost * 100) / 100, sell_price: e.sell_price });
+  f.querySelector("#pu-mg-preview").innerHTML = cost === null ? "" : `${T("ต้นทุน", "Cost")} <strong>${puMgNum(fig.cost)}</strong>`
+    + (fig.pct === null ? "" : ` · ${T("กำไร", "margin")} <strong>${puMgNum(fig.margin)}</strong> · <strong class="pu-st-${puMgState(fig.pct)}">${mgN(fig.pct, 0)}%</strong> ${T("ของราคา", "of the price")} · ${mgN(fig.mult, 2)}×`);
+}
+
+async function puMarginsSave(retire) {
+  const e = puMgReadForm();
+  if (!e || PU.mg.saving) return;
+  const p = Object.assign({}, e, retire ? { active: false } : {});
+  PU.mg.saving = true; PU.mg.msg = null; puDraw();
+  const { error } = await sb.rpc("purchase_save_cost", { p });
+  PU.mg.saving = false;
+  if (error) { PU.mg.msg = { ok: false, text: puServerText(error.message) }; puDraw(); return; }
+  PU.mg.edit = null;
+  PU.mg.msg = { ok: true, text: retire ? T(`เลิกขาย “${e.product}” แล้ว`, `“${e.product}” retired.`) : T(`บันทึก “${e.product}” แล้ว`, `“${e.product}” saved.`) };
+  await puLoadMargins();
+}
+
+async function puMarginsAct(act, b) {
+  const g = PU.mg;
+  puMgReadForm();                        // keep what was typed in the form across redraws
+  if (act === "mg-section") { g.section = b.dataset.section; puDraw(); }
+  else if (act === "mg-add") { g.msg = null; g.edit = { section: g.section !== "all" ? g.section : "", sell_unit: "kg", basis: "direct", yield_pct: 75 }; puDraw(); }
+  else if (act === "mg-edit") {
+    const r = (g.rows || []).find(x => x.id === b.dataset.id); if (!r) return;
+    g.msg = null; g.edit = Object.assign({}, r); puDraw();
+    const f = document.getElementById("pu-mg-form"); if (f) f.scrollIntoView({ block: "nearest" });
+  }
+  else if (act === "mg-close") { g.edit = null; puDraw(); }
+  else if (act === "mg-retire") { await puMarginsSave(true); }
+  else if (act === "mg-yield") {
+    const box = b.closest(".pu-yield");
+    const pct = Number(box.querySelector(".pu-yield-pct").value);
+    g.saving = true; g.msg = null;
+    const { data, error } = await sb.rpc("purchase_set_yield", { p_group: b.dataset.group, p_pct: pct });
+    g.saving = false;
+    if (error) { g.msg = { ok: false, text: puServerText(error.message) }; puDraw(); return; }
+    g.msg = { ok: true, text: T(`Yield ${pct}% ใช้กับ ${data} ชิ้นส่วนของ ${b.dataset.group}`, `Yield ${pct} % applied to ${data} ${b.dataset.group} cuts.`) };
+    await puLoadMargins();
+  }
+  else if (act === "mg-csv") {
+    const out = [["Section", "Product", "Size", "Selling price THB", "Per", "Cost basis", "Buying price THB", "Yield %", "Cost THB", "Margin THB", "Multiple", "Cost % of price", "Supplier", "Price date", "Note"]];
+    for (const r of puMgVisible()) {
+      const f = puMgFigures(r);
+      out.push([r.section, r.product, r.size || "", r.sell_price ?? "", r.sell_unit, r.basis, r.buy_price ?? "", r.yield_pct ?? "",
+        f.cost ?? "", f.margin === null ? "" : f.margin.toFixed(2), f.mult === null ? "" : f.mult.toFixed(2), f.pct === null ? "" : f.pct.toFixed(1),
+        r.supplier || "", r.price_date || "", r.note || ""]);
+    }
+    puDownload(`prosun-margins-${puToday()}.csv`, out);
+  }
 }
