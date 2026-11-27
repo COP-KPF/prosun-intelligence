@@ -192,6 +192,8 @@
 .dl-modal-lines { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .dl-lines-table { min-width: 0; background: #fff; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .dl-lines-table tfoot td { border-top: 2px solid var(--accent); background: #faf7f0; }
+/* The paper's lines always fit the pop-up (phones: the 760 px table width below is for the board's tables). */
+.dl-modal .dl-lines-table { min-width: 0; width: 100%; }
 .dl-modal-who { margin: 0; font-size: .9rem; }
 
 /* ---- smaller screens ---- */

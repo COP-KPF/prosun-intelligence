@@ -17,6 +17,10 @@
 // English (ไทย / EN switch); a status never covers other text — pills are cut
 // with "…" inside their column and "Late again" wraps below.
 //
+// 📄 on an order (27 Nov, Migration 053): its working paper at once — the
+// photo and its lines (ordered, actual kg), who confirmed — in the same
+// pop-up as the delivery board. Also in the timeline panel.
+//
 // Click an order: its timeline (postponed → photographed → weights confirmed
 // → picked up → on the road → delivered), and for the middle office "Delivered
 // — close" by hand (until the delivery team uses the board) and the register
@@ -44,6 +48,7 @@ const PP = {
   editing: null,     // the register row being corrected
   message: null,     // { kind: "ok" | "err", text }
   missing: false,    // Migration 035 not run yet
+  paper: null,       // the working paper pop-up: { key, id, data, url, loading, error }
 };
 const PP_CLOSED_DAYS = 30;
 
@@ -171,6 +176,7 @@ function closePostponed() {
   if (ppSection.classList.contains("hidden")) return;
   ppSection.classList.add("hidden");
   ppSection.innerHTML = "";
+  PP.paper = null;
 }
 
 document.getElementById("switch-system-btn").addEventListener("click", closePostponed);
@@ -273,8 +279,10 @@ function ppRowHtml(o) {
   const update = ppLastUpdate(o);
   const delay = o.delay_days === null || o.delay_days === undefined ? "—" : `+${o.delay_days}${T(" วัน", " d")}`;
   return `<tr class="pp-row${o.late ? " pp-late" : ""}${o.open ? "" : " pp-closed"}${open ? " pp-open" : ""}" data-key="${escapeAttr(o.key)}">
-    <td class="pp-c-client"><button type="button" class="pp-name" data-act="toggle" data-key="${escapeAttr(o.key)}" aria-expanded="${open}" title="${escapeAttr(name)}">
-      <strong>${escapeHtml(o.customer_name || "—")}</strong>${ppScTag(o)}${part ? ` <span class="pp-part">${escapeHtml(part)}</span>` : ""}${o.po_number ? ` <span class="pp-po">${escapeHtml(o.po_number)}</span>` : ""}</button></td>
+    <td class="pp-c-client"><div class="pp-client-in">${o.paper_id
+      ? `<button type="button" class="pp-paper" data-act="paper" data-key="${escapeAttr(o.key)}" title="${escapeAttr(T("ดูใบงาน", "See the working paper"))}" aria-label="${escapeAttr(T("ดูใบงาน: ", "See the working paper: ") + name)}">📄</button>`
+      : `<span class="pp-paper pp-paper-none" title="${escapeAttr(T("ยังไม่มีใบงาน", "No working paper yet"))}" aria-hidden="true"></span>`}<button type="button" class="pp-name" data-act="toggle" data-key="${escapeAttr(o.key)}" aria-expanded="${open}" title="${escapeAttr(name)}">
+      <strong>${escapeHtml(o.customer_name || "—")}</strong>${ppScTag(o)}${part ? ` <span class="pp-part">${escapeHtml(part)}</span>` : ""}${o.po_number ? ` <span class="pp-po">${escapeHtml(o.po_number)}</span>` : ""}</button></div></td>
     <td class="pp-c-co"><span class="pp-co pp-co-${ppCompanyTag(o.company).toLowerCase()}">${ppCompanyTag(o.company)}</span></td>
     <td class="pp-c-by" title="${escapeAttr(by + (reason ? " · " + reason : "") + (o.note ? " — " + o.note : ""))}"><span class="pp-cut">
       <span class="pp-by">${escapeHtml(by)}</span>${o.times > 1 ? `<span class="pp-times" title="${escapeAttr(T(`เลื่อน ${o.times} ครั้ง`, `Postponed ${o.times} times`))}">${o.times}×</span>` : ""}${reason ? `<span class="pp-reason"> · ${escapeHtml(reason)}</span>` : ""}</span></td>
@@ -351,7 +359,8 @@ function ppDetailHtml(o) {
       o.kg_actual && o.confirmed_at ? T(`จริง ${ppKg(o.kg_actual)} กก.`, `actual ${ppKg(o.kg_actual)} kg`) : ""].filter(Boolean).join(" · ") || "—"],
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
 
-  let actions = "";
+  let actions = o.paper_id
+    ? `<button type="button" class="ws-chip" data-act="paper" data-key="${escapeAttr(o.key)}">📄 ${T("ดูใบงาน", "See the working paper")}</button>` : "";
   if (canEdit) {
     if (PP.closing === o.key) {
       actions += `<form class="pp-close-form" data-key="${escapeAttr(o.key)}">
@@ -495,7 +504,9 @@ function ppDraw() {
     <p class="mg-small mg-muted pp-legend"><span class="pp-steps" aria-hidden="true"><i class="on"></i></span> ${T(
       "ขั้นตอน: ผลิตแล้ว → รับสินค้า → กำลังส่ง → ส่งแล้ว · เลยกำหนดอีกครั้ง = เลยวันส่งใหม่แล้วแต่ยังไม่ส่ง · กดที่ชื่อลูกค้าเพื่อดูไทม์ไลน์",
       "Steps: produced → picked up → on the road → delivered · Late again = the new delivery date has passed and it is not delivered · Click a client for the timeline")}</p>` : ""}
-    ${showForm ? ppFormHtml() : ""}`;
+    ${showForm ? ppFormHtml() : ""}
+    <div id="pp-paper-root"></div>`;
+  ppDrawPaper();
   ppSyncForm(document.getElementById("pp-form"));
   if (showForm) ppScFormCheck();
 }
@@ -524,6 +535,125 @@ ppSection.addEventListener("change", e => {
   if (e.target.dataset.pp) ppSyncForm(e.target.form);
   if (e.target.id === "pp-customer") ppScFormCheck();      // special care client? (043)
   if (e.target.id === "pp-src") { PP.source = e.target.value; ppDrawList(); }
+});
+
+
+// ----------------------------------------------------------- the working paper (053)
+async function ppOpenPaper(key) {
+  const o = ppOrder(key);
+  if (!o || !o.paper_id) return;
+  PP.paper = { key, id: o.paper_id, data: null, url: null, loading: true, error: null };
+  ppDrawPaper();
+  const { data, error } = await sb.rpc("postponed_order_paper", { p_paper: o.paper_id });
+  if (!PP.paper || PP.paper.id !== o.paper_id) return;          // closed or another one meanwhile
+  if (error || !data) {
+    PP.paper.loading = false;
+    PP.paper.error = error && /postponed_order_paper|schema cache|Could not find/i.test(error.message || "")
+      ? T("ยังไม่พร้อม: กรุณารัน Migration 053 ใน Supabase", "Not ready: run Migration 053 in Supabase.")
+      : T("เปิดใบงานไม่ได้", "Could not open the working paper") + (error ? ": " + error.message : "");
+    ppDrawPaper();
+    return;
+  }
+  PP.paper.data = data;
+  if (data.photo_ok && data.photo_path) {
+    ppDrawPaper();
+    const r = await sb.storage.from(WEIGH_BUCKET).createSignedUrl(data.photo_path, 600);
+    if (!PP.paper || PP.paper.id !== o.paper_id) return;
+    if (r.error || !r.data || !r.data.signedUrl) PP.paper.photoError = (r.error && r.error.message) || "photo not found";
+    else PP.paper.url = r.data.signedUrl;
+  }
+  PP.paper.loading = false;
+  ppDrawPaper();
+}
+
+function ppClosePaper() {
+  if (!PP.paper) return;
+  const key = PP.paper.key;
+  PP.paper = null;
+  ppDrawPaper();
+  // Back to the 📄 that opened it.
+  const again = ppSection.querySelector(`tr.pp-row[data-key="${CSS.escape(key)}"] .pp-paper`);
+  if (again && again.focus) again.focus();
+}
+
+function ppKgCell(v, confirmed) {
+  if (v === null || v === undefined) return "—";
+  return Number(v).toLocaleString("en-GB", { maximumFractionDigits: 2 }) + (confirmed ? "" : "?");
+}
+
+function ppDrawPaper() {
+  const root = document.getElementById("pp-paper-root");
+  if (!root) return;
+  const st = PP.paper;
+  const o = st && ppOrder(st.key);
+  if (!st || !o) { root.innerHTML = ""; return; }
+  const p = st.data;
+  const stt = PP_STATE[o.state] || PP_STATE.checking;
+  const confirmed = !!(p && p.status === "confirmed");
+  const part = p && p.part > 1 ? T(`ส่วนที่ ${p.part}`, `Part ${p.part}`) : "";
+
+  let photo;
+  if (!p) photo = st.error ? `<div class="mg-msg">${escapeHtml(st.error)}</div>` : `<p class="mg-small mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
+  else if (p.photo_ok && st.url) photo = `<a href="${escapeAttr(st.url)}" target="_blank" rel="noopener" class="dl-photo-link">
+        <img src="${escapeAttr(st.url)}" alt="${escapeAttr(T("ใบงาน ", "Working paper ") + (p.po_number || "") + " " + (p.customer_name || ""))}" class="dl-photo">
+      </a>
+      <a href="${escapeAttr(st.url)}" target="_blank" rel="noopener" class="dl-photo-full">↗ ${T("เปิดรูปเต็ม", "Open full size")}</a>`;
+  else if (p.photo_ok && st.photoError) photo = `<div class="mg-msg">${T("เปิดรูปไม่ได้", "Could not open the photo")}: ${escapeHtml(st.photoError)}</div>`;
+  else if (p.photo_ok) photo = `<p class="mg-small mg-muted">${T("กำลังโหลดรูป…", "Loading the photo…")}</p>`;
+  else photo = `<div class="dl-photo-none">📄<p>${
+      !p.photo_path ? T("ไม่มีรูป", "No photo")
+      : p.photo_deleted_at ? T("รูปถูกลบแล้ว (เก็บไว้ 4 สัปดาห์)", "Photo deleted (kept 4 weeks)")
+      : T("คุณเปิดรูปนี้ไม่ได้", "You cannot open this photo")}</p></div>`;
+
+  const lines = p && Array.isArray(p.lines) ? p.lines : [];
+  const total = lines.reduce((t, l) => t + (Number(l.actual_kg) || 0), 0);
+  const rows = lines.map(l => `<tr>
+      <td class="dl-no">${escapeHtml(String(l.line_no || ""))}</td>
+      <td>${escapeHtml(l.description || "—")}</td>
+      <td class="dl-kg">${escapeHtml(l.ordered_text || (l.ordered_qty !== null && l.ordered_qty !== undefined ? `${l.ordered_qty} ${weighUnit(l.ordered_unit)}` : "—"))}</td>
+      <td class="dl-kg">${ppKgCell(l.actual_kg, confirmed)}</td>
+    </tr>`).join("");
+  const who = !p ? ""
+    : confirmed ? `✅ ${T("ยืนยันน้ำหนักโดย", "Weights confirmed by")} <strong>${escapeHtml(p.confirmed_by_name || "—")}</strong>${p.confirmed_at ? " · " + escapeHtml(ppWhen(p.confirmed_at)) : ""}`
+    : p.status === "postponed" ? `⏳ ${T(`ยังไม่ผลิต — วันผลิต ${weighDayShort(p.work_date)}`, `Not produced yet — production day ${weighDayShort(p.work_date)}`)}`
+    : `⏳ ${T("ยังไม่ยืนยันน้ำหนัก — ตัวเลขอาจเปลี่ยน", "Weights not confirmed yet — figures may change")}`;
+  const meta = [
+    p && p.po_number ? `PO ${escapeHtml(p.po_number)}` : (o.po_number ? `PO ${escapeHtml(o.po_number)}` : ""),
+    p && p.customer_po ? `${T("PO ลูกค้า", "Client PO")} ${escapeHtml(p.customer_po)}` : "",
+    part ? `<span class="pp-part">${escapeHtml(part)}</span>` : "",
+    `<span class="pp-co pp-co-${ppCompanyTag(o.company).toLowerCase()}">${ppCompanyTag(o.company)}</span>`,
+    p ? `${T("ส่ง", "Delivery")} ${escapeHtml(ppDate(p.due_date))}` : "",
+    `<span class="pp-pill ${stt.cls}">${escapeHtml(stt.label)}</span>`,
+  ].filter(Boolean).join(" · ");
+
+  root.innerHTML = `<div class="dl-modal-back" data-act="paper-close-back">
+    <div class="dl-modal" role="dialog" aria-modal="true" aria-labelledby="pp-paper-title">
+      <header class="dl-modal-head">
+        <div>
+          <h3 id="pp-paper-title" class="dl-modal-title">📄 ${escapeHtml(o.customer_name || "—")}</h3>
+          <div class="dl-modal-meta">${meta}</div>
+        </div>
+        <button type="button" class="dl-modal-close" data-act="paper-close" aria-label="${escapeAttr(T("ปิด", "Close"))}">✕</button>
+      </header>
+      <div class="dl-modal-body">
+        <div class="dl-modal-photo">${photo}</div>
+        ${p ? `<div class="dl-modal-lines">
+          <table class="dl-table dl-lines-table">
+            <thead><tr><th class="dl-no">#</th><th>${T("สินค้า", "Product")}</th><th class="dl-kg">${T("สั่ง", "Ordered")}</th><th class="dl-kg">${T("ชั่งจริง กก.", "Actual kg")}</th></tr></thead>
+            <tbody>${rows || `<tr><td colspan="4" class="dl-empty">${T("ยังไม่มีรายการ", "No lines yet")}</td></tr>`}</tbody>
+            ${total ? `<tfoot><tr><td></td><td><strong>${T("รวม", "Total")}</strong></td><td></td><td class="dl-kg"><strong>${ppKgCell(total, confirmed)}</strong></td></tr></tfoot>` : ""}
+          </table>
+          <p class="dl-modal-who">${who}</p>
+        </div>` : ""}
+      </div>
+    </div>
+  </div>`;
+  const close = root.querySelector(".dl-modal-close");
+  if (close && !root.contains(document.activeElement)) close.focus();
+}
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && PP.paper && !ppSection.classList.contains("hidden")) { e.preventDefault(); ppClosePaper(); }
 });
 
 
@@ -565,6 +695,9 @@ ppSection.addEventListener("click", async e => {
     return;
   }
   const act = b.dataset.act;
+  if (act === "paper") { await ppOpenPaper(b.dataset.key); return; }
+  if (act === "paper-close") { ppClosePaper(); return; }
+  if (act === "paper-close-back") { if (e.target === b) ppClosePaper(); return; }
   if (act === "lang") { weighSetLang(b.dataset.lang); ppDraw(); }
   else if (act === "filter") { PP.filter = b.dataset.filter; ppDraw(); }
   else if (act === "toggle") {
@@ -666,6 +799,6 @@ paceLiveOn(() => {
   const open = !ppSection.classList.contains("hidden");
   const typing = document.activeElement && ppSection.contains(document.activeElement)
     && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName) && document.activeElement.id !== "pp-q";
-  if (open && !PP.formOpen && !PP.editing && !PP.closing && !typing) ppLoad();
+  if (open && !PP.formOpen && !PP.editing && !PP.closing && !PP.paper && !typing) ppLoad();
   else if (!open) ppRefreshBadge();
 });

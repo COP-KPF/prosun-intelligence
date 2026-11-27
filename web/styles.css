@@ -2110,6 +2110,15 @@ body.pace-readonly #weights-table tr.ws-row { cursor: default; }
 .pp-name { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit;
   text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .pp-name strong { font-weight: 600; color: var(--text); }
+/* 📄 the working paper (Migration 053) */
+.pp-client-in { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pp-client-in .pp-name { flex: 1 1 auto; min-width: 0; }
+.pp-paper { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0;
+  border: 1px solid var(--border); border-radius: 6px; background: #fff; font-size: 0.85rem; line-height: 1; cursor: pointer; }
+.pp-paper:hover { background: #f3ecdc; border-color: #d6c9ad; }
+.pp-paper:focus-visible { outline: 3px solid #d9c8a6; outline-offset: 2px; }
+.pp-paper-none { border-color: transparent; background: none; cursor: default; }
+.dl-modal-meta .pp-pill { max-width: none; }
 .pp-row.pp-closed .pp-name strong { color: var(--muted); }
 .pp-po { font-size: 0.74rem; color: var(--muted); }
 .pp-co { display: inline-block; font-size: 0.68rem; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: #efe8d8; color: #4a3a1c; }
@@ -2196,6 +2205,8 @@ body.pace-readonly #weights-table tr.ws-row { cursor: default; }
   .pp-table .pp-c-steps { grid-area: steps; justify-self: end; align-self: center; } .pp-table .pp-c-note { grid-area: note; }
   .pp-c-go { display: none !important; }
   .pp-name { font-size: 0.92rem; min-height: 32px; }
+  .pp-paper { width: 40px; height: 40px; font-size: 1.05rem; }
+  .pp-paper-none { display: none; }
   .pp-table tr.pp-detail-row { display: block; }
   .pp-table tr.pp-detail-row > td { display: block; border-radius: 10px; }
   .pp-timeline li { grid-template-columns: 84px 12px minmax(0, 1fr); }
