@@ -2694,3 +2694,18 @@ body.pace-readonly #weights-table tr.ws-row { cursor: default; }
 @media (min-width: 901px) {
   body.pace-nav-folded .pace-nav { background: var(--bg); border-right-color: transparent; }
 }
+
+/* Purchasing › Purchases › Odoo upload (Migration 054) */
+.pu-od-preview { display: flex; flex-direction: column; gap: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+.pu-od-preview h4 { margin: 0; font-size: 0.95rem; }
+.pu-od-scroll { max-height: 440px; overflow: auto; }
+.pu-od-dim td { color: #8a8478; }
+.pu-od-wait { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: flex-end; justify-content: space-between; padding: 10px 0; border-top: 1px solid #efe8d9; }
+.pu-od-wait:first-of-type { border-top: 0; }
+.pu-od-wait > div:first-child { flex: 1 1 320px; }
+.pu-od-dates { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.pu-od-dates label { display: flex; flex-direction: column; gap: 3px; font-size: 0.78rem; font-weight: 600; color: var(--muted); }
+.pu-od-dates input { padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-weight: 400; color: var(--text); }
+.pu-od-note-l input { width: 180px; }
+.pu-od-editrow td { background: #faf6ec; }
+#pu-od-list select { min-height: 34px; }

@@ -5,7 +5,7 @@
 create or replace function pg_temp.ok(cond boolean, label text) returns void language plpgsql as $$
 begin if coalesce(cond, false) then raise notice 'PASS %', label; else raise exception 'FAIL %', label; end if; end $$;
 create or replace function pg_temp.as_user(uid text) returns void language sql as $$
-  select set_config('request.jwt.claims', json_build_object('sub', uid)::text, false) $$;
+  select set_config('request.jwt.claims', json_build_object('sub', uid, 'aal', 'aal2')::text, false) $$;
 
 do $$
 declare v_id uuid; n int;

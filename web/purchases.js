@@ -33,7 +33,8 @@ const puSection = document.getElementById("purchases-section");
 
 const PU = {
   ctx: "purchasing",      // "purchasing": Purchasing › Purchases · "mgmt": Management › KPI › Purchases (Migration 047)
-  tab: (() => { try { return localStorage.getItem("pu-tab") === "ratio" ? "ratio" : "orders"; } catch (e) { return "orders"; } })(),
+  tab: (() => { try { const t = localStorage.getItem("pu-tab"); return t === "ratio" || t === "odoo" ? t : "orders"; } catch (e) { return "orders"; } })(),
+  od: { file: null, parsed: null, company: "", preview: null, err: null, board: null, month: null, filterCo: "all", saving: false, msg: null, editPo: null },
   week: null,            // Monday shown on Orders & arrivals
   board: null,           // purchase_board answer
   items: {},             // id → item
@@ -47,9 +48,10 @@ const PU = {
   ratio: { preset: "month", from: null, to: null, company: "Prosun Farm", group: "cycle", data: null, err: null, sig: "" },
 };
 
-// Targets (process notes, 4 Sep 2026): Prosun Farm 55–60 %, Prosun Food below 50 %.
+// Target (Clément, 27 Nov 2026): keep the ratio at 50 % — at or below is
+// green, above is red. (Was Farm 55–60 %, Food below 50 %, 4 Sep 2026.)
 const PU_TARGETS = {
-  "Prosun Farm": { good: 55, max: 60 },
+  "Prosun Farm": { good: 50, max: 50 },
   "Prosun Food": { good: 50, max: 50 },
 };
 const PU_SIZES = ["1.2-1.4", "1.4-1.6", "1.6-1.8"];
@@ -199,6 +201,7 @@ async function puLoad() {
   if (!puIsOpen()) return;
   if (puTabNow() === "ratio") return puLoadRatio();
   if (puTabNow() === "margins") return puLoadMargins();
+  if (puTabNow() === "odoo") return puOdooLoad();
   puReadForms();                     // a half-filled form survives Refresh
   const from = wsAddDays(PU.week, -7), to = wsAddDays(PU.week, 13);
   const week = PU.week;
@@ -218,6 +221,7 @@ function puDraw() {
   if (!puIsOpen()) return;
   const tabs = `<div class="kpi-tabs pu-tabs" role="tablist" aria-label="${escapeAttr(T("การสั่งซื้อ", "Purchases"))}">
     <button type="button" class="kpi-tab${PU.tab === "orders" ? " active" : ""}" role="tab" data-act="tab" data-tab="orders" aria-selected="${PU.tab === "orders"}">${T("สั่งซื้อและรับสินค้า", "Orders & arrivals")}<small>Mon → Wed · Wed → Fri · Sat → Mon</small></button>
+    <button type="button" class="kpi-tab${PU.tab === "odoo" ? " active" : ""}" role="tab" data-act="tab" data-tab="odoo" aria-selected="${PU.tab === "odoo"}">${T("อัปโหลดจาก Odoo", "Odoo upload")}<small>${T("ไฟล์ Purchase Analysis รายวัน", "Daily Purchase Analysis file")}</small></button>
     <button type="button" class="kpi-tab${PU.tab === "ratio" ? " active" : ""}" role="tab" data-act="tab" data-tab="ratio" aria-selected="${PU.tab === "ratio"}">${T("สัดส่วนต้นทุนต่อรายได้", "Cost ratio")}<small>${T("ต้นทุนซื้อ ÷ รายได้", "Purchases ÷ revenue")}</small></button>
   </div>`;
   const msg = PU.msg ? `<div class="${PU.msg.ok ? "pp-ok" : "mg-msg"}" id="pu-msg" role="status">${escapeHtml(PU.msg.text)}</div>` : "";
@@ -237,7 +241,7 @@ function puDraw() {
   }
   puSection.innerHTML = tabs + msg + `<div id="pu-body"></div>`;
   const body = document.getElementById("pu-body");
-  body.innerHTML = puTabNow() === "ratio" ? puRatioHtml() : puOrdersHtml();
+  body.innerHTML = puTabNow() === "ratio" ? puRatioHtml() : puTabNow() === "odoo" ? puOdooHtml() : puOrdersHtml();
   if (PU.mode && PU.mode.kind === "order") puFormRefresh();
 }
 
@@ -369,8 +373,8 @@ function puOrderHtml(o) {
 
 function puOrdersNoteHtml() {
   return `<div class="mg-card mg-small mg-muted" id="pu-orders-note">${T(
-    "รอบสั่งซื้อ: สั่งวันจันทร์ ถึงโรงงานวันพุธ · สั่งวันพุธ ถึงวันศุกร์ · สั่งวันเสาร์ ถึงวันจันทร์ ต้นทุน = กก. × ราคาต่อกก. หรือ จำนวน × ราคาต่อตัว ก่อนรับสินค้าเป็นประมาณการจากที่สั่ง หลังรับใช้จำนวน/น้ำหนักที่รับจริง ตัวที่ไม่รับ (ตาย/ไม่ผ่าน) ไม่คิดเงิน หน้านี้เปิดเฉพาะบัญชีที่คุณเคลมองต์กำหนด",
-    "Cycles: ordered Monday, at the factory Wednesday · ordered Wednesday, Friday · ordered Saturday, Monday. Cost = kg × price per kg, or quantity × price per bird. Before the arrival it is an estimate from the order; after, the received quantity and kg are used. Rejected birds (dead or refused) are not paid. Only the accounts Clément has named see this page.")}</div>`;
+    "รอบสั่งซื้อ: สั่งวันจันทร์ ถึงโรงงานวันพุธ · สั่งวันพุธ ถึงวันศุกร์ · สั่งวันเสาร์ ถึงวันจันทร์ ต้นทุน = กก. × ราคาต่อกก. หรือ จำนวน × ราคาต่อตัว ก่อนรับสินค้าเป็นประมาณการจากที่สั่ง หลังรับใช้จำนวน/น้ำหนักที่รับจริง ตัวที่ไม่รับ (ตาย/ไม่ผ่าน) ไม่คิดเงิน หน้านี้เปิดเฉพาะบัญชีที่คุณเคลมองต์กำหนด ตั้งแต่ 27 พ.ย. สัดส่วนต้นทุนใช้ต้นทุนจากไฟล์ Odoo ไม่ใช่ราคาที่กรอกที่นี่",
+    "Cycles: ordered Monday, at the factory Wednesday · ordered Wednesday, Friday · ordered Saturday, Monday. Cost = kg × price per kg, or quantity × price per bird. Before the arrival it is an estimate from the order; after, the received quantity and kg are used. Rejected birds (dead or refused) are not paid. Only the accounts Clément has named see this page. Since 27 Nov the cost ratio takes its cost from the Odoo upload, not from the prices typed here.")}</div>`;
 }
 
 
@@ -640,14 +644,13 @@ function puTarget() { return PU_TARGETS[PU.ratio.company] || null; }
 function puRatioState(pct) {
   const t = puTarget();
   if (pct === null || !t) return "";
-  if (pct <= t.good && !(t.good === t.max && pct >= t.max)) return "good";
-  if (pct <= t.max && t.good !== t.max) return "watch";
+  if (pct <= t.good) return "good";
+  if (pct <= t.max) return "watch";
   return "alert";
 }
 function puTargetText() {
   const c = PU.ratio.company;
-  if (c === "Prosun Farm") return T("เป้าหมาย 55–60%", "Target 55–60%");
-  if (c === "Prosun Food") return T("เป้าหมายต่ำกว่า 50%", "Target below 50%");
+  if (c === "Prosun Farm" || c === "Prosun Food") return T("เป้าหมาย 50%", "Target 50%");
   return T("ไม่มีเป้าหมายรวม (เลือกบริษัท)", "No combined target (choose a company)");
 }
 
@@ -709,8 +712,8 @@ function puRatioHtml() {
   if (!d) return bar + `<p class="mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
   if (!d.first_purchase) {
     return bar + `<div class="mg-card" id="pu-r-empty"><p>${T(
-      "ยังไม่มีการสั่งซื้อที่บันทึกใน PACE — สัดส่วนจะเริ่มคำนวณตั้งแต่การรับสินค้าครั้งแรกที่บันทึกในแท็บ “สั่งซื้อและรับสินค้า”",
-      "No purchase recorded in PACE yet. The ratio starts with the first arrival entered on the “Orders & arrivals” tab.")}</p></div>` + puRatioNoteHtml(d);
+      "ยังไม่มีการซื้อจาก Odoo — อัปโหลดไฟล์ Purchase Analysis ในแท็บ “อัปโหลดจาก Odoo” แล้วสัดส่วนจะเริ่มคำนวณ",
+      "No Odoo purchase yet. Upload the Purchase Analysis file on the “Odoo upload” tab and the ratio starts.")}</p></div>` + puOdooStatusHtml(d) + puRatioNoteHtml(d);
   }
   if (d.full === false) return bar + puRatioLimitedHtml(d);
   const rows = puRatioRows(d);
@@ -722,10 +725,11 @@ function puRatioHtml() {
   tot.pct = tot.rev > 0 ? (tot.total / tot.rev) * 100 : null;
   const started = d.from_effective > d.from
     ? `<p class="mg-small pu-warn" id="pu-r-start">${escapeHtml(T(
-        `นับตั้งแต่ ${smDayLabel(d.from_effective)} — วันแรกที่มีทั้งใบงานที่นับและการสั่งซื้อที่บันทึกใน PACE`,
-        `Counted from ${smDayLabel(d.from_effective)}: the first day with both counted working papers and purchases entered in PACE.`))}</p>` : "";
+        `นับตั้งแต่ ${smDayLabel(d.from_effective)} — วันแรกที่มีทั้งใบงานที่นับและการซื้อจาก Odoo`,
+        `Counted from ${smDayLabel(d.from_effective)}: the first day with both counted working papers and Odoo purchases.`))}</p>` : "";
+  const odoo = puOdooStatusHtml(d);
   tot.cut = cut;
-  return bar + started + puRatioTilesHtml(tot, d) + puRatioChartHtml(rows) + puRatioTableHtml(rows, tot) + puInvoicedHtml(d) + puRatioNoteHtml(d);
+  return bar + started + odoo + puRatioTilesHtml(tot, d) + puRatioChartHtml(rows) + puRatioTableHtml(rows, tot) + puInvoicedHtml(d) + puRatioNoteHtml(d);
 }
 
 // Ratio only (purchasing manager, Migration 047): percentages, birds, orders.
@@ -738,8 +742,9 @@ function puRatioLimitedHtml(d) {
   const fill = Number(tbo) > 0 ? Math.round((Number(tbr) / Number(tbo)) * 1000) / 10 : null;
   const started = d.from_effective > d.from
     ? `<p class="mg-small pu-warn" id="pu-r-start">${escapeHtml(T(
-        `นับตั้งแต่ ${smDayLabel(d.from_effective)} — วันแรกที่มีทั้งใบงานที่นับและการสั่งซื้อที่บันทึกใน PACE`,
-        `Counted from ${smDayLabel(d.from_effective)}: the first day with both counted working papers and purchases entered in PACE.`))}</p>` : "";
+        `นับตั้งแต่ ${smDayLabel(d.from_effective)} — วันแรกที่มีทั้งใบงานที่นับและการซื้อจาก Odoo`,
+        `Counted from ${smDayLabel(d.from_effective)}: the first day with both counted working papers and Odoo purchases.`))}</p>` : "";
+  const odoo = puOdooStatusHtml(d);
   const tiles = `<div class="mg-tiles pu-tiles pu-tiles-3" id="pu-r-tiles">
     ${mgTile({ id: "pu-r-ratio", label: T("ต้นทุนซื้อ ÷ รายได้", "Purchase cost ÷ revenue"),
       value: pct === null ? "—" : mgN(pct, 1) + "%", state: st === "watch" ? "alert" : st,
@@ -766,9 +771,9 @@ function puRatioLimitedHtml(d) {
     </table></div>
   </div>`;
   const note = `<div class="mg-card mg-small mg-muted" id="pu-r-note">${T(
-    "สัดส่วน = (ต้นทุนสินค้าที่ซื้อ + ค่าขนส่ง) ÷ รายได้ของใบงานที่ยืนยันแล้ว ต้นทุนนับตามวันที่สินค้ามาถึง ใบสั่งซื้อที่ยังไม่รับนับเป็นประมาณการ (≈) ตัวเลขรายได้เห็นเฉพาะผู้บริหาร",
-    "Ratio = (goods bought + freight) ÷ revenue of the confirmed working papers. Purchases count on the day they arrived; an order not arrived yet counts as an estimate (≈). Revenue figures are visible to management only.")}</div>`;
-  return started + tiles + puRatioChartHtml(rows) + table + note;
+    "สัดส่วน = (ต้นทุนสินค้าที่ซื้อ + ค่าขนส่ง) ÷ รายได้ของใบงานที่ยืนยันแล้ว ต้นทุนมาจากไฟล์ Odoo: สินค้าที่ขาย (Saleable) ของแต่ละ PO และค่าขนส่ง นับตามวันที่สินค้ามาถึง (วันสั่ง + 2 วัน) PO ที่ยังไม่มาถึงมีเครื่องหมาย ≈ ยังไม่นับบรรจุภัณฑ์และวัสดุสิ้นเปลือง ตัวเลขรายได้เห็นเฉพาะผู้บริหาร",
+    "Ratio = (goods bought + freight) ÷ revenue of the confirmed working papers. Purchases come from the Odoo upload: the saleable goods of each PO and its freight, counted on the arrival day (order date + 2 days); a PO not arrived yet is marked ≈. Packaging and consumables are not counted yet. Revenue figures are visible to management only.")}</div>`;
+  return started + odoo + tiles + puRatioChartHtml(rows) + table + note;
 }
 
 function puRatioTilesHtml(t, d) {
@@ -889,8 +894,8 @@ function puInvoicedHtml(d) {
 
 function puRatioNoteHtml(d) {
   return `<div class="mg-card mg-small mg-muted" id="pu-r-note">${T(
-    `สัดส่วน = (ต้นทุนสินค้าที่ซื้อ + ค่าขนส่ง) ÷ รายได้ ต้นทุนนับตามวันที่สินค้ามาถึง ใบสั่งซื้อที่ยังไม่รับนับเป็นประมาณการ (≈) รายได้โดยประมาณมาจากใบงานที่ยืนยันน้ำหนักแล้ว ตามวันผลิต ใช้หลักเดียวกับหน้าสรุป: น้ำหนักจริง × ราคาในใบราคา ไม่หักส่วนลด จึงอาจสูงกว่ารายได้จริง (สัดส่วนจะดูดีกว่าความจริง) ส่วนสินค้าที่ไม่มีในใบราคาไม่ถูกนับรายได้ (สัดส่วนจะดูแย่กว่าความจริง) ยอดใบแจ้งหนี้ใน Odoo คือรายได้จริง ยอดขายของ Prosun Food ที่ซื้อจาก Prosun Farm นับเป็นรายได้ของ Farm`,
-    `Ratio = (goods bought + freight) ÷ revenue. Purchases count on the day they arrived; an order not arrived yet counts as an estimate (≈). Approx. revenue comes from the confirmed working papers, by production day, with the Summary rules: actual kg × the list price, no discounts — so it can be above the real revenue (the ratio then looks better than it is), while products not on the price list bring no revenue (the ratio then looks worse). Odoo invoices are the real revenue. Prosun Food's purchases from Prosun Farm are Farm revenue.`)}</div>`;
+    `สัดส่วน = (ต้นทุนสินค้าที่ซื้อ + ค่าขนส่ง) ÷ รายได้ ต้นทุนมาจากไฟล์ Odoo: สินค้าที่ขาย (Saleable) ของแต่ละ PO และค่าขนส่งของ PO นั้น นับตามวันที่สินค้ามาถึง (วันสั่ง + 2 วัน) PO ที่ยังไม่มาถึงมีเครื่องหมาย ≈ ยังไม่นับบรรจุภัณฑ์และวัสดุสิ้นเปลือง รายได้โดยประมาณมาจากใบงานที่ยืนยันน้ำหนักแล้ว ตามวันผลิต ใช้หลักเดียวกับหน้าสรุป: น้ำหนักจริง × ราคาในใบราคา ไม่หักส่วนลด จึงอาจสูงกว่ารายได้จริง (สัดส่วนจะดูดีกว่าความจริง) ส่วนสินค้าที่ไม่มีในใบราคาไม่ถูกนับรายได้ (สัดส่วนจะดูแย่กว่าความจริง) ยอดใบแจ้งหนี้ใน Odoo คือรายได้จริง ยอดขายของ Prosun Food ที่ซื้อจาก Prosun Farm นับเป็นรายได้ของ Farm`,
+    `Ratio = (goods bought + freight) ÷ revenue. Purchases come from the Odoo upload: each PO's saleable goods and its freight, counted on the arrival day (order date + 2 days, or the date set on the Odoo upload tab); a PO not arrived yet is marked ≈. Packaging and consumables are not counted yet. Approx. revenue comes from the confirmed working papers, by production day, with the Summary rules: actual kg × the list price, no discounts — so it can be above the real revenue (the ratio then looks better than it is), while products not on the price list bring no revenue (the ratio then looks worse). Odoo invoices are the real revenue. Prosun Food's purchases from Prosun Farm are Farm revenue.`)}</div>`;
 }
 
 
@@ -1031,6 +1036,8 @@ puSection.addEventListener("click", async e => {
     puDraw(); await puLoad();
   } else if (act.startsWith("mg-")) {
     await puMarginsAct(act, b);
+  } else if (act.startsWith("od-")) {
+    await puOdooAct(act, b);
   }
 });
 
@@ -1052,6 +1059,9 @@ puSection.addEventListener("change", async e => {
   const id = e.target.id;
   if (e.target.closest("#pu-f-lines")) { puFormRefresh(); return; }
   if (e.target.closest("#pu-mg-form")) { puMarginsFormRefresh(); return; }
+  if (id === "pu-od-file") { await puOdooRead(e.target.files && e.target.files[0]); return; }
+  if (id === "pu-od-company" && PU.od.parsed) { PU.od.company = e.target.value; await puOdooPreview(); return; }
+  if (id === "pu-od-filter") { PU.od.filterCo = e.target.value; PU.od.board = null; puDraw(); await puOdooLoad(); return; }
   if (id === "pu-f-order" && PU.mode && PU.mode.kind === "order" && !PU.mode.o.arrivalTouched && e.target.value) {
     document.getElementById("pu-f-arrival").value = wsAddDays(e.target.value, 2);   // Mon → Wed, Wed → Fri, Sat → Mon
   } else if (id === "pu-f-arrival" && PU.mode) {
@@ -1073,6 +1083,7 @@ if (document.getElementById("sign-out-btn")) {
     Object.assign(PU, { board: null, items: {}, err: null, mode: null, msg: null });
     Object.assign(PU.ratio, { data: null, err: null, sig: "" });
     Object.assign(PU.mg, { rows: null, err: null, locked: false, edit: null, msg: null });
+    Object.assign(PU.od, { file: null, parsed: null, company: "", preview: null, err: null, board: null, msg: null, editPo: null });
   });
 }
 
@@ -1121,8 +1132,8 @@ function puMgFigures(r) {
   if (cost === null || cost === undefined || sell === null || sell === undefined) return { cost, margin: null, mult: null, pct: null };
   return { cost, margin: sell - cost, mult: cost > 0 ? sell / cost : null, pct: sell > 0 ? (cost / sell) * 100 : null };
 }
-// Product level: ≤55 % green, 55–60 % amber, above 60 % red (Farm targets).
-function puMgState(pct) { return pct === null ? "" : pct <= 55 ? "good" : pct <= 60 ? "watch" : "alert"; }
+// Product level: ≤50 % green (the ratio target), 50–60 % amber, above 60 % red.
+function puMgState(pct) { return pct === null ? "" : pct <= 50 ? "good" : pct <= 60 ? "watch" : "alert"; }
 function puMgUnit(u) { return u === "pce" ? T("ชิ้น", "pce") : "kg"; }
 function puMgNum(v, dp) { return v === null || v === undefined ? "—" : mgN(v, dp !== undefined ? dp : (Math.round(v * 100) % 100 ? 2 : 0)); }
 
@@ -1156,8 +1167,8 @@ function puMarginsHtml() {
     ${g.edit ? puMgFormHtml(g.edit) : ""}
     <div class="mg-card" id="pu-mg-table-card"><div id="pu-mg-table-box">${puMgTableHtml()}</div></div>
     <div class="mg-card mg-small mg-muted" id="pu-mg-note">${T(
-      "ต้นทุนของชิ้นส่วน = ราคาซื้อสัตว์ปีกต่อกก. ÷ สัดส่วนที่ใช้ได้ (yield) — แทนสูตรเดิม 1000×83/1450 ที่ทำให้ต้นทุนชิ้นส่วนต่ำเกินจริง ผลพลอยได้ (โครง คอ) จึงแสดงขาดทุน ต้นทุนเป็น % ของราคาขาย: ≤55% เขียว 55–60% เหลือง เกิน 60% แดง ราคาขายตามไฟล์ของคุณเคลมองต์ (สัตว์ปีกพิเศษ: ราคา 11 ชิ้นขึ้นไป) ราคาซื้อจากรายการต้นทุนวันที่ 24/02/25 ข้อมูลนี้เห็นเฉพาะคุณเคลมองต์และคุณจุ๋ม",
-      "Cost of a cut = the bird's buying price per kg ÷ usable yield — instead of the file's 1000×83/1450, which understated every cut's cost. By-products (carcass, neck) therefore show a loss. Cost as a % of the price: ≤55 % green, 55–60 % amber, above 60 % red. Selling prices from Clément's file (special poultry: the price for 11 pieces and more); buying prices from the cost list of 24/02/25. Visible to Clément and Khun Jum only.")}</div>`;
+      "ต้นทุนของชิ้นส่วน = ราคาซื้อสัตว์ปีกต่อกก. ÷ สัดส่วนที่ใช้ได้ (yield) — แทนสูตรเดิม 1000×83/1450 ที่ทำให้ต้นทุนชิ้นส่วนต่ำเกินจริง ผลพลอยได้ (โครง คอ) จึงแสดงขาดทุน ต้นทุนเป็น % ของราคาขาย: ≤50% เขียว 50–60% เหลือง เกิน 60% แดง ราคาขายตามไฟล์ของคุณเคลมองต์ (สัตว์ปีกพิเศษ: ราคา 11 ชิ้นขึ้นไป) ราคาซื้อจากรายการต้นทุนวันที่ 24/02/25 ข้อมูลนี้เห็นเฉพาะคุณเคลมองต์และคุณจุ๋ม",
+      "Cost of a cut = the bird's buying price per kg ÷ usable yield — instead of the file's 1000×83/1450, which understated every cut's cost. By-products (carcass, neck) therefore show a loss. Cost as a % of the price: ≤50 % green, 50–60 % amber, above 60 % red. Selling prices from Clément's file (special poultry: the price for 11 pieces and more); buying prices from the cost list of 24/02/25. Visible to Clément and Khun Jum only.")}</div>`;
 }
 
 function puMgTilesHtml() {
@@ -1339,5 +1350,394 @@ async function puMarginsAct(act, b) {
         r.supplier || "", r.price_date || "", r.note || ""]);
     }
     puDownload(`prosun-margins-${puToday()}.csv`, out);
+  }
+}
+
+
+// ============================================================================
+// Purchasing › Purchases › Odoo upload (Migration 054)
+// ============================================================================
+// Clément, 27 Nov 2026: the purchasing team exports Odoo's Purchase Analysis
+// (pivot by category and PO, month to date, one file per company) and uploads
+// it daily; the cost ratio takes its cost from it. The file is read here in the
+// browser (no library: an .xlsx is a zip of XML, inflated with the browser's
+// DecompressionStream), the PO rows go to purchase_odoo_import — first as a
+// dry run for the preview, then for real. The database reads the dates.
+
+async function puXlsxRead(buf) {
+  const v = new DataView(buf);
+  const u8 = new Uint8Array(buf);
+  let eocd = -1;
+  for (let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 70000); i--) {
+    if (v.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("not an Excel (.xlsx) file");
+  const n = v.getUint16(eocd + 10, true);
+  let p = v.getUint32(eocd + 16, true);
+  const files = {};
+  const dec = new TextDecoder("utf-8");
+  for (let k = 0; k < n; k++) {
+    if (v.getUint32(p, true) !== 0x02014b50) throw new Error("damaged .xlsx file");
+    const method = v.getUint16(p + 10, true), csize = v.getUint32(p + 20, true);
+    const nlen = v.getUint16(p + 28, true), xlen = v.getUint16(p + 30, true), clen = v.getUint16(p + 32, true);
+    const off = v.getUint32(p + 42, true);
+    const name = dec.decode(u8.subarray(p + 46, p + 46 + nlen));
+    files[name] = { method, csize, off };
+    p += 46 + nlen + xlen + clen;
+  }
+  async function text(name) {
+    const f = files[name];
+    if (!f) return null;
+    const lh = f.off, start = lh + 30 + v.getUint16(lh + 26, true) + v.getUint16(lh + 28, true);
+    const data = u8.subarray(start, start + f.csize);
+    if (f.method === 0) return dec.decode(data);
+    if (f.method !== 8 || typeof DecompressionStream === "undefined") throw new Error("this browser cannot read the file — use Chrome or Edge");
+    const out = await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer();
+    return dec.decode(out);
+  }
+  const xml = s => new DOMParser().parseFromString(s, "application/xml");
+  const wb = xml(await text("xl/workbook.xml"));
+  const sheet = wb.getElementsByTagName("sheet")[0];
+  const sheetName = sheet ? sheet.getAttribute("name") : "";
+  const rid = sheet ? (sheet.getAttribute("r:id") || sheet.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id")) : null;
+  let target = "worksheets/sheet1.xml";
+  const relsTxt = await text("xl/_rels/workbook.xml.rels");
+  if (relsTxt && rid) {
+    for (const r of xml(relsTxt).getElementsByTagName("Relationship")) if (r.getAttribute("Id") === rid) target = r.getAttribute("Target");
+  }
+  target = target.replace(/^\/?xl\//, "").replace(/^\//, "");
+  const shared = [];
+  const ssTxt = await text("xl/sharedStrings.xml");
+  if (ssTxt) for (const si of xml(ssTxt).getElementsByTagName("si")) shared.push([...si.getElementsByTagName("t")].map(t => t.textContent).join(""));
+  const sh = xml(await text("xl/" + target));
+  const col = ref => { let c = 0; for (const ch of ref.replace(/\d+$/, "")) c = c * 26 + ch.charCodeAt(0) - 64; return c - 1; };
+  const rows = [];
+  for (const r of sh.getElementsByTagName("row")) {
+    const row = [];
+    for (const c of r.getElementsByTagName("c")) {
+      const t = c.getAttribute("t"), vEl = c.getElementsByTagName("v")[0];
+      let val = null;
+      if (t === "s") val = vEl ? shared[Number(vEl.textContent)] : null;
+      else if (t === "inlineStr") val = [...c.getElementsByTagName("t")].map(x => x.textContent).join("");
+      else if (t === "str" || t === "b" || t === "e") val = vEl ? vEl.textContent : null;
+      else val = vEl ? Number(vEl.textContent) : null;
+      row[col(c.getAttribute("r"))] = val;
+    }
+    rows.push(row);
+  }
+  return { sheetName, rows };
+}
+
+// The pivot → PO rows. Groups whose name has "Saleable" are goods; others are
+// everything else. Product rows (under an expanded PO) are ignored.
+function puOdooParse(sheet, fileName) {
+  const rows = sheet.rows;
+  let hdr = -1, cCount = 1, cUntaxed = 2, cTotal = 3;
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    const r = rows[i] || [];
+    const j = r.findIndex(x => typeof x === "string" && /untaxed/i.test(x));
+    if (j >= 0) { hdr = i; cUntaxed = j; cCount = r.findIndex(x => typeof x === "string" && /^count$/i.test(x.trim())); cTotal = r.findIndex((x, k) => k !== j && typeof x === "string" && /^total$/i.test(x.trim())); break; }
+  }
+  if (hdr < 0) throw new Error(T("ไม่พบคอลัมน์ Untaxed Total — ใช่ไฟล์ Purchase Analysis จาก Odoo หรือไม่", "No “Untaxed Total” column: is this Odoo's Purchase Analysis export?"));
+  const out = [], groups = [];
+  let grp = null;
+  for (let i = hdr + 1; i < rows.length; i++) {
+    const r = rows[i] || [];
+    const raw = r[0];
+    if (typeof raw !== "string") continue;
+    const label = raw.replace(/ /g, " ");
+    const t = label.trim();
+    if (!t || /^total$/i.test(t)) continue;
+    const m = t.match(/^(PO\d{6,})\s*(?:\((.*)\))?\s*$/s);
+    if (m) {
+      if (!grp) continue;
+      grp.direct = true;
+      out.push({ po: m[1], grp: grp.kind, description: (m[2] || "").trim(), lines: r[cCount] ?? null,
+                 untaxed: Number(r[cUntaxed] || 0), total: cTotal >= 0 ? (r[cTotal] ?? null) : null });
+    } else if (/^\[/.test(t)) {
+      continue;                                                  // a product line under a PO
+    } else {
+      grp = { label: t, kind: /saleable/i.test(t) ? "saleable" : "other", untaxed: Number(r[cUntaxed] || 0), direct: false };
+      groups.push(grp);
+    }
+  }
+  if (!out.length) throw new Error(T("ไม่พบ PO ในไฟล์นี้", "No purchase order (PO…) found in this file."));
+  const file = { saleable: 0, other: 0 };
+  for (const g of groups) if (g.direct) file[g.kind] += g.untaxed;
+  const name = (sheet.sheetName || "") + " " + (fileName || "");
+  const company = /food|prosum/i.test(name) ? "Prosun Food" : /farm/i.test(name) ? "Prosun Farm" : "";
+  return { rows: out, file, company, sheetName: sheet.sheetName, fileName };
+}
+
+async function puOdooRead(file) {
+  const od = PU.od;
+  od.preview = null; od.err = null; od.msg = null; od.parsed = null;
+  if (!file) { puDraw(); return; }
+  od.file = file.name;
+  try {
+    const sheet = await puXlsxRead(await file.arrayBuffer());
+    od.parsed = puOdooParse(sheet, file.name);
+    od.company = od.parsed.company || od.company;
+  } catch (e) {
+    od.err = T("อ่านไฟล์ไม่ได้: ", "Could not read the file: ") + (e.message || e);
+    puDraw(); return;
+  }
+  await puOdooPreview();
+}
+
+function puOdooPayload(dry) {
+  const od = PU.od;
+  return { company: od.company, file_name: od.file, dry_run: dry, file: od.parsed.file,
+           rows: od.parsed.rows.map(r => ({ po: r.po, grp: r.grp, description: r.description, lines: r.lines, untaxed: r.untaxed, total: r.total })) };
+}
+
+async function puOdooPreview() {
+  const od = PU.od;
+  if (!od.parsed) return;
+  if (!od.company) { od.preview = null; puDraw(); return; }
+  od.saving = true; puDraw();
+  const { data, error } = await sb.rpc("purchase_odoo_import", { p: puOdooPayload(true) });
+  od.saving = false;
+  if (error) { const e = puError(error); od.err = e.kind === "other" ? e.text : e.text; od.preview = null; puDraw(); return; }
+  od.preview = data;
+  puDraw();
+}
+
+async function puOdooLoad() {
+  const od = PU.od;
+  if (!od.month) od.month = puToday().slice(0, 7) + "-01";
+  const from = od.month, to = wsAddDays(smMonthStart(wsAddDays(od.month, 40), 0), -1);
+  const key = from + od.filterCo;
+  const { data, error } = await sb.rpc("purchase_odoo_board", { p_from: from, p_to: to, p_company: od.filterCo });
+  if (!puIsOpen() || puTabNow() !== "odoo" || key !== od.month + od.filterCo) return;
+  if (error) {
+    const e = puError(error);
+    if (e.kind === "access") PU.err = e;
+    else if (/purchase_odoo|schema cache|does not exist|Could not find/i.test(error.message || ""))
+      PU.err = { kind: "missing", text: T("ฐานข้อมูลยังไม่อัปเดต: กรุณารัน Migration 054 ใน Supabase", "The database is not up to date: run Migration 054 in Supabase.") };
+    else od.err = e.text;
+    puDraw(); return;
+  }
+  PU.err = null;
+  od.board = data;
+  puDraw();
+}
+
+function puOdooStateChip(st) {
+  const t = {
+    counted:     [T("นับในสัดส่วน", "Counted"), "received"],
+    no_date:     [T("ไม่มีวันที่ — ต้องใส่", "No date: set it"), "late"],
+    far_date:    [T("วันที่ไม่ตรงเดือนของ PO — ต้องยืนยัน", "Date far from the PO month: confirm it"), "late"],
+    not_counted: [T("บรรจุภัณฑ์/วัสดุ — ยังไม่นับ", "Packaging / consumables: not counted yet"), "cancelled"],
+    waiting:     [T("รอวันที่", "Waiting for a date"), "late"],
+  }[st] || [st, "ordered"];
+  return `<span class="pu-chip pu-chip-${t[1]}">${escapeHtml(t[0])}</span>`;
+}
+function puOdooTime(ts) {
+  return ts ? new Date(ts).toLocaleString(WEIGH_LANG === "en" ? "en-GB" : "th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" }) : "—";
+}
+function puOdooCompleteHtml(x) {
+  if (x.complete) return `<span class="pu-st-good">✓ ${T("ครบ", "complete")}</span>`;
+  const parts = [];
+  if (x.saleable_file !== null && x.saleable_file !== undefined && Math.abs(Number(x.saleable_file) - Number(x.saleable_rows)) >= 1)
+    parts.push(T(`Saleable: PO รวม ${smBaht(x.saleable_rows)} จากยอด ${smBaht(x.saleable_file)}`, `Saleable: POs add up to ${smBaht(x.saleable_rows)} of ${smBaht(x.saleable_file)}`));
+  if (x.other_file !== null && x.other_file !== undefined && Math.abs(Number(x.other_file) - Number(x.other_rows)) >= 1)
+    parts.push(T(`อื่นๆ: ${smBaht(x.other_rows)} จาก ${smBaht(x.other_file)}`, `Other: ${smBaht(x.other_rows)} of ${smBaht(x.other_file)}`));
+  return `<span class="pu-bad">⚠ ${T("ไม่ครบ", "incomplete")}</span>${parts.length ? `<div class="mg-small pu-bad">${escapeHtml(parts.join(" · "))}</div>` : ""}`;
+}
+
+function puOdooHtml() {
+  const od = PU.od;
+  const msg = od.msg ? `<div class="${od.msg.ok ? "pp-ok" : "mg-msg"}" id="pu-od-msg" role="status">${escapeHtml(od.msg.text)}</div>` : "";
+  const err = od.err ? `<div class="mg-msg" id="pu-od-error">${escapeHtml(od.err)}</div>` : "";
+  const upload = `<div class="mg-card pu-form" id="pu-od-upload">
+    <div class="mg-card-head"><h3>${T("อัปโหลดไฟล์จาก Odoo", "Upload the Odoo file")}</h3>${weighLangHtml()}</div>
+    <p class="mg-small mg-muted">${T(
+      "Odoo › Purchase › Reporting › Purchase Analysis (มุมมอง Pivot, เดือนนี้ถึงวันนี้) — กด “Expand all” ก่อนดาวน์โหลด ไฟล์ละหนึ่งบริษัท อัปโหลดทุกวันได้ PO เดิมจะไม่ถูกนับซ้ำ",
+      "Odoo › Purchase › Reporting › Purchase Analysis (pivot, month to date) — click “Expand all” before downloading. One file per company. Upload it every day: a PO already uploaded is never counted twice.")}</p>
+    <div class="pu-grid">
+      <label>${T("ไฟล์ Excel (.xlsx)", "Excel file (.xlsx)")}<input type="file" id="pu-od-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
+      <label>${T("บริษัท", "Company")}<select id="pu-od-company">
+        <option value=""${!od.company ? " selected" : ""}>${T("— เลือก —", "— choose —")}</option>
+        <option${od.company === "Prosun Farm" ? " selected" : ""}>Prosun Farm</option>
+        <option${od.company === "Prosun Food" ? " selected" : ""}>Prosun Food</option></select></label>
+    </div>
+    ${od.saving ? `<p class="mg-muted">${T("กำลังอ่าน…", "Reading…")}</p>` : ""}
+    ${od.parsed && !od.company ? `<p class="pu-warn mg-small">${T("เลือกบริษัทของไฟล์นี้", "Choose the company of this file.")}</p>` : ""}
+    ${od.preview ? puOdooPreviewHtml(od.preview) : ""}
+  </div>`;
+  if (!od.board) return msg + err + upload + `<p class="mg-muted">${T("กำลังโหลด…", "Loading…")}</p>`;
+  return msg + err + upload + puOdooWaitingHtml() + puOdooListHtml() + puOdooUploadsHtml();
+}
+
+function puOdooPreviewHtml(p) {
+  const pos = p.pos || [];
+  const counted = pos.filter(x => x.state === "counted");
+  const waiting = pos.filter(x => x.state === "no_date" || x.state === "far_date");
+  const other = pos.filter(x => x.state === "not_counted");
+  const sum = (list, f) => list.reduce((a, x) => a + Number(x[f] || 0), 0);
+  return `<div id="pu-od-preview" class="pu-od-preview">
+    <h4>${escapeHtml(PU.od.file || "")} — ${escapeHtml(p.company)}</h4>
+    <div class="mg-tiles pu-tiles" id="pu-od-tiles">
+      ${mgTile({ id: "pu-od-t-pos", label: T("PO ในไฟล์", "POs in the file"), value: mgN(pos.length),
+        sub: T(`ใหม่ ${p.new} · เปลี่ยน ${p.changed} · เหมือนเดิม ${p.unchanged} (แถว)`, `rows: ${p.new} new · ${p.changed} changed · ${p.unchanged} unchanged`) })}
+      ${mgTile({ id: "pu-od-t-counted", label: T("นับในสัดส่วน", "Counted in the ratio"), value: smBaht(sum(counted, "goods") + sum(counted, "freight")), unit: "THB",
+        sub: T(`${counted.length} PO · สินค้า ${smBaht(sum(counted, "goods"))} · ขนส่ง ${smBaht(sum(counted, "freight"))}`, `${counted.length} POs · goods ${smBaht(sum(counted, "goods"))} · freight ${smBaht(sum(counted, "freight"))}`) })}
+      ${mgTile({ id: "pu-od-t-wait", label: T("รอวันที่", "Waiting for a date"), value: mgN(waiting.length), state: waiting.length ? "alert" : "good",
+        sub: waiting.length ? smBaht(sum(waiting, "goods") + sum(waiting, "freight")) + " THB" : "" })}
+      ${mgTile({ id: "pu-od-t-other", label: T("บรรจุภัณฑ์/วัสดุ (ยังไม่นับ)", "Packaging / consumables (not counted)"), value: smBaht(sum(other, "other")), unit: "THB",
+        sub: T(`${other.length} PO`, `${other.length} POs`) })}
+      ${mgTile({ id: "pu-od-t-complete", label: T("ไฟล์ครบหรือไม่", "Is the file complete?"), value: p.complete ? T("ครบ", "Yes") : T("ไม่ครบ", "No"), state: p.complete ? "good" : "alert",
+        sub: p.complete ? T("PO รวมเท่ากับยอดรวมของไฟล์", "POs add up to the file's totals") : T("PO รวมน้อยกว่ายอดรวม — กด Expand all ใน Odoo", "POs add up to less than the totals — click Expand all in Odoo") })}
+    </div>
+    ${p.complete ? "" : `<div class="mg-msg" id="pu-od-incomplete">${puOdooCompleteHtml(p)}<div class="mg-small">${T(
+      "ใน Odoo กด “Expand all” ก่อนดาวน์โหลด มิฉะนั้นต้นทุนจะต่ำกว่าความจริงและสัดส่วนจะดูดีเกินจริง ยังนำเข้าได้",
+      "In Odoo, click “Expand all” before downloading, otherwise the cost is under-counted and the ratio looks better than it is. You can still import it.")}</div></div>`}
+    <div class="mg-table-wrap pu-od-scroll"><table class="mg-table" id="pu-od-preview-table">
+      <thead><tr><th>PO</th><th>${T("รายละเอียด", "Description")}</th><th>${T("วันสั่ง", "Ordered")}</th><th>${T("ถึง", "Arrives")}</th>
+        <th class="mg-n">${T("สินค้า", "Goods")}</th><th class="mg-n">${T("ขนส่ง", "Freight")}</th><th class="mg-n">${T("อื่นๆ", "Other")}</th><th></th></tr></thead>
+      <tbody>${pos.map(x => `<tr class="${x.state === "not_counted" ? "pu-od-dim" : ""}">
+        <td class="mo-nowrap">${escapeHtml(x.po)}${x.is_new ? ` <span class="pu-size">${T("ใหม่", "new")}</span>` : ""}</td>
+        <td class="mg-small">${escapeHtml(x.description || "")}</td>
+        <td class="mo-nowrap">${x.order_day ? escapeHtml(puDay(x.order_day)) : (x.text_date ? `<span class="pu-bad">${escapeHtml(puDay(x.text_date))}?</span>` : "—")}</td>
+        <td class="mo-nowrap">${x.arrival_day ? escapeHtml(puDay(x.arrival_day)) : "—"}</td>
+        <td class="mg-n">${Number(x.goods) ? smBaht(x.goods) : ""}</td>
+        <td class="mg-n">${Number(x.freight) ? smBaht(x.freight) : ""}</td>
+        <td class="mg-n mg-muted">${Number(x.other) ? smBaht(x.other) : ""}</td>
+        <td>${puOdooStateChip(x.state)}</td></tr>`).join("")}</tbody></table></div>
+    <div class="pu-form-acts">
+      <button type="button" class="btn-primary" data-act="od-import" id="pu-od-import"${PU.od.saving ? " disabled" : ""}>${T("นำเข้าไฟล์นี้", "Import this file")}</button>
+      <button type="button" class="btn-secondary" data-act="od-clear">${T("ยกเลิก", "Cancel")}</button>
+    </div>
+  </div>`;
+}
+
+function puOdooDateForm(x) {
+  return `<div class="pu-od-dates" data-co="${escapeAttr(x.company)}" data-po="${escapeAttr(x.po)}">
+    <label>${T("วันสั่ง", "Order date")}<input type="date" class="pu-od-order" value="${escapeAttr(x.set_order || x.order_day || (x.text_state === "far" ? x.text_date : "") || "")}"></label>
+    <label>${T("วันที่มาถึง", "Arrival")}<input type="date" class="pu-od-arrival" value="${escapeAttr(x.set_arrival || "")}" placeholder="${escapeAttr(T("วันสั่ง + 2", "order + 2 days"))}"></label>
+    <label class="pu-od-note-l">${T("หมายเหตุ", "Note")}<input type="text" class="pu-od-note" value="${escapeAttr(x.note || "")}"></label>
+    <button type="button" class="ws-chip pu-primary" data-act="od-save-dates"${PU.od.saving ? " disabled" : ""}>${T("บันทึก", "Save")}</button>
+    ${x.set_order || x.set_arrival ? `<button type="button" class="ws-chip" data-act="od-clear-dates">${T("ใช้วันที่จากข้อความ", "Back to the date in the text")}</button>` : ""}
+  </div>`;
+}
+
+function puOdooWaitingHtml() {
+  const list = (PU.od.board.pos || []).filter(x => x.needs_date);
+  if (!list.length) return "";
+  return `<div class="mg-card" id="pu-od-waiting">
+    <div class="mg-card-head"><h3>${T("รอวันที่ — ยังไม่นับในสัดส่วน", "Waiting for a date — not in the ratio yet")}</h3>
+      <span class="mg-small pu-warn">${T("ใส่วันสั่ง (และวันที่มาถึงถ้าไม่ใช่ +2 วัน)", "Set the order date (and the arrival if it is not 2 days later)")}</span></div>
+    ${list.map(x => `<div class="pu-od-wait" data-po="${escapeAttr(x.po)}">
+      <div><strong>${escapeHtml(x.po)}</strong> <span class="mg-muted mg-small">${escapeHtml(x.company)}</span> — ${escapeHtml(x.description || "")}
+        <div class="mg-small">${smBaht(Number(x.goods) + Number(x.freight))} THB · ${x.text_state === "none" ? T("ไม่มีวันที่ในข้อความ", "no date in the text")
+          : escapeHtml(T(`ข้อความบอก ${puDay(x.text_date)} — ห่างจากเดือนของ PO`, `the text says ${puDay(x.text_date)}, far from the PO's month`))}</div></div>
+      ${puOdooDateForm(x)}
+    </div>`).join("")}
+  </div>`;
+}
+
+function puOdooListHtml() {
+  const od = PU.od;
+  const list = (od.board.pos || []).filter(x => !x.needs_date);
+  const counted = list.filter(x => x.counted);
+  const tot = counted.reduce((a, x) => { a.g += Number(x.goods); a.f += Number(x.freight); return a; }, { g: 0, f: 0 });
+  const otherTot = list.reduce((a, x) => a + Number(x.other || 0), 0);
+  const label = smMonthLabel(od.month, true);
+  return `<div class="mg-card" id="pu-od-list">
+    <div class="mg-card-head"><h3>${T("ใบสั่งซื้อจาก Odoo", "Odoo purchase orders")} — ${escapeHtml(label)}</h3>
+      <div class="pu-weeknav">
+        <button type="button" class="ws-chip" data-act="od-month" data-step="-1" aria-label="${escapeAttr(T("เดือนก่อน", "Previous month"))}">‹</button>
+        <button type="button" class="ws-chip" data-act="od-month" data-step="1" aria-label="${escapeAttr(T("เดือนถัดไป", "Next month"))}">›</button>
+        <select id="pu-od-filter" aria-label="${escapeAttr(T("บริษัท", "Company"))}">
+          <option value="all"${od.filterCo === "all" ? " selected" : ""}>${T("ทุกบริษัท", "All companies")}</option>
+          <option${od.filterCo === "Prosun Farm" ? " selected" : ""}>Prosun Farm</option>
+          <option${od.filterCo === "Prosun Food" ? " selected" : ""}>Prosun Food</option></select>
+      </div></div>
+    <p class="mg-small">${T(`นับในสัดส่วน: สินค้า <strong>${smBaht(tot.g)}</strong> + ขนส่ง <strong>${smBaht(tot.f)}</strong> บาท · บรรจุภัณฑ์/วัสดุ (ยังไม่นับ) ${smBaht(otherTot)} บาท`,
+      `Counted in the ratio: goods <strong>${smBaht(tot.g)}</strong> + freight <strong>${smBaht(tot.f)}</strong> THB · packaging / consumables (not counted yet) ${smBaht(otherTot)} THB`)}</p>
+    ${list.length ? `<div class="mg-table-wrap"><table class="mg-table" id="pu-od-table">
+      <thead><tr><th>PO</th><th>${T("บริษัท", "Company")}</th><th>${T("รายละเอียด", "Description")}</th><th>${T("วันสั่ง", "Ordered")}</th><th>${T("ถึง", "Arrives")}</th>
+        <th class="mg-n">${T("สินค้า", "Goods")}</th><th class="mg-n">${T("ขนส่ง", "Freight")}</th><th class="mg-n">${T("อื่นๆ", "Other")}</th><th></th><th></th></tr></thead>
+      <tbody>${list.map(x => `<tr data-po="${escapeAttr(x.po)}" class="${x.counted ? "" : "pu-od-dim"}">
+        <td class="mo-nowrap">${escapeHtml(x.po)}${x.missing_in_latest ? `<div class="mg-small pu-warn">${T("ไม่อยู่ในไฟล์ล่าสุด", "not in the latest file")}</div>` : ""}</td>
+        <td class="mg-small">${escapeHtml(typeof weighCompanyShort === "function" ? weighCompanyShort(x.company) : x.company)}</td>
+        <td class="mg-small">${escapeHtml(x.description || "")}${x.note ? `<div class="mg-muted">${escapeHtml(x.note)}</div>` : ""}</td>
+        <td class="mo-nowrap">${x.order_day ? escapeHtml(puDay(x.order_day)) : "—"}${x.set_order ? ` <span class="pu-size">${T("แก้", "set")}</span>` : ""}</td>
+        <td class="mo-nowrap">${x.arrival_day ? escapeHtml(puDay(x.arrival_day)) : "—"}${x.set_arrival ? ` <span class="pu-size">${T("แก้", "set")}</span>` : ""}</td>
+        <td class="mg-n">${Number(x.goods) ? smBaht(x.goods) : ""}</td>
+        <td class="mg-n">${Number(x.freight) ? smBaht(x.freight) : ""}</td>
+        <td class="mg-n mg-muted">${Number(x.other) ? smBaht(x.other) : ""}</td>
+        <td>${puOdooStateChip(x.counted ? "counted" : "not_counted")}</td>
+        <td>${x.counted ? `<button type="button" class="ws-chip pu-mg-edit" data-act="od-edit" data-po="${escapeAttr(x.po)}" data-co="${escapeAttr(x.company)}">${T("วันที่", "Dates")}</button>` : ""}</td>
+      </tr>${od.editPo === x.company + "|" + x.po ? `<tr class="pu-od-editrow"><td colspan="10">${puOdooDateForm(x)}</td></tr>` : ""}`).join("")}</tbody></table></div>`
+    : `<p class="mg-muted mg-small" id="pu-od-none">${T("ยังไม่มี PO ในเดือนนี้", "No Odoo PO in this month yet.")}</p>`}
+  </div>`;
+}
+
+function puOdooUploadsHtml() {
+  const ups = PU.od.board.uploads || [];
+  if (!ups.length) return "";
+  return `<div class="mg-card" id="pu-od-uploads">
+    <div class="mg-card-head"><h3>${T("การอัปโหลดล่าสุด", "Last uploads")}</h3></div>
+    <div class="mg-table-wrap"><table class="mg-table">
+      <thead><tr><th>${T("เมื่อ", "When")}</th><th>${T("บริษัท", "Company")}</th><th>${T("โดย", "By")}</th><th>${T("ไฟล์", "File")}</th>
+        <th class="mg-n">${T("แถว PO", "PO rows")}</th><th class="mg-n">${T("ใหม่", "New")}</th><th class="mg-n">${T("เปลี่ยน", "Changed")}</th><th>${T("ครบ", "Complete")}</th></tr></thead>
+      <tbody>${ups.map(u => `<tr><td class="mo-nowrap">${escapeHtml(puOdooTime(u.at))}</td><td class="mg-small">${escapeHtml(u.company)}</td>
+        <td class="mg-small">${escapeHtml(u.by || "—")}</td><td class="mg-small">${escapeHtml(u.file_name || "")}</td>
+        <td class="mg-n">${mgN(u.po_rows)}</td><td class="mg-n">${mgN(u.new)}</td><td class="mg-n">${mgN(u.changed)}</td>
+        <td>${puOdooCompleteHtml(u)}</td></tr>`).join("")}</tbody></table></div>
+  </div>`;
+}
+
+// Under the ratio tiles: when the last file came in, whether it was complete,
+// what is waiting for a date.
+function puOdooStatusHtml(d) {
+  const o = d && d.odoo;
+  if (!o) return "";
+  const ups = o.uploads || [];
+  const bits = ups.map(u => `${escapeHtml(u.company)}: ${escapeHtml(puOdooTime(u.at))}${u.complete ? "" : ` <span class="pu-bad">⚠ ${T("ไฟล์ไม่ครบ — ต้นทุนต่ำกว่าความจริง", "file incomplete: cost under-counted")}</span>`}`);
+  const wait = Number(o.waiting_count) > 0
+    ? ` · <span class="pu-warn">${escapeHtml(T(`${o.waiting_count} PO (${smBaht(o.waiting_amount)} บาท) รอวันที่ ยังไม่นับ`, `${o.waiting_count} PO${o.waiting_count == 1 ? "" : "s"} (${smBaht(o.waiting_amount)} THB) waiting for a date, not counted`))}</span>` : "";
+  return `<p class="mg-small" id="pu-r-odoo">${T("อัปโหลด Odoo ล่าสุด", "Last Odoo upload")} — ${bits.length ? bits.join(" · ") : T("ยังไม่มี", "none yet")}${wait}</p>`;
+}
+
+async function puOdooAct(act, b) {
+  const od = PU.od;
+  if (act === "od-clear") {
+    Object.assign(od, { file: null, parsed: null, preview: null, err: null, msg: null });
+    puDraw();
+  } else if (act === "od-import") {
+    if (!od.parsed || !od.company) return;
+    od.saving = true; puDraw();
+    const { data, error } = await sb.rpc("purchase_odoo_import", { p: puOdooPayload(false) });
+    od.saving = false;
+    if (error) { od.msg = { ok: false, text: puServerText(error.message) }; puDraw(); return; }
+    od.msg = { ok: !!data.complete, text: T(
+      `นำเข้าแล้ว: ${od.company} — แถวใหม่ ${data.new}, เปลี่ยน ${data.changed}, เหมือนเดิม ${data.unchanged}` + (data.complete ? "" : " — ไฟล์ไม่ครบ (Expand all ใน Odoo)"),
+      `Imported: ${od.company} — ${data.new} new rows, ${data.changed} changed, ${data.unchanged} unchanged` + (data.complete ? "." : ". The file is incomplete: click Expand all in Odoo next time.")) };
+    Object.assign(od, { file: null, parsed: null, preview: null });
+    PU.ratio.data = null; PU.ratio.sig = "";
+    await puOdooLoad();
+  } else if (act === "od-month") {
+    od.month = smMonthStart(wsAddDays(od.month, Number(b.dataset.step) > 0 ? 40 : -1), 0);
+    od.board = Object.assign({}, od.board, { pos: [] });
+    puDraw(); await puOdooLoad();
+  } else if (act === "od-edit") {
+    const k = b.dataset.co + "|" + b.dataset.po;
+    od.editPo = od.editPo === k ? null : k; puDraw();
+  } else if (act === "od-save-dates" || act === "od-clear-dates") {
+    const box = b.closest(".pu-od-dates");
+    const clear = act === "od-clear-dates";
+    const val = sel => { const v = box.querySelector(sel).value; return v === "" ? null : v; };
+    od.saving = true;
+    const { error } = await sb.rpc("purchase_odoo_set_dates", {
+      p_company: box.dataset.co, p_po: box.dataset.po,
+      p_order: clear ? null : val(".pu-od-order"), p_arrival: clear ? null : val(".pu-od-arrival"), p_note: clear ? null : val(".pu-od-note") });
+    od.saving = false;
+    if (error) { od.msg = { ok: false, text: puServerText(error.message) }; puDraw(); return; }
+    od.msg = { ok: true, text: T(`บันทึกวันที่ของ ${box.dataset.po} แล้ว`, `Dates of ${box.dataset.po} saved.`) };
+    od.editPo = null; PU.ratio.data = null; PU.ratio.sig = "";
+    await puOdooLoad();
   }
 }

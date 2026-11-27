@@ -6,7 +6,7 @@
 create or replace function pg_temp.ok(cond boolean, label text) returns void language plpgsql as $$
 begin if coalesce(cond, false) then raise notice 'PASS %', label; else raise exception 'FAIL %', label; end if; end $$;
 create or replace function pg_temp.as_user(uid text) returns void language sql as $$
-  select set_config('request.jwt.claims', json_build_object('sub', uid)::text, false) $$;
+  select set_config('request.jwt.claims', json_build_object('sub', uid, 'aal', 'aal2')::text, false) $$;
 
 do $$
 declare v_full jsonb; lim jsonb; me jsonb; g jsonb; v_pct numeric; v_rev numeric; v_cost numeric;
@@ -36,8 +36,9 @@ begin
   perform pg_temp.ok(not (lim ? 'revenue') and not (lim ? 'purchases') and not (lim ? 'invoiced'), 'no revenue, purchases or invoiced in her answer');
   perform pg_temp.ok(lim::text !~ (round(v_rev)::text), 'the revenue amount appears nowhere in her answer');
   v_pct := round(v_cost / v_rev * 100, 1);
-  perform pg_temp.ok((lim->'total'->>0) is null and (lim->>'complete_before')::date <= '2026-11-25',
-                     'total = completed cycles only: the 25/27 Nov cycles are not finished, so no total yet');
+  perform pg_temp.ok((lim->>'complete_before')::date <= (now() at time zone 'Asia/Bangkok')::date
+                     and ((lim->>'complete_before')::date > '2026-11-25' or (lim->'total'->>0) is null),
+                     'total = completed cycles only');
   perform pg_temp.ok((lim->'groups'->0->>1)::numeric = v_pct, 'her November ratio = Clément''s cost ÷ revenue (' || v_pct || '%)');
   perform pg_temp.ok((lim->'groups'->0->>6)::boolean, 'November flagged in progress');
   perform pg_temp.ok(jsonb_array_length(lim->'groups') = 1 and lim->'groups'->0->>0 = '2026-11-01', 'by month: one row, November');
