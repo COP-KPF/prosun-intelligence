@@ -1237,6 +1237,7 @@ const tabWeightsMidBtn   = document.getElementById("tab-weights-middle");      /
 const tabPayablesBtn     = document.getElementById("tab-payables");            // Accounting › Payables (Migration 025)
 const tabManagementBtn   = document.getElementById("tab-management");          // Management dashboard, admin only (Migration 024)
 const tabOverviewBtn     = document.getElementById("tab-overview");            // Management overview, admin only (Migration 036)
+const tabWeeklyBtn       = document.getElementById("tab-weekly");              // Management › Weekly report, admin only (Migration 051)
 const tabMgSummaryBtn    = document.getElementById("tab-mgsummary");           // Management summary and revenue (Migration 031)
 const tabPostponedBtn    = document.getElementById("tab-postponed");           // Middle office › Postponed orders (Migration 027)
 const tabDeliveryBtn     = document.getElementById("tab-delivery");            // Delivery › Delivery board (Migration 029)
@@ -2011,7 +2012,7 @@ function setupPaceRole() {
 // This is the screen only; the database's RLS still decides what each role
 // can read (purchasing reads orders because the calculator is built on them).
 const PACE_MENU = {
-  admin:         ["overview", "management", "mgsummary", "mgorders", "mg-sales-kpis", "mg-purchases", "special-care", "sales-day", "sales-clients", "sales-deliveries", "orders", "postponed", "calculator", "purchases", "weighing", "delivery", "payables", "weights"],
+  admin:         ["overview", "weekly", "management", "mgsummary", "mgorders", "mg-sales-kpis", "mg-purchases", "special-care", "sales-day", "sales-clients", "sales-deliveries", "orders", "postponed", "calculator", "purchases", "weighing", "delivery", "payables", "weights"],
   sale_support:  ["orders", "confirm-birds", "postponed", "weights", "delivery"],
   purchasing:    ["calculator", "purchases", "weights"],   // + Purchases (Migration 046)
   production:    ["weighing"],
@@ -2027,7 +2028,7 @@ const PACE_MENU = {
 // Roles that have both systems and choose at sign-in (admin, and the sales team since Migration 037).
 const CHOOSER_ROLES = ["admin", "sales", "director"];
 const PACE_HOME = { admin: "overview", sale_support: "orders", purchasing: "calculator", production: "weighing", factory_admin: "weighing", accounting: "weights", delivery: "delivery", company_director: "management", sales: "sales-day", director: "sales-day" };
-const PACE_DEPT = { orders: "Middle office", postponed: "Middle office", calculator: "Purchasing", purchases: "Purchasing", weighing: "Production", weights: "Accounting", payables: "Accounting", management: "Management", mgsummary: "Management", mgorders: "Management", overview: "Management", delivery: "Delivery", "sales-clients": "Sales", "sales-deliveries": "Sales", "sales-day": "Sales", "sales-kpis": "Sales", "mg-sales-kpis": "Management", "mg-purchases": "Management", "special-care": "Management" };
+const PACE_DEPT = { orders: "Middle office", postponed: "Middle office", calculator: "Purchasing", purchases: "Purchasing", weighing: "Production", weights: "Accounting", payables: "Accounting", management: "Management", mgsummary: "Management", mgorders: "Management", overview: "Management", weekly: "Management", delivery: "Delivery", "sales-clients": "Sales", "sales-deliveries": "Sales", "sales-day": "Sales", "sales-kpis": "Sales", "mg-sales-kpis": "Management", "mg-purchases": "Management", "special-care": "Management" };
 
 function setPaceTabsForRole() {
   const items = PACE_MENU[myProfile && myProfile.role] || [];
@@ -2044,6 +2045,7 @@ function setPaceTabsForRole() {
   tabManagementBtn.classList.toggle("hidden", !items.includes("management"));
   tabMgSummaryBtn.classList.toggle("hidden", !items.includes("mgsummary"));
   tabOverviewBtn.classList.toggle("hidden", !items.includes("overview"));
+  tabWeeklyBtn.classList.toggle("hidden", !items.includes("weekly"));
   tabPostponedBtn.classList.toggle("hidden", !items.includes("postponed"));
   tabDeliveryBtn.classList.toggle("hidden", !items.includes("delivery"));
   tabSalesClientsBtn.classList.toggle("hidden", !items.includes("sales-clients"));
@@ -2125,7 +2127,7 @@ document.getElementById("pace-menu-btn").addEventListener("click", () =>
   document.addEventListener("keydown", e => { if (e.key === "Escape") setOpen(false); });
 })();
 
-async function switchPaceView(view) {
+async function switchPaceView(view, opts) {    // opts.week: Weekly report week (notification)
   paceView = view;
   document.getElementById("pace-refresh-stamp").textContent = "";   // Refresh button's "Updated HH:MM" belongs to the last section
   setPaceTabsForRole();
@@ -2148,6 +2150,7 @@ async function switchPaceView(view) {
   tabMgSummaryBtn.classList.toggle("active", SUM_VIEWS.includes(view));
   sumShowTabs(view);
   tabOverviewBtn.classList.toggle("active", view === "overview");
+  tabWeeklyBtn.classList.toggle("active", view === "weekly");
   tabPostponedBtn.classList.toggle("active", view === "postponed");
   tabDeliveryBtn.classList.toggle("active", view === "delivery");
   tabSalesClientsBtn.classList.toggle("active", view === "sales-clients");
@@ -2181,6 +2184,7 @@ async function switchPaceView(view) {
   if (view !== "mgsummary") closeSummary();          // management-summary.js
   if (view !== "mgorders") moClose();                // management-orders.js
   if (view !== "overview") closeOverview();          // management-overview.js
+  if (view !== "weekly") closeWeekly();              // weekly-report.js (Migration 051)
   if (view !== "payables") closePayables();          // payables.js
   if (view !== "postponed") closePostponed();        // postponed.js
   if (view !== "delivery") closeDelivery();          // delivery.js
@@ -2218,6 +2222,10 @@ async function switchPaceView(view) {
   else if (view === "overview") {
     document.getElementById("list-title").textContent = "Overview";
     await openOverview();                             // management-overview.js
+  }
+  else if (view === "weekly") {
+    document.getElementById("list-title").textContent = "Weekly report";
+    await openWeekly(opts && opts.week);              // weekly-report.js (Migration 051)
   }
   else if (view === "mgsummary") {
     document.getElementById("list-title").textContent = "Summary";
@@ -2288,6 +2296,7 @@ sumTabs.addEventListener("keydown", e => {
   switchPaceView(next.dataset.view);
 });
 tabOverviewBtn.addEventListener("click", () => switchPaceView("overview"));
+tabWeeklyBtn.addEventListener("click", () => switchPaceView("weekly"));
 tabPayablesBtn.addEventListener("click", () => switchPaceView("payables"));
 tabPostponedBtn.addEventListener("click", () => switchPaceView("postponed"));
 tabDeliveryBtn.addEventListener("click", () => switchPaceView("delivery"));
@@ -2373,6 +2382,7 @@ async function refreshPaceView() {
     else if (view === "mgsummary") await smLoad();
     else if (view === "mgorders") await moLoad();                     // management-orders.js (Migration 045)
     else if (view === "overview") await ovLoad();
+    else if (view === "weekly") await wrLoad();                       // weekly-report.js (Migration 051)
     else if (view === "payables") { await pyFlush(); await pyLoad(); }
     else if (view === "postponed") await ppLoad();
     else if (view === "delivery") await dlLoad();

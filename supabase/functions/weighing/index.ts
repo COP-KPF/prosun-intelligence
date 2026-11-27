@@ -144,6 +144,7 @@ export const READ_TOOL = {
       company: { type: "string", enum: ["Prosun Farm", "Prosun Food", "unknown"], description: "From the letterhead top left" },
       po_number: { type: ["string", "null"], description: "Exactly as printed after 'PO. NO. :', e.g. 69-091001 or UR69-091005" },
       customer: { type: ["string", "null"], description: "First line after 'ส่ง :', as printed, including any code in brackets" },
+      customer_po: { type: ["string", "null"], description: "The client's own purchase order number, if one is printed in the 'ส่ง :' box under the customer name (e.g. POASIA-H102-00093733), exactly as printed. NOT the 'PO. NO. :' in the top right box. null if there is none." },
       delivery_date: { type: ["string", "null"], description: "The 'Delivery Date' as YYYY-MM-DD (Gregorian). Printed as d/m/yy with yy = Gregorian year, e.g. 9/10/26 = 2026-10-09" },
       lines: {
         type: "array",
@@ -166,7 +167,7 @@ export const READ_TOOL = {
       other_handwriting: { type: ["string", "null"], description: "Handwriting outside the kg. column (e.g. in หมายเหตุ or beside a line), transcribed" },
       photo_problem: { type: ["string", "null"], description: "In Thai, if the photo is blurry, cut off, too dark, or two papers overlap; else null" },
     },
-    required: ["is_working_paper", "company", "po_number", "customer", "delivery_date", "lines", "other_handwriting", "photo_problem"],
+    required: ["is_working_paper", "company", "po_number", "customer", "customer_po", "delivery_date", "lines", "other_handwriting", "photo_problem"],
   },
 };
 
@@ -178,6 +179,7 @@ Layout (portrait A4):
 - Top left: logo and company letterhead — "Prosun Farm Co., Ltd." or "Prosun Food Co., Ltd." (or the Thai name).
 - Top right box: "PO. NO. :" followed by the paper number (e.g. 69-091001; Under Roof papers start with UR), then "Date :", then "Delivery Date วัน... ที่ d/m/yy".
 - "ส่ง :" box: customer name (often with a code in brackets, e.g. Cagette (CR033)), then extra lines such as "Standing order" or an address.
+  One of these extra lines may be the CLIENT'S OWN purchase order number (e.g. POASIA-H102-00093733 — letters, digits and dashes, often starting with "PO"). Record it as customer_po, exactly as printed. It is different from Prosun's own number after "PO. NO. :" in the top right box (e.g. 69-271102), which is po_number. "Standing order", an address or a phone number is not a customer_po.
 - Main table columns: Reference | รายละเอียด (description) | จำนวน (ordered quantity + unit, printed) | kg. (handwritten actual weight).
   A row with a description but no จำนวน continues the description above (packaging or cutting instructions) — it is NOT a separate line, but a weight written on that row belongs to the line above.
 - Below: หมายเหตุ (notes) box, then signature boxes. The right-hand column (meat types, packaging list) is a fixed legend: ignore it. A second page with Lot No. may appear: ignore it.
@@ -270,6 +272,7 @@ export function normalizeHeader(raw: any) {
     company,
     po_number: raw?.po_number ? String(raw.po_number).trim() : null,
     customer_name: raw?.customer ? String(raw.customer).trim() : null,
+    customer_po: raw?.customer_po ? String(raw.customer_po).trim() || null : null,
     delivery_date: d,
     note: notes || null,
   };
@@ -353,14 +356,22 @@ export async function readPaper(db: any, paperId: string): Promise<void> {
         .insert(lines.map((l) => ({ ...l, paper_id: paperId })));
       if (insErr) throw insErr;
     }
-    const { error: upErr } = await db.from("weighing_papers").update({
-      ...header,
+    const done = {
       status: "read",
       read_at: new Date().toISOString(),
       read_model: model,
       read_result: input,
       read_error: null,
-    }).eq("id", paperId).neq("status", "confirmed");
+    };
+    let { error: upErr } = await db.from("weighing_papers").update({ ...header, ...done })
+      .eq("id", paperId).neq("status", "confirmed");
+    // Deployed before Migration 052 added the column: save the rest anyway
+    // (the customer PO stays in read_result).
+    if (upErr && /customer_po/.test(upErr.message ?? "")) {
+      const { customer_po: _skip, ...rest } = header;
+      ({ error: upErr } = await db.from("weighing_papers").update({ ...rest, ...done })
+        .eq("id", paperId).neq("status", "confirmed"));
+    }
     if (upErr) throw upErr;
   } catch (e) {
     await db.from("weighing_papers").update({

@@ -48,6 +48,7 @@ const NOTIF_KIND = {
   payable_returned:     { label: "Returned",     cls: "n-tag-red" },
   payable_undo:         { label: "Payment cancelled", cls: "n-tag-red" },
   payable_voided:       { label: "Voided",       cls: "n-tag-red" },
+  weekly_report:        { label: "Weekly report", cls: "n-tag-green" },     // Migration 051
 };
 
 function notifEnabled() { return !!myProfile && NOTIF_ROLES.includes(myProfile.role); }
@@ -189,6 +190,7 @@ function notifRender() {
           ${n.kind === "invoice_weights_changed" ? `<button type="button" class="btn-link" data-n="open-weights" data-id="${escapeAttr(n.id)}">Open Confirmed weights ›</button>` : ""}
           ${n.kind === "delivery_problem" ? `<button type="button" class="btn-link" data-n="open-delivery" data-id="${escapeAttr(n.id)}">Open delivery board ›</button>` : ""}
           ${String(n.kind).startsWith("payable_") ? `<button type="button" class="btn-link" data-n="open-payables" data-id="${escapeAttr(n.id)}">Open payables ›</button>` : ""}
+          ${n.kind === "weekly_report" ? `<button type="button" class="btn-link" data-n="open-weekly" data-id="${escapeAttr(n.id)}">Open weekly report ›</button>` : ""}
           ${n.read_at ? "" : `<button type="button" class="btn-link n-mark" data-n="read" data-id="${escapeAttr(n.id)}">Mark as read</button>`}
         </div>
       </li>`;
@@ -268,6 +270,19 @@ notifPanel.addEventListener("click", async (e) => {
     const day = n && n.details && n.details.delivery_date;
     if (day && typeof WS !== "undefined") { WS.from = WS.to = day; WS.preset = "custom"; WS.sig = ""; }
     await switchPaceView("weights");
+    return;
+  }
+  if (act === "open-weekly") {                       // Migration 051
+    await notifMarkRead([el.dataset.id]);
+    notifClose();
+    const chooser = document.getElementById("system-chooser");
+    if (chooser && !chooser.classList.contains("hidden")) {
+      chooser.classList.add("hidden");
+      document.querySelector(".toolbar").classList.remove("hidden");
+      document.querySelector(".page-footer").classList.remove("hidden");
+    }
+    const n = N.items.find((x) => x.id === el.dataset.id);
+    await switchPaceView("weekly", { week: n && n.details && n.details.week_start });
     return;
   }
   if (act === "open-payables") {

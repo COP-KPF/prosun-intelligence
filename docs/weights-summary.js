@@ -320,7 +320,7 @@ function wsFiltered(ignoreShow) {
     }
     if (WS.company !== "all" && r.company !== WS.company) return false;
     if (!q) return true;
-    return [r.customer_name, r.po_number, r.description].some((v) => v && String(v).toLowerCase().includes(q));
+    return [r.customer_name, r.po_number, r.customer_po, r.description].some((v) => v && String(v).toLowerCase().includes(q));
   });
 }
 
@@ -405,7 +405,7 @@ function wsResultsHtml() {
   const basePaperIds = [...new Set(base.map((r) => r.paper_id))];
   const invP = basePaperIds.filter((id) => wsInvState(id) === "done").length;
   const invChangedP = basePaperIds.filter((id) => wsInvState(id) === "changed").length;
-  const cols = 13;
+  const cols = 14;
   let prev = null;
 
   return `
@@ -438,7 +438,7 @@ function wsResultsHtml() {
     </div>
     <div class="table-scroll w-scroll">
       <table class="w-table" id="weights-table">
-        <thead><tr><th class="ws-cb-col" title="${T("ตรวจแล้ว", "Checked")}">✓</th><th>${T("วันส่ง", "Delivery")}</th><th>${T("บริษัท", "Company")}</th><th>PO</th><th>${T("ลูกค้า", "Customer")}</th><th>${T("สินค้า", "Product")}</th>
+        <thead><tr><th class="ws-cb-col" title="${T("ตรวจแล้ว", "Checked")}">✓</th><th>${T("วันส่ง", "Delivery")}</th><th>${T("บริษัท", "Company")}</th><th>${T("PO (PSF)", "PSF PO")}</th><th>${T("PO ลูกค้า", "Customer PO")}</th><th>${T("ลูกค้า", "Customer")}</th><th>${T("สินค้า", "Product")}</th>
           <th class="w-num">${T("สั่ง", "Ordered")}</th><th class="w-num">${T("ชั่งจริง (kg)", "Actual (kg)")}</th><th class="w-num">${T("ต่าง", "Difference")}</th>
           <th>${T("ยืนยันโดย", "Confirmed by")}</th><th>${T("รูป", "Photo")}</th><th>${T("ตรวจแล้ว", "Checked")} · ${escapeHtml(WS_DEPT_LABEL[WS.dept]())}</th><th>🧾 ${T("ใบแจ้งหนี้", "Invoice")}</th></tr></thead>
         <tbody>${WS.loading ? `<tr><td colspan="${cols}" class="w-empty">${T("กำลังโหลด…", "Loading…")}</td></tr>`
@@ -458,6 +458,7 @@ function wsResultsHtml() {
                 + (sfCanSplit(wsPaperLines(r.paper_id)) ? `<br><button type="button" class="w-btn w-btn-outline w-btn-sm ws-pp-btn ws-pl-btn" data-ws="pl-open" data-paper="${escapeAttr(r.paper_id)}"${sfIsOpen(r.paper_id) ? " disabled" : ""}>${T("เลื่อนสินค้า", "Postpone a product")}</button>` : "") : "") : ""}</td>
             <td>${first ? escapeHtml(weighCompanyShort(r.company)) : ""}</td>
             <td class="w-mono">${first ? escapeHtml(r.po_number || "") + (WS.split[r.paper_id] && WS.split[r.paper_id].part > 1 ? "<br>" + sfPartTag(WS.split[r.paper_id]) : "") : ""}</td>
+            <td class="w-mono ws-cpo">${first ? escapeHtml(r.customer_po || "") : ""}</td>
             <td>${first ? escapeHtml(r.customer_name || "") + wsScCellHtml(r.paper_id) : ""}</td>
             <td class="w-wrap">${escapeHtml(r.description || "")}${r.edited ? ` <span class="ws-edited" title="${T("แก้ตัวเลขด้วยมือที่โรงงาน", "Corrected by hand at the factory")}">${T("แก้ไข", "corrected")}</span>` : ""}</td>
             <td class="w-num">${escapeHtml(r.ordered_text || "")}</td>
@@ -820,17 +821,17 @@ async function wsOpenPhoto(path) {
 function wsExport() {
   const rows = wsFiltered();
   const header = WEIGH_LANG === "en"
-    ? ["Delivery date", "Weighing day", "Company", "PO", "Customer", "Line", "Product", "Ordered",
+    ? ["Delivery date", "Weighing day", "Company", "PSF PO", "Customer PO", "Customer", "Line", "Product", "Ordered",
        "Ordered qty", "Unit", "Actual (kg)", "Difference (kg)", "kg per unit", "Corrected by hand",
        "Confirmed by", "Confirmed at", "Checked (" + WS_DEPT_LABEL[WS.dept]() + ") by", "Checked at", "Postponed", "Invoice"]
-    : ["วันส่ง", "วันที่ชั่ง", "บริษัท", "PO", "ลูกค้า", "ลำดับ", "สินค้า", "สั่ง",
+    : ["วันส่ง", "วันที่ชั่ง", "บริษัท", "PO (PSF)", "PO ลูกค้า", "ลูกค้า", "ลำดับ", "สินค้า", "สั่ง",
        "จำนวนสั่ง", "หน่วย", "น้ำหนักจริง (kg)", "ต่าง (kg)", "kg ต่อหน่วย", "แก้ไขด้วยมือ",
        "ยืนยันโดย", "เวลายืนยัน", "ตรวจแล้ว (" + WS_DEPT_LABEL[WS.dept]() + ") โดย", "เวลาตรวจ", "เลื่อน", "ใบแจ้งหนี้"];
   const out = [header];
   rows.forEach((r) => {
     const d = weighDiff(r);
     out.push([
-      r.delivery_date || "", r.work_date || "", r.company || "", r.po_number || "", r.customer_name || "",
+      r.delivery_date || "", r.work_date || "", r.company || "", r.po_number || "", r.customer_po || "", r.customer_name || "",
       r.line_no, r.description || "", r.ordered_text || "",
       r.ordered_qty === null || r.ordered_qty === undefined ? "" : Number(r.ordered_qty),
       weighUnit(r.ordered_unit),
@@ -849,5 +850,5 @@ function wsExport() {
   });
   const name = WS.from === WS.to ? WS.from : `${WS.from} to ${WS.to}`;
   downloadXlsx(`Confirmed weights ${name}.xlsx`, T("น้ำหนักที่ยืนยันแล้ว", "Confirmed weights"), out,
-    [12, 12, 12, 13, 26, 6, 40, 12, 9, 7, 12, 12, 10, 10, 16, 16, 18, 16, 34, 20]);
+    [12, 12, 12, 13, 22, 26, 6, 40, 12, 9, 7, 12, 12, 10, 10, 16, 16, 18, 16, 34, 20]);
 }

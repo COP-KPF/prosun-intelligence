@@ -816,8 +816,10 @@ function weighRenderCheck() {
               <option value="Prosun Farm"${p.company === "Prosun Farm" ? " selected" : ""}>Prosun Farm</option>
               <option value="Prosun Food"${p.company === "Prosun Food" ? " selected" : ""}>Prosun Food</option>
             </select></label>
-          <label>PO
+          <label>${T("PO (PSF)", "PSF PO")}
             <input type="text" data-paper-field="po_number" value="${escapeAttr(p.po_number || "")}"${ro}></label>
+          <label title="${T("เลข PO ของลูกค้า ในกล่อง “ส่ง :” ใต้ชื่อลูกค้า", "The client's own PO number, in the “ส่ง :” box under the customer name")}">${T("PO ลูกค้า", "Customer PO")}
+            <input type="text" data-paper-field="customer_po" value="${escapeAttr(p.customer_po || "")}"${ro}></label>
           <label>${T("ลูกค้า", "Customer")}
             <input type="text" data-paper-field="customer_name" value="${escapeAttr(p.customer_name || "")}"${ro}></label>
           <label>${T("วันส่ง", "Delivery date")}
@@ -1372,17 +1374,17 @@ async function weighUploadFiles(files) {
 // ------------------------------------------------------------ Excel export
 function weighExport() {
   const header = WEIGH_LANG === "en"
-    ? ["Weighing day", "Delivery", "Company", "PO", "Customer", "Line", "Product", "Ordered",
+    ? ["Weighing day", "Delivery", "Company", "PSF PO", "Customer PO", "Customer", "Line", "Product", "Ordered",
        "Ordered qty", "Unit", "Actual (kg)", "Written", "Difference (kg)", "kg per unit",
        "Status", "Confirmed by", "Confirmed at", "Note"]
-    : ["วันที่ชั่ง", "วันที่ส่ง", "บริษัท", "PO", "ลูกค้า", "ลำดับ", "สินค้า", "สั่ง",
+    : ["วันที่ชั่ง", "วันที่ส่ง", "บริษัท", "PO (PSF)", "PO ลูกค้า", "ลูกค้า", "ลำดับ", "สินค้า", "สั่ง",
        "จำนวนสั่ง", "หน่วย", "น้ำหนักจริง (kg)", "ค่าที่เขียน", "ต่าง (kg)", "kg ต่อหน่วย",
        "สถานะ", "ยืนยันโดย", "เวลายืนยัน", "หมายเหตุ"];
   const rows = [header];
   W.papers.forEach((p) => {
     const lines = weighLines(p);
     const st = (weighStatusOf(p)).label;
-    const base = [p.work_date, p.delivery_date || "", p.company || "", p.po_number || "", p.customer_name || ""];
+    const base = [p.work_date, p.delivery_date || "", p.company || "", p.po_number || "", p.customer_po || "", p.customer_name || ""];
     const tail = [st, p.confirmed_by ? (W.names[p.confirmed_by] || "") : "", p.confirmed_at ? weighTime(p.confirmed_at) : "", weighServerText(p.note || "")];
     if (!lines.length) { rows.push([...base, "", "", "", "", "", "", "", "", "", ...tail]); return; }
     lines.forEach((l) => {
@@ -1401,5 +1403,5 @@ function weighExport() {
   });
   // ASCII file name: some browsers drop a Thai download name entirely.
   downloadXlsx(`Weighing ${W.date}.xlsx`, T("น้ำหนักจริง ", "Actual weights ") + W.date, rows,
-    [11, 11, 12, 13, 26, 6, 40, 12, 9, 7, 13, 14, 9, 10, 11, 14, 10, 30]);
+    [11, 11, 12, 13, 22, 26, 6, 40, 12, 9, 7, 13, 14, 9, 10, 11, 14, 10, 30]);
 }

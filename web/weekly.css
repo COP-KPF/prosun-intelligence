@@ -1,0 +1,46 @@
+/* ---------------------------------------------------------------------------
+   Management › Weekly report (Migration 051, 27 Nov 2026) — reuses the
+   dashboard's .mg-* pieces, the Summary's .sm-pair and the Overview's .ov-*.
+   --------------------------------------------------------------------------- */
+#weekly-section {
+  --mg-done: #2e7d4f; --mg-open: #c9892b; --mg-alert: #a8262c; --mg-good: #1e6b3a;
+  display: flex; flex-direction: column; gap: 14px;
+  font-family: -apple-system, "Segoe UI", "Noto Sans Thai", "Leelawadee UI", Tahoma, sans-serif;
+}
+#weekly-section h3 { margin: 0; font-size: 1.02rem; }
+#weekly-section p { margin: 0; }
+#weekly-section .btn-primary { width: auto; margin-top: 0; padding: 9px 16px; }
+#weekly-section .mg-table td small { font-size: 0.76rem; }
+
+.wr-nav { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.wr-nav .ws-chip { min-width: 38px; padding: 6px 10px; font-size: 1.05rem; }
+.wr-nav .ws-chip:disabled { opacity: 0.4; cursor: default; }
+.wr-select { min-height: 38px; width: auto; max-width: 100%; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--text); font: inherit; font-weight: 600; }
+.wr-confirm { background: #fbe9e9; border-color: var(--mg-alert); color: var(--mg-alert); font-weight: 700; }
+
+.wr-note-warn { padding: 10px 14px; border-radius: 8px; background: #fbf3e2; color: #7a4a00; font-size: 0.86rem; }
+
+.wr-pts { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.wr-pt { display: flex; gap: 10px; align-items: baseline; padding: 8px 12px; border-radius: 8px; font-size: 0.92rem; line-height: 1.45; }
+.wr-pt-i { flex: 0 0 18px; font-weight: 700; text-align: center; }
+.wr-pt-warn { background: #fbe9e9; color: #7d1d22; }
+.wr-pt-info { background: #f4efe3; color: #4a3f2a; }
+.wr-pt-good { background: #e4efe6; color: #1e6b3a; }
+
+.wr-chart { position: relative; width: 100%; }
+.wr-list { margin: 4px 0 0; padding-left: 18px; }
+.wr-list li { margin: 2px 0; }
+.wr-comment { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  font: inherit; font-size: 0.92rem; line-height: 1.5; resize: vertical; background: #fffdf8; color: var(--text); }
+.wr-row { display: flex; justify-content: flex-end; margin-top: 8px; }
+#wr-note summary { cursor: pointer; font-weight: 600; color: var(--text); }
+#wr-note p { margin-top: 8px; }
+
+@media (max-width: 700px) {
+  .wr-nav { width: 100%; }
+  .wr-select { flex: 1; min-width: 0; }
+  #weekly-section .sm-pair { grid-template-columns: minmax(0, 1fr); }
+}
+#wr-tiles { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+#wr-tiles .mg-tile-v { font-size: 1.75rem; }

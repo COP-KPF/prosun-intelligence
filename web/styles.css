@@ -2674,3 +2674,6 @@ body.pace-readonly #weights-table tr.ws-row { cursor: default; }
 .mfa-help { font-size: 0.8rem; color: var(--muted, #6b6355); margin: 12px 0 0; line-height: 1.45; }
 .mfa-link { background: none; border: 0; padding: 0; margin-top: 12px; color: var(--muted, #6b6355);
   text-decoration: underline; cursor: pointer; font: inherit; font-size: 0.85rem; }
+
+/* Customer PO column (Migration 052, 27 Nov 2026) */
+#weights-section .ws-cpo { white-space: nowrap; }

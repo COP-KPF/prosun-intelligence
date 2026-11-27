@@ -41,7 +41,7 @@ const SEC_K = { last: "pace-sec-last", idle: "pace-sec-idle", loginAt: "pace-sec
 
 // Screens that never print (also the CRM and the system chooser, i.e. any
 // signed-in screen outside PACE).
-const SEC_NOPRINT_VIEWS = ["overview", "management", "mgsummary", "mgorders", "mg-sales-kpis", "mg-purchases",
+const SEC_NOPRINT_VIEWS = ["overview", "weekly", "management", "mgsummary", "mgorders", "mg-sales-kpis", "mg-purchases",
   "payables", "purchases", "sales-day", "sales-clients", "sales-deliveries", "sales-kpis"];
 
 const SEC = { started: false, last: Date.now(), idleMin: SEC_IDLE_DEFAULT, loginAt: null, timer: null,
