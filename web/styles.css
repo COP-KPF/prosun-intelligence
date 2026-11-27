@@ -2677,3 +2677,9 @@ body.pace-readonly #weights-table tr.ws-row { cursor: default; }
 
 /* Customer PO column (Migration 052, 27 Nov 2026) */
 #weights-section .ws-cpo { white-space: nowrap; }
+
+/* Folded menu (27 Nov 2026, Clément): the strip takes the page colour, so the
+   page reads as one colour; only the ☰ button shows. */
+@media (min-width: 901px) {
+  body.pace-nav-folded .pace-nav { background: var(--bg); border-right-color: transparent; }
+}
